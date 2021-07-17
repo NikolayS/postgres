@@ -738,7 +738,7 @@ CREATE INDEX people_names ON people ((first_name || ' ' || last_name));
   <note>
    <title>Note</title>
    <para>
-    Once an index on an expression is successfuly created, it is important to
+    Once an index on an expression is successfully created, it is important to
     run <literal>ANALYZE</literal> on the corresponding table to gather
     statistics for the expression.
    </para>
