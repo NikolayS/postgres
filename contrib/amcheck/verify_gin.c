@@ -47,7 +47,11 @@ typedef struct GinScanItem
 typedef struct GinPostingTreeScanItem
 {
 	int			depth;
+<<<<<<< HEAD
 	ItemPointerData parentkey;
+=======
+	ItemPointer parentkey;
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 	BlockNumber parentblk;
 	BlockNumber blkno;
 	struct GinPostingTreeScanItem *next;
@@ -188,7 +192,11 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 	/* Start the scan at the root page */
 	stack = (GinPostingTreeScanItem *) palloc0(sizeof(GinPostingTreeScanItem));
 	stack->depth = 0;
+<<<<<<< HEAD
 	ItemPointerSetInvalid(&stack->parentkey);
+=======
+	stack->parentkey = NULL;
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 	stack->parentblk = InvalidBlockNumber;
 	stack->blkno = posting_tree_root;
 
@@ -218,7 +226,10 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 			ItemPointerData minItem;
 			int			nlist;
 			ItemPointerData *list;
+<<<<<<< HEAD
 			char		tidrange_buf[100];
+=======
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 
 			ItemPointerSetMin(&minItem);
 
@@ -230,6 +241,7 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 						 errmsg("index \"%s\": internal pages traversal encountered leaf page unexpectedly on block %u",
 								RelationGetRelationName(rel), stack->blkno)));
 			list = GinDataLeafPageGetItems(page, &nlist, minItem);
+<<<<<<< HEAD
 
 			if (nlist > 0)
 			{
@@ -264,6 +276,33 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 				ItemPointerGetOffsetNumberNoCheck(&stack->parentkey) != InvalidOffsetNumber &&
 				nlist > 0 &&
 				ItemPointerCompare(&stack->parentkey, &list[nlist - 1]) < 0)
+=======
+			if (stack->parentkey)
+			{
+				elog(INFO, "blk %u: parent %u highkey (%u, %u), %d tids (%u, %u) - (%u, %u)",
+					 stack->blkno,
+					 stack->parentblk,
+					 ItemPointerGetBlockNumberNoCheck(stack->parentkey),
+					 ItemPointerGetOffsetNumberNoCheck(stack->parentkey),
+					 nlist,
+					 ItemPointerGetBlockNumberNoCheck(&list[0]),
+					 ItemPointerGetOffsetNumberNoCheck(&list[0]),
+					 ItemPointerGetBlockNumberNoCheck(&list[nlist - 1]),
+					 ItemPointerGetOffsetNumberNoCheck(&list[nlist - 1]));
+			}
+			else
+			{
+				elog(INFO, "blk %u: root leaf %d tids (%u, %u) - (%u, %u)",
+					 stack->blkno,
+					 nlist,
+					 ItemPointerGetBlockNumberNoCheck(&list[0]),
+					 ItemPointerGetOffsetNumberNoCheck(&list[0]),
+					 ItemPointerGetBlockNumberNoCheck(&list[nlist - 1]),
+					 ItemPointerGetOffsetNumberNoCheck(&list[nlist - 1]));
+			}
+
+			if (stack->parentkey && ItemPointerCompare(stack->parentkey, &list[nlist - 1]) < 0)
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 			{
 				ereport(WARNING,
 						(errcode(ERRCODE_INDEX_CORRUPTED),
@@ -273,14 +312,18 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 		}
 		else
 		{
+<<<<<<< HEAD
 			LocationIndex pd_lower;
 			int			lowersize;
 			ItemPointerData bound;
+=======
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 
 			/*
 			 * Check that tuples in each page are properly ordered and
 			 * consistent with parent high key
 			 */
+<<<<<<< HEAD
 			maxoff = GinPageGetOpaque(page)->maxoff;
 			if (stack->parentblk != InvalidBlockNumber)
 				elog(INFO, "blk %u: internal posting tree page with %u items, parent %u highkey (%u, %u)",
@@ -335,16 +378,37 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 									ItemPointerGetOffsetNumberNoCheck(&stack->parentkey))));
 				}
 			}
+=======
+			maxoff = PageGetMaxOffsetNumber(page);
+
+			if (stack->parentkey)
+				elog(INFO, "blk %u: internal, parent %u highkey (%u, %u)",
+					 stack->blkno,
+					 stack->parentblk,
+					 ItemPointerGetBlockNumberNoCheck(stack->parentkey),
+					 ItemPointerGetOffsetNumberNoCheck(stack->parentkey));
+			else
+				elog(INFO, "blk %u: root internal", stack->blkno);
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 
 			for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
 			{
 				PostingItem *posting_item = GinDataPageGetPostingItem(page, i);
 
+<<<<<<< HEAD
+=======
+				if (ItemPointerGetBlockNumberNoCheck(&posting_item->key) == 0 ||
+					ItemPointerGetOffsetNumberNoCheck(&posting_item->key) == 0)
+				{
+					continue;
+				}
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 				elog(INFO, "key (%u, %u) -> %u",
 					 ItemPointerGetBlockNumber(&posting_item->key),
 					 ItemPointerGetOffsetNumber(&posting_item->key),
 					 BlockIdGetBlockNumber(&posting_item->child_blkno));
 
+<<<<<<< HEAD
 				if (i == maxoff && GinPageGetOpaque(page)->rightlink == InvalidBlockNumber)
 				{
 					/* The rightmost item in the tree level has (0, 0) as the key */
@@ -361,25 +425,43 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 					}
 				}
 				else if (i != FirstOffsetNumber)
+=======
+				if (i != FirstOffsetNumber)
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 				{
 					PostingItem *previous_posting_item = GinDataPageGetPostingItem(page, i - 1);
 
 					if (ItemPointerCompare(&posting_item->key, &previous_posting_item->key) < 0)
 					{
+<<<<<<< HEAD
 						ereport(WARNING,
+=======
+
+						ereport(ERROR,
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 								(errcode(ERRCODE_INDEX_CORRUPTED),
 								 errmsg("index \"%s\" has wrong tuple order in posting tree, block %u, offset %u",
 										RelationGetRelationName(rel), stack->blkno, i)));
 					}
+<<<<<<< HEAD
+=======
+
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 				}
 
 				/*
 				 * Check if this tuple is consistent with the downlink in the
 				 * parent.
 				 */
+<<<<<<< HEAD
 				if (stack->parentblk != InvalidBlockNumber && i == maxoff)
 				{
 					if (ItemPointerCompare(&stack->parentkey, &posting_item->key) < 0)
+=======
+				if (stack->parentkey && i == maxoff)
+				{
+					if (ItemPointerCompare(stack->parentkey, &posting_item->key) < 0)
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 					{
 						ereport(WARNING,
 								(errcode(ERRCODE_INDEX_CORRUPTED),
@@ -396,7 +478,11 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 
 					ptr = (GinPostingTreeScanItem *) palloc(sizeof(GinPostingTreeScanItem));
 					ptr->depth = stack->depth + 1;
+<<<<<<< HEAD
 					ptr->parentkey = posting_item->key;
+=======
+					ptr->parentkey = &posting_item->key;
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 					ptr->parentblk = stack->blkno;
 					ptr->blkno = BlockIdGetBlockNumber(&posting_item->child_blkno);
 					ptr->next = stack->next;
@@ -418,6 +504,48 @@ gin_check_posting_tree_parent_keys_consistency(Relation rel, BlockNumber posting
 	MemoryContextDelete(mctx);
 }
 
+<<<<<<< HEAD
+=======
+static void
+validate_leaf(Page page, Relation rel, BlockNumber blkno)
+{
+	OffsetNumber i,
+				maxoff;
+
+	maxoff = PageGetMaxOffsetNumber(page);
+	for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
+	{
+		ItemId		iid = PageGetItemIdCareful(rel, blkno, page, i, sizeof(GinPageOpaqueData));
+		IndexTuple	idxtuple = (IndexTuple) PageGetItem(page, iid);
+
+		if (GinIsPostingTree(idxtuple))
+		{
+/*             elog(INFO, "validating posting tree on page %u, block %u, offset %u", page, blkno, i); */
+			BlockNumber rootPostingTree = GinGetPostingTree(idxtuple);
+
+			gin_check_posting_tree_parent_keys_consistency(rel, rootPostingTree);
+		}
+		else
+		{
+/*             elog(INFO, "validating posting list on page %u, block %u, offset %u", page, blkno, i); */
+
+			ItemPointer ipd;
+			int			nipd;
+
+			ipd = ginReadTupleWithoutState(idxtuple, &nipd);
+			if (!OffsetNumberIsValid(ItemPointerGetOffsetNumber(&ipd[nipd - 1])))
+			{
+				ereport(WARNING,
+						(errcode(ERRCODE_INDEX_CORRUPTED),
+						 errmsg("index \"%s\": posting list contains invalid heap pointer on block %u",
+								RelationGetRelationName(rel), blkno)));
+			}
+			pfree(ipd);
+		}
+	}
+}
+
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 /*
  * Main entry point for GIN check. Allocates memory context and scans through
  * GIN graph.
@@ -521,6 +649,7 @@ gin_check_parent_keys_consistency(Relation rel)
 			if (leafdepth == -1)
 				leafdepth = stack->depth;
 			else if (stack->depth != leafdepth)
+<<<<<<< HEAD
 			{
 				ereport(WARNING,
 						(errcode(ERRCODE_INDEX_CORRUPTED),
@@ -528,6 +657,12 @@ gin_check_parent_keys_consistency(Relation rel)
 								RelationGetRelationName(rel), stack->blkno)));
 				goto nextpage;
 			}
+=======
+				ereport(ERROR,
+						(errcode(ERRCODE_INDEX_CORRUPTED),
+						 errmsg("index \"%s\": internal pages traversal encountered leaf page unexpectedly on block %u",
+								RelationGetRelationName(rel), stack->blkno)));
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 		}
 
 		/*
@@ -547,6 +682,7 @@ gin_check_parent_keys_consistency(Relation rel)
 			Datum		current_key;
 
 			if (MAXALIGN(ItemIdGetLength(iid)) != MAXALIGN(IndexTupleSize(idxtuple)))
+<<<<<<< HEAD
 			{
 				ereport(WARNING,
 						(errcode(ERRCODE_INDEX_CORRUPTED),
@@ -554,6 +690,12 @@ gin_check_parent_keys_consistency(Relation rel)
 								RelationGetRelationName(rel), stack->blkno, i)));
 				continue;
 			}
+=======
+				ereport(ERROR,
+						(errcode(ERRCODE_INDEX_CORRUPTED),
+						 errmsg("index \"%s\" has inconsistent tuple sizes, block %u, offset %u",
+								RelationGetRelationName(rel), stack->blkno, i)));
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 
 			current_key = gintuple_get_key(&state, idxtuple, &current_key_category);
 /*             elog(INFO, "current_key %s, depth %u", DatumGetCString(current_key), stack->depth); */
@@ -563,12 +705,19 @@ gin_check_parent_keys_consistency(Relation rel)
 			{
 				prev_key = gintuple_get_key(&state, prev_tuple, &prev_key_category);
 				if (ginCompareEntries(&state, attnum, prev_key, prev_key_category, current_key, current_key_category) >= 0)
+<<<<<<< HEAD
 				{
 					ereport(WARNING,
 							(errcode(ERRCODE_INDEX_CORRUPTED),
 							 errmsg("index \"%s\" has wrong tuple order, block %u, offset %u",
 									RelationGetRelationName(rel), stack->blkno, i)));
 				}
+=======
+					ereport(ERROR,
+							(errcode(ERRCODE_INDEX_CORRUPTED),
+							 errmsg("index \"%s\" has wrong tuple order, block %u, offset %u",
+									RelationGetRelationName(rel), stack->blkno, i)));
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 			}
 
 			/*
@@ -639,6 +788,7 @@ gin_check_parent_keys_consistency(Relation rel)
 				ptr->next = stack->next;
 				stack->next = ptr;
 			}
+<<<<<<< HEAD
 			/* If this item is a pointer to a posting tree, recurse into it */
 			else if (GinIsPostingTree(idxtuple))
 			{
@@ -666,6 +816,14 @@ gin_check_parent_keys_consistency(Relation rel)
 				pfree(ipd);
 			}
 
+=======
+			else
+			{
+				validate_leaf(page, rel, stack->blkno);
+			}
+
+
+>>>>>>> 589e45e50de1181f4887c780c17a7de5ff7218ef
 			prev_tuple = CopyIndexTuple(idxtuple);
 		}
 
