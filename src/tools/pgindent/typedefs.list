@@ -1918,8 +1918,9 @@ PgStat_MsgArchiver
 PgStat_MsgAutovacStart
 PgStat_MsgBgWriter
 PgStat_MsgChecksumFailure
-PgStat_MsgConn
+PgStat_MsgConnect
 PgStat_MsgDeadlock
+PgStat_MsgDisconnect
 PgStat_MsgDropdb
 PgStat_MsgDummy
 PgStat_MsgFuncpurge
@@ -3701,6 +3702,7 @@ xl_logical_message
 xl_multi_insert_tuple
 xl_multixact_create
 xl_multixact_truncate
+xl_overwrite_contrecord
 xl_parameter_change
 xl_relmap_update
 xl_replorigin_drop

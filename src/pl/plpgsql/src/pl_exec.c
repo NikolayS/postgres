@@ -3553,13 +3553,13 @@ exec_stmt_return_query(PLpgSQL_execstate *estate,
 		memset(&options, 0, sizeof(options));
 		options.params = paramLI;
 		options.read_only = estate->readonly_func;
+		options.must_return_tuples = true;
 		options.dest = treceiver;
 
 		rc = SPI_execute_plan_extended(expr->plan, &options);
-		if (rc != SPI_OK_SELECT)
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("query \"%s\" is not a SELECT", expr->query)));
+		if (rc < 0)
+			elog(ERROR, "SPI_execute_plan_extended failed executing query \"%s\": %s",
+				 expr->query, SPI_result_code_string(rc));
 	}
 	else
 	{
@@ -3596,6 +3596,7 @@ exec_stmt_return_query(PLpgSQL_execstate *estate,
 		options.params = exec_eval_using_params(estate,
 												stmt->params);
 		options.read_only = estate->readonly_func;
+		options.must_return_tuples = true;
 		options.dest = treceiver;
 
 		rc = SPI_execute_extended(querystr, &options);
@@ -5644,7 +5645,8 @@ exec_eval_expr(PLpgSQL_execstate *estate,
 	if (rc != SPI_OK_SELECT)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("query \"%s\" did not return data", expr->query)));
+				 errmsg("query did not return data"),
+				 errcontext("query: %s", expr->query)));
 
 	/*
 	 * Check that the expression returns exactly one column...
@@ -5652,11 +5654,11 @@ exec_eval_expr(PLpgSQL_execstate *estate,
 	if (estate->eval_tuptable->tupdesc->natts != 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg_plural("query \"%s\" returned %d column",
-							   "query \"%s\" returned %d columns",
+				 errmsg_plural("query returned %d column",
+							   "query returned %d columns",
 							   estate->eval_tuptable->tupdesc->natts,
-							   expr->query,
-							   estate->eval_tuptable->tupdesc->natts)));
+							   estate->eval_tuptable->tupdesc->natts),
+				 errcontext("query: %s", expr->query)));
 
 	/*
 	 * ... and get the column's datatype.
@@ -5680,8 +5682,8 @@ exec_eval_expr(PLpgSQL_execstate *estate,
 	if (estate->eval_processed != 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_CARDINALITY_VIOLATION),
-				 errmsg("query \"%s\" returned more than one row",
-						expr->query)));
+				 errmsg("query returned more than one row"),
+				 errcontext("query: %s", expr->query)));
 
 	/*
 	 * Return the single result Datum.
@@ -5748,9 +5750,22 @@ exec_run_select(PLpgSQL_execstate *estate,
 	rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI,
 										 estate->readonly_func, maxtuples);
 	if (rc != SPI_OK_SELECT)
-		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("query \"%s\" is not a SELECT", expr->query)));
+	{
+		/*
+		 * SELECT INTO deserves a special error message, because "query is not
+		 * a SELECT" is not very helpful in that case.
+		 */
+		if (rc == SPI_OK_SELINTO)
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("query is SELECT INTO, but it should be plain SELECT"),
+					 errcontext("query: %s", expr->query)));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("query is not a SELECT"),
+					 errcontext("query: %s", expr->query)));
+	}
 
 	/* Save query results for eventual cleanup */
 	Assert(estate->eval_tuptable == NULL);
