@@ -2428,6 +2428,9 @@ GetSnapshotData(Snapshot snapshot)
 		subcount = KnownAssignedXidsGetAndSetXmin(snapshot->subxip, &xmin,
 												  xmax);
 
+        if (random() % 100000 == 0)
+                elog(WARNING, "procArray->lastOverflowedXid: %u", procArray->lastOverflowedXid);
+
 		if (TransactionIdPrecedesOrEquals(xmin, procArray->lastOverflowedXid))
 			suboverflowed = true;
 	}
