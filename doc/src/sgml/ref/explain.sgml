@@ -188,9 +188,11 @@ ROLLBACK;
       previously-dirtied blocks evicted from cache by this backend during
       query processing.
       The number of blocks shown for an
-      upper-level node includes those used by all its child nodes.  In text
-      format, only non-zero values are printed.  It defaults to
-      <literal>FALSE</literal>.
+      upper-level node includes those used by all its child nodes. In text
+      format, only non-zero values are printed. It defaults to
+      <literal>TRUE</literal> for <literal>EXPLAIN ANALYZE</literal> and
+      to <literal>FALSE</literal> for <literal>EXPLAIN</literal> executed
+      without the <literal>ANALYZE</literal> option.
      </para>
     </listitem>
    </varlistentry>

@@ -171,6 +171,7 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 	List	   *rewritten;
 	ListCell   *lc;
 	bool		timing_set = false;
+	bool		buffers_set = false;
 	bool		summary_set = false;
 
 	/* Parse options list. */
@@ -185,7 +186,10 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 		else if (strcmp(opt->defname, "costs") == 0)
 			es->costs = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "buffers") == 0)
+		{
+			buffers_set = true;
 			es->buffers = defGetBoolean(opt);
+		}
 		else if (strcmp(opt->defname, "wal") == 0)
 			es->wal = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "settings") == 0)
@@ -240,6 +244,12 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("EXPLAIN option TIMING requires ANALYZE")));
+
+	/* if the buffers option was not set explicitly, set default value:
+	 *   - TRUE for EXPLAIN ANALYZE
+	 *   - FALSE for EXPLAIN without ANALYZE
+	 */
+	es->buffers = (buffers_set) ? es->buffers : es->analyze;
 
 	/* if the summary was not set explicitly, set default value */
 	es->summary = (summary_set) ? es->summary : es->analyze;
