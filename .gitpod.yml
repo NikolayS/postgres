@@ -17,3 +17,5 @@ github:
     pullRequests: true
     addCheck: true
     addComment: true
+    addBadge: true
+    addComment: true
