@@ -9,3 +9,10 @@ tasks:
       make install
       ~/pg_local/bin/initdb -D ~/pgdata
       /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l pg.log start
+github:
+  prebuilds:
+    master: true
+    branches: true
+    pullRequests: true
+    addCheck: true
+    addComment: true
