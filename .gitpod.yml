@@ -12,5 +12,5 @@ tasks:
       echo "To start it:   "
       echo "               /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l logfile start"
       echo "After changes in code, rebuild&reinstall&restart:""
-      echo                 make && make install"
-      echo                 /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l logfile restart"
+      echo "                make && make install"
+      echo "               /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l logfile restart"
