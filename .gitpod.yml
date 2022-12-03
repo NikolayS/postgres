@@ -5,3 +5,5 @@ tasks:
     command: |
       mkdir ~/pg_local
       ./configure --prefix=$(echo ~/pg_local)
+      make
+      make install
