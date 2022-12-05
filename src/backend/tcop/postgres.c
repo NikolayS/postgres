@@ -2691,6 +2691,9 @@ start_xact_command(void)
 	{
 		StartTransactionCommand();
 
+		if (TransactionTimeout > 0 && !get_timeout_active(TRANSACTION_TIMEOUT))
+			enable_timeout_after(TRANSACTION_TIMEOUT, TransactionTimeout);
+
 		xact_started = true;
 	}
 
@@ -2720,6 +2723,7 @@ finish_xact_command(void)
 
 	if (xact_started)
 	{
+
 		CommitTransactionCommand();
 
 #ifdef MEMORY_CONTEXT_CHECKING
@@ -3268,6 +3272,7 @@ ProcessInterrupts(void)
 	{
 		bool		lock_timeout_occurred;
 		bool		stmt_timeout_occurred;
+		bool		tx_timeout_occurred;
 
 		QueryCancelPending = false;
 
@@ -3277,6 +3282,7 @@ ProcessInterrupts(void)
 		 */
 		lock_timeout_occurred = get_timeout_indicator(LOCK_TIMEOUT, true);
 		stmt_timeout_occurred = get_timeout_indicator(STATEMENT_TIMEOUT, true);
+		tx_timeout_occurred = get_timeout_indicator(TRANSACTION_TIMEOUT, true);
 
 		/*
 		 * If both were set, we want to report whichever timeout completed
@@ -3301,6 +3307,13 @@ ProcessInterrupts(void)
 			ereport(ERROR,
 					(errcode(ERRCODE_QUERY_CANCELED),
 					 errmsg("canceling statement due to statement timeout")));
+		}
+		if (tx_timeout_occurred)
+		{
+			LockErrorCleanup();
+			ereport(ERROR,
+					(errcode(ERRCODE_TRANSACTION_TIMEOUT),
+					 errmsg("canceling transaction due to transaction timeout")));
 		}
 		if (IsAutoVacuumWorkerProcess())
 		{
@@ -4460,6 +4473,10 @@ PostgresMain(const char *dbname, const char *username)
 					enable_timeout_after(IDLE_SESSION_TIMEOUT,
 										 IdleSessionTimeout);
 				}
+
+
+				if (get_timeout_active(TRANSACTION_TIMEOUT))
+					disable_timeout(TRANSACTION_TIMEOUT, false);
 			}
 
 			/* Report any recently-changed GUC options */
