@@ -1,0 +1,21 @@
+tasks:
+  - init: |
+      sudo apt update
+      sudo apt-get install build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache
+    command: |
+      mkdir ~/pg_local
+      ./configure --prefix=$(echo ~/pg_local)
+      make
+      make install
+      ~/pg_local/bin/initdb -D ~/pgdata
+      /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l pg.log start
+      /home/gitpod/pg_local/bin/psql postgres -c 'create database gitpod'
+      gp env PATH=$PATH:/home/gitpod/pg_local/bin && printf "\nPostgres installed. To connect, use:    psql\n"
+github:
+  prebuilds:
+    master: true
+    branches: true
+    pullRequests: true
+    addCheck: true
+    addComment: true
+    addBadge: true
