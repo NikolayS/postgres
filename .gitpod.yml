@@ -4,8 +4,8 @@ tasks:
       sudo apt-get install build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache
     command: |
       mkdir ~/pg_local
-      ./configure --prefix=$(echo ~/pg_local)
-      make
+      ./configure --prefix=$(echo ~/pg_local) --enable-depend --enable-cassert
+      make -j$(grep -c processor /proc/cpuinfo)
       make install
       ~/pg_local/bin/initdb -D ~/pgdata
       /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l pg.log start
