@@ -8,7 +8,7 @@ prep_scripts:
   script:
     - apt-get update -y && apt-get install openssh-client git -y
     - eval $(ssh-agent -s)
-    - echo "$GIT_SSH_PRIV_KEY" | tr -d ' ' | base64 --decode | ssh-add -
+    - echo "$GIT_SSH_PRIV_KEY" | tr -d ' ' | base64 -D | ssh-add -
     - git config --global user.name "${GITLAB_USER_NAME}"
     - git config --global user.email "${GITLAB_USER_EMAIL}"
     - mkdir -p ~/.ssh
