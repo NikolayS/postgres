@@ -1,4 +1,4 @@
-image: docker:20.10.12
+image: gitlab.dev.terastrm.net:4567/terastream/cisco-nso/ci-cisco-nso:4.2.3
 stages:
   - prepare
   - update
