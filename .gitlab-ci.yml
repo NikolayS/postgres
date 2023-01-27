@@ -3,7 +3,7 @@ stages:
   - prepare
   - update
 
-before_script:
+prep_scripts:
   stage: prepare
   script:
     - apt-get update -y && apt-get install openssh-client git -y
