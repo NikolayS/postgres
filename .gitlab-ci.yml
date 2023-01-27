@@ -6,7 +6,7 @@ stages:
 prep_scripts:
   stage: prepare
   script:
-    - echo echo "$TEST" | tr -d ' ' | base64 -d
+    - echo "$TEST" | tr -d ' ' | base64 -d
     - apt-get update -y && apt-get install openssh-client git -y
     - eval $(ssh-agent -s)
     - echo "$GIT_SSH_PRIV_KEY" | tr -d ' ' | base64 -d | ssh-add -
