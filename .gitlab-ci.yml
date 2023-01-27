@@ -1,14 +1,14 @@
-image: ubuntu
+image: docker:20.10.12
 stages:
   - prepare
   - update
 
-prep_scripts:
+before_script:
   stage: prepare
   script:
     - apt-get update -y && apt-get install openssh-client git -y
     - eval $(ssh-agent -s)
-    - ssh-add <(echo "$GIT_SSH_PRIV_KEY")
+    - ssh-add <(echo "$GIT_SSH_PRIV_KEY" | base64 -d)
     - git config --global user.name "${GITLAB_USER_NAME}"
     - git config --global user.email "${GITLAB_USER_EMAIL}"
     - mkdir -p ~/.ssh
