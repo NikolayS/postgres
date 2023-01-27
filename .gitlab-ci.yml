@@ -1,4 +1,4 @@
-image: gitlab.dev.terastrm.net:4567/terastream/cisco-nso/ci-cisco-nso:4.2.3
+image: ubuntu
 stages:
   - prepare
   - update
