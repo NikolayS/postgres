@@ -1,0 +1,29 @@
+image: docker:20.10.12
+stages:
+  - prepare
+  - update
+
+before_script:
+  stage: prepare
+  script:
+    - apt-get update -y && apt-get install openssh-client git -y
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$GIT_SSH_PRIV_KEY")
+    - git config --global user.name "${GITLAB_USER_NAME}"
+    - git config --global user.email "${GITLAB_USER_EMAIL}"
+    - mkdir -p ~/.ssh
+    - cat gitlab-known-hosts >> ~/.ssh/known_hosts
+  rules:
+    - if: $UPDATE_BRANCH_MAIN_GITPOD == "true"
+
+bring_updates:
+  stage: update
+  script:
+    - git clone git@gitlab.com:NikolayS/postgres.git
+    - cd postgres
+    - git switch main-gitpod
+    - git pull origin master
+    - git commit -a -m 'update'
+    - git push origin main-gitpod 
+  rules:
+    - if: $UPDATE_BRANCH_MAIN_GITPOD == "true"
