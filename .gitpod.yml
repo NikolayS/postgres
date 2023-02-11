@@ -1,7 +1,7 @@
 tasks:
   - init: |
       sudo apt update
-      sudo apt-get install build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache
+      sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache
     command: |
       if [[ ! -z "${patchUrl}" ]]; then echo "PATCH: ${patchUrl}"; wget $patchUrl; patch -p1 < $(ls *.patch); fi
       mkdir ~/pg_local
