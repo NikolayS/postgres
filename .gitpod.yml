@@ -2,10 +2,12 @@ tasks:
   - init: |
       sudo apt update
       sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache
+      git config pull.rebase true
+      git pull origin master
     command: |
       if [[ ! -z "${patchUrl}" ]]; then echo "PATCH: ${patchUrl}"; wget $patchUrl; patch -p1 < $(ls *.patch); fi
       mkdir ~/pg_local
-      ./configure --prefix=$(echo ~/pg_local) --enable-depend --enable-cassert
+      ./configure --prefix=$(echo ~/pg_local) --enable-depend --enable-cassert --with-libxml
       make -j$(grep -c processor /proc/cpuinfo)
       make install
       ~/pg_local/bin/initdb -D ~/pgdata
