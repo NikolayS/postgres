@@ -12,6 +12,7 @@ tasks:
       /home/gitpod/pg_local/bin/pg_ctl -D /home/gitpod/pgdata -l pg.log start
       /home/gitpod/pg_local/bin/psql postgres -c 'create database gitpod'
       gp env PATH=$PATH:/home/gitpod/pg_local/bin && printf "\nPostgres installed. To connect, use:    psql\n"
+      nohup python3 -m http.server --directory ./doc/src/sgml/html &
 github:
   prebuilds:
     master: true
