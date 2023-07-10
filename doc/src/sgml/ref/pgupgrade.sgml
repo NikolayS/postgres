@@ -361,10 +361,10 @@ make prefix=/usr/local/pgsql.new install
    </step>
 
    <step>
-    <title>Stop both servers</title>
+    <title>Stop both primary servers</title>
 
     <para>
-     Make sure both database servers are stopped using, on Unix, e.g.:
+     Make sure both primary servers are stopped using, on Unix, e.g.:
 
 <programlisting>
 pg_ctl -D /opt/PostgreSQL/9.6 stop
@@ -380,22 +380,28 @@ NET STOP postgresql-&majorversion;
     </para>
 
     <para>
-     Streaming replication and log-shipping standby servers can
+     Streaming replication and log-shipping standby servers must
      remain running until a later step.
     </para>
    </step>
 
-   <step>
+   <step id="pgupgrade-step-prepare-standbys">
     <title>Prepare for standby server upgrades</title>
 
     <para>
-     If you are upgrading standby servers using methods outlined in section <xref
-     linkend="pgupgrade-step-replicas"/>, verify that the old standby
-     servers are caught up by running <application>pg_controldata</application>
-     against the old primary and standby clusters.  Verify that the
-     <quote>Latest checkpoint location</quote> values match in all clusters.
-     (There will be a mismatch if old standby servers were shut down
-     before the old primary or if the old standby servers are still running.)
+     If you are upgrading standby servers using methods outlined in 
+     <xref linkend="pgupgrade-step-replicas"/>, ensure that they were running when 
+     you shut down the primaries in the previous step, so all the latest changes 
+     and the shutdown checkpoint record were received. You can verify this by running 
+     <application>pg_controldata</application> against the old primary and standby 
+     clusters. The <quote>Latest checkpoint location</quote> values must match in all 
+     nodes. A mismatch might occur if old standby servers were shut down before 
+     the old primary. To fix a mismatch, start all old servers and return to the 
+     previous step; proceeding with mismatched 
+     <quote>Latest checkpoint location</quote> may lead to standby corruption.
+    </para>
+
+    <para>
      Also, make sure <varname>wal_level</varname> is not set to
      <literal>minimal</literal> in the <filename>postgresql.conf</filename> file on the
      new primary cluster.
@@ -497,7 +503,6 @@ pg_upgrade.exe
      linkend="warm-standby"/>) standby servers, you can follow these steps to
      quickly upgrade them.  You will not be running <application>pg_upgrade</application> on
      the standby servers, but rather <application>rsync</application> on the primary.
-     Do not start any servers yet.
     </para>
 
     <para>
@@ -506,6 +511,16 @@ pg_upgrade.exe
      the instructions in this section and simply recreate the standby
      servers once <application>pg_upgrade</application> completes and the new primary
      is running.
+    </para>
+
+    <para>
+     Before running rsync, to avoid standby corruption, it is absolutely
+     critical to ensure that both old and new primary servers are shut down
+     and standby servers have received the last changes as discussed in
+     <xref linkend="pgupgrade-step-prepare-standbys"/>. 
+     Standby servers can be running at this point or be fully stopped. If they 
+     are still running. You can stop, upgrade, and start them one by one; this
+     can be useful to keep the cluster open for read-only transactions.
     </para>
 
     <procedure>
