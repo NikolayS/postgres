@@ -523,6 +523,13 @@ my %pgdump_runs = (
 			'-B', 'postgres',
 		],
 	},
+	no_policies => {
+		dump_cmd => [
+			'pg_dump', '--no-sync',
+			"--file=$tempdir/no_policies.sql",
+			'--no-policies', 'postgres',
+		],
+	},
 	no_privs => {
 		dump_cmd => [
 			'pg_dump', '--no-sync',
@@ -1234,6 +1241,7 @@ my %tests = (
 			exclude_dump_test_schema => 1,
 			exclude_test_table => 1,
 			only_dump_measurement => 1,
+			no_policies => 1,
 		},
 	},
 
@@ -2840,6 +2848,7 @@ my %tests = (
 			exclude_dump_test_schema => 1,
 			exclude_test_table => 1,
 			only_dump_measurement => 1,
+			no_policies => 1,
 		},
 	},
 

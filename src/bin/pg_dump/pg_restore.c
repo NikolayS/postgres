@@ -71,6 +71,7 @@ main(int argc, char **argv)
 	static int	outputNoTablespaces = 0;
 	static int	use_setsessauth = 0;
 	static int	no_comments = 0;
+	static int	no_policies = 0;
 	static int	no_publications = 0;
 	static int	no_security_labels = 0;
 	static int	no_subscriptions = 0;
@@ -124,6 +125,7 @@ main(int argc, char **argv)
 		{"transaction-size", required_argument, NULL, 5},
 		{"use-set-session-authorization", no_argument, &use_setsessauth, 1},
 		{"no-comments", no_argument, &no_comments, 1},
+		{"no-policies", no_argument, &no_policies, 1},
 		{"no-publications", no_argument, &no_publications, 1},
 		{"no-security-labels", no_argument, &no_security_labels, 1},
 		{"no-subscriptions", no_argument, &no_subscriptions, 1},
@@ -372,6 +374,7 @@ main(int argc, char **argv)
 	opts->noTablespace = outputNoTablespaces;
 	opts->use_setsessauth = use_setsessauth;
 	opts->no_comments = no_comments;
+	opts->no_policies = no_policies;
 	opts->no_publications = no_publications;
 	opts->no_security_labels = no_security_labels;
 	opts->no_subscriptions = no_subscriptions;
@@ -493,6 +496,7 @@ usage(const char *progname)
 	printf(_("  --no-comments                do not restore comment commands\n"));
 	printf(_("  --no-data-for-failed-tables  do not restore data of tables that could not be\n"
 			 "                               created\n"));
+	printf(_("  --no-policies                do not restore row level security policies\n"));
 	printf(_("  --no-publications            do not restore publications\n"));
 	printf(_("  --no-security-labels         do not restore security labels\n"));
 	printf(_("  --no-subscriptions           do not restore subscriptions\n"));

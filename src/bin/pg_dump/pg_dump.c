@@ -498,6 +498,7 @@ main(int argc, char **argv)
 		{"no-toast-compression", no_argument, &dopt.no_toast_compression, 1},
 		{"no-unlogged-table-data", no_argument, &dopt.no_unlogged_table_data, 1},
 		{"no-sync", no_argument, NULL, 7},
+		{"no-policies", no_argument, &dopt.no_policies, 1},
 		{"on-conflict-do-nothing", no_argument, &dopt.do_nothing, 1},
 		{"rows-per-insert", required_argument, NULL, 10},
 		{"include-foreign-data", required_argument, NULL, 11},
@@ -1219,6 +1220,7 @@ help(const char *progname)
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --load-via-partition-root    load partitions via the root table\n"));
 	printf(_("  --no-comments                do not dump comment commands\n"));
+	printf(_("  --no-policies                do not dump row security policies\n"));
 	printf(_("  --no-publications            do not dump publications\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
 	printf(_("  --no-subscriptions           do not dump subscriptions\n"));
@@ -4169,6 +4171,10 @@ dumpPolicy(Archive *fout, const PolicyInfo *polinfo)
 
 	/* Do nothing if not dumping schema */
 	if (!dopt->dumpSchema)
+		return;
+
+	/* Skip if --no-policies was specified */
+	if (dopt->no_policies)
 		return;
 
 	/*
