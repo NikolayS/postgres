@@ -263,9 +263,10 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	/*
 	 * Start tracking WAL usage for this statement execution
 	 * (following pg_stat_statements pattern for low overhead)
-	 * Only enable when fully initialized in normal processing mode
+	 * Only enable when running as a normal backend (not during initdb)
 	 */
 	if (IsNormalProcessingMode() &&
+		IsPostmasterEnvironment &&
 		queryDesc->plannedstmt->relationOids &&
 		queryDesc->plannedstmt->commandType != CMD_SELECT)
 	{
