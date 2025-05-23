@@ -153,6 +153,11 @@ typedef struct PgStat_TableCounts
 
 	PgStat_Counter blocks_fetched;
 	PgStat_Counter blocks_hit;
+
+	/* WAL generation counters */
+	PgStat_Counter wal_records;
+	PgStat_Counter wal_fpi;
+	uint64		wal_bytes;
 } PgStat_TableCounts;
 
 /* ----------
@@ -194,6 +199,10 @@ typedef struct PgStat_TableXactStatus
 	PgStat_Counter inserted_pre_truncdrop;
 	PgStat_Counter updated_pre_truncdrop;
 	PgStat_Counter deleted_pre_truncdrop;
+	/* WAL generation counters in (sub)xact */
+	PgStat_Counter wal_records;
+	PgStat_Counter wal_fpi;
+	uint64		wal_bytes;
 	int			nest_level;		/* subtransaction nest level */
 	/* links to other structs for same relation: */
 	struct PgStat_TableXactStatus *upper;	/* next higher subxact if any */
@@ -453,6 +462,11 @@ typedef struct PgStat_StatTabEntry
 	PgStat_Counter total_autovacuum_time;
 	PgStat_Counter total_analyze_time;
 	PgStat_Counter total_autoanalyze_time;
+
+	/* WAL generation counters */
+	PgStat_Counter wal_records;
+	PgStat_Counter wal_fpi;
+	uint64		wal_bytes;
 } PgStat_StatTabEntry;
 
 /* ------
@@ -717,6 +731,9 @@ extern void pgstat_count_heap_update(Relation rel, bool hot, bool newpage);
 extern void pgstat_count_heap_delete(Relation rel);
 extern void pgstat_count_truncate(Relation rel);
 extern void pgstat_update_heap_dead_tuples(Relation rel, int delta);
+
+extern void pgstat_count_heap_wal_usage(Relation rel, const WalUsage *walusage);
+extern void pgstat_count_statement_wal_usage(List *relationOids, const WalUsage *walusage);
 
 extern void pgstat_twophase_postcommit(TransactionId xid, uint16 info,
 									   void *recdata, uint32 len);
