@@ -17,12 +17,15 @@
 
 #include "postgres.h"
 
+#include "access/relation.h"
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "utils/fmgroids.h"
 #include "utils/memutils.h"
 #include "utils/pgstat_internal.h"
 #include "utils/rel.h"
+#include "utils/relcache.h"
 #include "utils/timestamp.h"
 
 
@@ -36,6 +39,10 @@ typedef struct TwoPhasePgStatRecord
 	PgStat_Counter inserted_pre_truncdrop;
 	PgStat_Counter updated_pre_truncdrop;
 	PgStat_Counter deleted_pre_truncdrop;
+	/* WAL generation counts in xact */
+	PgStat_Counter wal_records;	/* WAL records generated in xact */
+	PgStat_Counter wal_bytes;	/* WAL bytes generated in xact */
+	PgStat_Counter wal_fpi;		/* WAL full page images in xact */
 	Oid			id;				/* table's OID */
 	bool		shared;			/* is it a shared catalog? */
 	bool		truncdropped;	/* was the relation truncated/dropped? */
@@ -200,6 +207,9 @@ pgstat_drop_relation(Relation rel)
 		pgstat_info->trans->tuples_inserted = 0;
 		pgstat_info->trans->tuples_updated = 0;
 		pgstat_info->trans->tuples_deleted = 0;
+		pgstat_info->trans->wal_records = 0;
+		pgstat_info->trans->wal_bytes = 0;
+		pgstat_info->trans->wal_fpi = 0;
 	}
 }
 
@@ -438,6 +448,9 @@ pgstat_count_truncate(Relation rel)
 		pgstat_info->trans->tuples_inserted = 0;
 		pgstat_info->trans->tuples_updated = 0;
 		pgstat_info->trans->tuples_deleted = 0;
+		pgstat_info->trans->wal_records = 0;
+		pgstat_info->trans->wal_bytes = 0;
+		pgstat_info->trans->wal_fpi = 0;
 	}
 }
 
@@ -457,6 +470,92 @@ pgstat_update_heap_dead_tuples(Relation rel, int delta)
 		PgStat_TableStatus *pgstat_info = rel->pgstat_info;
 
 		pgstat_info->counts.delta_dead_tuples -= delta;
+	}
+}
+
+/*
+ * count WAL usage for a heap operation using PostgreSQL's WalUsage infrastructure
+ */
+void
+pgstat_count_heap_wal_usage(Relation rel, const WalUsage *walusage)
+{
+	if (pgstat_should_count_relation(rel))
+	{
+		PgStat_TableStatus *pgstat_info = rel->pgstat_info;
+
+		/* Update persistent stats */
+		pgstat_info->counts.wal_records += walusage->wal_records;
+		pgstat_info->counts.wal_bytes += walusage->wal_bytes;
+		pgstat_info->counts.wal_fpi += walusage->wal_fpi;
+
+		/* Update transaction-level stats */
+		if (pgstat_info->trans != NULL)
+		{
+			pgstat_info->trans->wal_records += walusage->wal_records;
+			pgstat_info->trans->wal_bytes += walusage->wal_bytes;
+			pgstat_info->trans->wal_fpi += walusage->wal_fpi;
+		}
+	}
+}
+
+/*
+ * Count WAL usage for a statement, distributing across target relations
+ * (following pg_stat_statements pattern for low overhead)
+ */
+void
+pgstat_count_statement_wal_usage(List *relationOids, const WalUsage *walusage)
+{
+	ListCell   *lc;
+	int			num_relations;
+	WalUsage	distributed_usage;
+
+	if (!relationOids || !walusage)
+		return;
+
+	num_relations = list_length(relationOids);
+	if (num_relations == 0)
+		return;
+
+	/* Distribute WAL usage evenly across target relations */
+	distributed_usage.wal_records = walusage->wal_records / num_relations;
+	distributed_usage.wal_bytes = walusage->wal_bytes / num_relations;
+	distributed_usage.wal_fpi = walusage->wal_fpi / num_relations;
+
+	/* Handle remainder for wal_records to ensure no loss */
+	if (walusage->wal_records % num_relations != 0)
+		distributed_usage.wal_records++;
+
+	foreach(lc, relationOids)
+	{
+		Oid			reloid = lfirst_oid(lc);
+		Relation	rel;
+
+		/* 
+		 * Try to open the relation. Use NoLock and skip if we can't open it
+		 * safely (e.g., during initialization or if relation was dropped)
+		 */
+		PG_TRY();
+		{
+			rel = relation_open(reloid, NoLock);
+			
+			/* Only count user tables, skip system relations */
+			if (rel->rd_rel->relkind == RELKIND_RELATION && 
+				!IsSystemRelation(rel))
+			{
+				pgstat_count_heap_wal_usage(rel, &distributed_usage);
+			}
+			
+			relation_close(rel, NoLock);
+		}
+		PG_CATCH();
+		{
+			/* 
+			 * If relation can't be opened (dropped, system table, etc.), 
+			 * just skip it silently 
+			 */
+			FlushErrorState();
+		}
+		PG_END_TRY();
 	}
 }
 

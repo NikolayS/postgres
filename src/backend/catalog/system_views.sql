@@ -713,7 +713,10 @@ CREATE VIEW pg_stat_all_tables AS
             pg_stat_get_total_vacuum_time(C.oid) AS total_vacuum_time,
             pg_stat_get_total_autovacuum_time(C.oid) AS total_autovacuum_time,
             pg_stat_get_total_analyze_time(C.oid) AS total_analyze_time,
-            pg_stat_get_total_autoanalyze_time(C.oid) AS total_autoanalyze_time
+            pg_stat_get_total_autoanalyze_time(C.oid) AS total_autoanalyze_time,
+            pg_stat_get_wal_records(C.oid) AS wal_records,
+            pg_stat_get_wal_bytes(C.oid) AS wal_bytes,
+            pg_stat_get_wal_fpi(C.oid) AS wal_fpi
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -734,7 +737,10 @@ CREATE VIEW pg_stat_xact_all_tables AS
             pg_stat_get_xact_tuples_updated(C.oid) AS n_tup_upd,
             pg_stat_get_xact_tuples_deleted(C.oid) AS n_tup_del,
             pg_stat_get_xact_tuples_hot_updated(C.oid) AS n_tup_hot_upd,
-            pg_stat_get_xact_tuples_newpage_updated(C.oid) AS n_tup_newpage_upd
+            pg_stat_get_xact_tuples_newpage_updated(C.oid) AS n_tup_newpage_upd,
+            pg_stat_get_xact_wal_records(C.oid) AS wal_records,
+            pg_stat_get_xact_wal_bytes(C.oid) AS wal_bytes,
+            pg_stat_get_xact_wal_fpi(C.oid) AS wal_fpi
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)

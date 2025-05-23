@@ -106,6 +106,28 @@ PG_STAT_GET_RELENTRY_INT64(tuples_updated)
 /* pg_stat_get_vacuum_count */
 PG_STAT_GET_RELENTRY_INT64(vacuum_count)
 
+/* pg_stat_get_wal_records */
+PG_STAT_GET_RELENTRY_INT64(wal_records)
+
+/* pg_stat_get_wal_bytes */
+Datum
+pg_stat_get_wal_bytes(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int64		result;
+	PgStat_StatTabEntry *tabentry;
+
+	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)
+		result = 0;
+	else
+		result = (int64) (tabentry->wal_bytes);
+
+	PG_RETURN_INT64(result);
+}
+
+/* pg_stat_get_wal_fpi */
+PG_STAT_GET_RELENTRY_INT64(wal_fpi)
+
 #define PG_STAT_GET_RELENTRY_FLOAT8(stat)						\
 Datum															\
 CppConcat(pg_stat_get_,stat)(PG_FUNCTION_ARGS)					\
@@ -1788,6 +1810,15 @@ PG_STAT_GET_XACT_RELENTRY_INT64(tuples_updated)
 
 /* pg_stat_get_xact_tuples_deleted */
 PG_STAT_GET_XACT_RELENTRY_INT64(tuples_deleted)
+
+/* pg_stat_get_xact_wal_records */
+PG_STAT_GET_XACT_RELENTRY_INT64(wal_records)
+
+/* pg_stat_get_xact_wal_bytes */
+PG_STAT_GET_XACT_RELENTRY_INT64(wal_bytes)
+
+/* pg_stat_get_xact_wal_fpi */
+PG_STAT_GET_XACT_RELENTRY_INT64(wal_fpi)
 
 Datum
 pg_stat_get_xact_function_calls(PG_FUNCTION_ARGS)

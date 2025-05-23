@@ -64,6 +64,10 @@
 #include "utils/snapmgr.h"
 
 
+/* Static variables for WAL usage tracking */
+static WalUsage exec_wal_usage_start;
+static bool exec_wal_tracking_active = false;
+
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 ExecutorStart_hook_type ExecutorStart_hook = NULL;
 ExecutorRun_hook_type ExecutorRun_hook = NULL;
@@ -255,6 +259,19 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	 */
 	if (!(eflags & (EXEC_FLAG_SKIP_TRIGGERS | EXEC_FLAG_EXPLAIN_ONLY)))
 		AfterTriggerBeginQuery();
+
+	/*
+	 * Start tracking WAL usage for this statement execution
+	 * (following pg_stat_statements pattern for low overhead)
+	 * Only enable when fully initialized in normal processing mode
+	 */
+	if (IsNormalProcessingMode() &&
+		queryDesc->plannedstmt->relationOids &&
+		queryDesc->plannedstmt->commandType != CMD_SELECT)
+	{
+		exec_wal_usage_start = pgWalUsage;
+		exec_wal_tracking_active = true;
+	}
 
 	/*
 	 * Initialize the plan state tree
@@ -507,6 +524,20 @@ standard_ExecutorEnd(QueryDesc *queryDesc)
 	/* do away with our snapshots */
 	UnregisterSnapshot(estate->es_snapshot);
 	UnregisterSnapshot(estate->es_crosscheck_snapshot);
+
+	/*
+	 * Attribute WAL usage to target relations if we were tracking
+	 * (following pg_stat_statements pattern)
+	 */
+	if (exec_wal_tracking_active && queryDesc->plannedstmt->relationOids)
+	{
+		WalUsage	walusage;
+		
+		memset(&walusage, 0, sizeof(WalUsage));
+		WalUsageAccumDiff(&walusage, &pgWalUsage, &exec_wal_usage_start);
+		pgstat_count_statement_wal_usage(queryDesc->plannedstmt->relationOids, &walusage);
+		exec_wal_tracking_active = false;
+	}
 
 	/*
 	 * Must switch out of context before destroying it
