@@ -339,6 +339,14 @@ struct _archiveHandle
 	RestorePass restorePass;	/* used only during parallel restore */
 	struct _tocEntry *currentTE;
 	struct _tocEntry *lastErrorTE;
+
+	/* object status tracking */
+	struct _tocEntry **successful_objects;	/* array of successfully restored objects */
+	int			n_successful;				/* count of successful objects */
+	int			max_successful;				/* allocated size of successful_objects array */
+	struct _tocEntry **failed_objects;		/* array of failed objects */
+	int			n_failed;					/* count of failed objects */
+	int			max_failed;					/* allocated size of failed_objects array */
 };
 
 
@@ -382,6 +390,13 @@ struct _tocEntry
 								 * (REQ_* bit mask) */
 	bool		created;		/* set for DATA member if TABLE was created */
 
+	/* restoration status tracking */
+	bool		schema_attempted;	/* true if schema restoration was attempted */
+	bool		schema_success;		/* true if schema restoration succeeded */
+	bool		data_attempted;		/* true if data restoration was attempted */
+	bool		data_success;		/* true if data restoration succeeded */
+	char	   *failure_reason;		/* error message if restoration failed */
+
 	/* working state (needed only for parallel restore) */
 	struct _tocEntry *pending_prev; /* list links for pending-items list; */
 	struct _tocEntry *pending_next; /* NULL if not in that list */
@@ -397,6 +412,13 @@ extern void on_exit_close_archive(Archive *AHX);
 extern void replace_on_exit_close_archive(Archive *AHX);
 
 extern void warn_or_exit_horribly(ArchiveHandle *AH, const char *fmt,...) pg_attribute_printf(2, 3);
+
+/* Object status tracking functions */
+extern void init_object_tracking(ArchiveHandle *AH);
+extern void record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema);
+extern void record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const char *error_msg);
+extern void print_restoration_summary(ArchiveHandle *AH);
+extern void cleanup_object_tracking(ArchiveHandle *AH);
 
 /* Options for ArchiveEntry */
 typedef struct _archiveOpts

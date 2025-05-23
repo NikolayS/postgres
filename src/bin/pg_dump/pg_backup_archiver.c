@@ -354,6 +354,9 @@ RestoreArchive(Archive *AHX, bool append_data)
 
 	AH->stage = STAGE_INITIALIZING;
 
+	/* Initialize object status tracking */
+	init_object_tracking(AH);
+
 	/*
 	 * If we're going to do parallel restore, there are some restrictions.
 	 */
@@ -810,11 +813,17 @@ RestoreArchive(Archive *AHX, bool append_data)
 	 */
 	AH->stage = STAGE_FINALIZING;
 
+	/* Print restoration summary */
+	print_restoration_summary(AH);
+
 	if (ropt->filename || ropt->compression_spec.algorithm != PG_COMPRESSION_NONE)
 		RestoreOutput(AH, sav);
 
 	if (ropt->useDB)
 		DisconnectDatabase(&AH->public);
+
+	/* Clean up object tracking */
+	cleanup_object_tracking(AH);
 }
 
 /*
@@ -883,6 +892,16 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 		_printTocEntry(AH, te, TOC_PREFIX_NONE);
 		defnDumped = true;
 
+		/* Track schema restoration status */
+		if (AH->lastErrorTE == te)
+		{
+			record_object_failure(AH, te, true, "Schema creation failed");
+		}
+		else
+		{
+			record_object_success(AH, te, true);
+		}
+
 		if (strcmp(te->desc, "TABLE") == 0)
 		{
 			if (AH->lastErrorTE == te)
@@ -950,6 +969,16 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 			if (AH->PrintTocDataPtr != NULL)
 			{
 				_printTocEntry(AH, te, TOC_PREFIX_DATA);
+
+				/* Track data restoration status */
+				if (AH->lastErrorTE == te)
+				{
+					record_object_failure(AH, te, false, "Data restoration failed");
+				}
+				else
+				{
+					record_object_success(AH, te, false);
+				}
 
 				if (strcmp(te->desc, "BLOBS") == 0 ||
 					strcmp(te->desc, "BLOB COMMENTS") == 0)
@@ -1048,6 +1077,16 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 			/* If we haven't already dumped the defn part, do so now */
 			pg_log_info("executing %s %s", te->desc, te->tag);
 			_printTocEntry(AH, te, TOC_PREFIX_NONE);
+
+			/* Track schema restoration status */
+			if (AH->lastErrorTE == te)
+			{
+				record_object_failure(AH, te, true, "Schema execution failed");
+			}
+			else
+			{
+				record_object_success(AH, te, true);
+			}
 		}
 	}
 
@@ -1055,7 +1094,19 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 	 * If it has a statistics component that we want, then process that
 	 */
 	if ((reqs & REQ_STATS) != 0)
+	{
 		_printTocEntry(AH, te, TOC_PREFIX_STATS);
+
+		/* Track statistics restoration status */
+		if (AH->lastErrorTE == te)
+		{
+			record_object_failure(AH, te, true, "Statistics restoration failed");
+		}
+		else
+		{
+			record_object_success(AH, te, true);
+		}
+	}
 
 	/*
 	 * If we emitted anything for this TOC entry, that counts as one action
@@ -5192,4 +5243,209 @@ DeCloneArchive(ArchiveHandle *AH)
 	free(AH->savedPassword);
 
 	free(AH);
+}
+
+/*
+ * Object status tracking functions
+ */
+
+/*
+ * Initialize object tracking arrays
+ */
+void
+init_object_tracking(ArchiveHandle *AH)
+{
+	AH->successful_objects = NULL;
+	AH->n_successful = 0;
+	AH->max_successful = 0;
+	AH->failed_objects = NULL;
+	AH->n_failed = 0;
+	AH->max_failed = 0;
+}
+
+/*
+ * Record successful restoration of an object
+ */
+void
+record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
+{
+	/* Update object status */
+	if (is_schema)
+	{
+		te->schema_attempted = true;
+		te->schema_success = true;
+	}
+	else
+	{
+		te->data_attempted = true;
+		te->data_success = true;
+	}
+
+	/* Only add to successful list once per object */
+	if (!is_schema || !te->data_attempted || te->data_success)
+	{
+		/* Resize array if needed */
+		if (AH->n_successful >= AH->max_successful)
+		{
+			AH->max_successful = AH->max_successful ? AH->max_successful * 2 : 100;
+			AH->successful_objects = (TocEntry **) pg_realloc(AH->successful_objects,
+															 AH->max_successful * sizeof(TocEntry *));
+		}
+
+		/* Check if already in successful list */
+		for (int i = 0; i < AH->n_successful; i++)
+		{
+			if (AH->successful_objects[i] == te)
+				return;
+		}
+
+		AH->successful_objects[AH->n_successful++] = te;
+	}
+}
+
+/*
+ * Record failed restoration of an object
+ */
+void
+record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const char *error_msg)
+{
+	/* Update object status */
+	if (is_schema)
+	{
+		te->schema_attempted = true;
+		te->schema_success = false;
+	}
+	else
+	{
+		te->data_attempted = true;
+		te->data_success = false;
+	}
+
+	/* Store error message */
+	if (error_msg && !te->failure_reason)
+		te->failure_reason = pg_strdup(error_msg);
+
+	/* Resize array if needed */
+	if (AH->n_failed >= AH->max_failed)
+	{
+		AH->max_failed = AH->max_failed ? AH->max_failed * 2 : 100;
+		AH->failed_objects = (TocEntry **) pg_realloc(AH->failed_objects,
+													   AH->max_failed * sizeof(TocEntry *));
+	}
+
+	/* Check if already in failed list */
+	for (int i = 0; i < AH->n_failed; i++)
+	{
+		if (AH->failed_objects[i] == te)
+			return;
+	}
+
+	AH->failed_objects[AH->n_failed++] = te;
+}
+
+/*
+ * Print restoration summary showing successful and failed objects
+ */
+void
+print_restoration_summary(ArchiveHandle *AH)
+{
+	int			i;
+
+	pg_log_info("Restoration Summary:");
+	pg_log_info("===================");
+	pg_log_info("Successfully restored objects: %d", AH->n_successful);
+	pg_log_info("Failed objects: %d", AH->n_failed);
+
+	if (AH->n_failed > 0)
+	{
+		pg_log_info("");
+		pg_log_info("Failed Objects (including dependency failures):");
+		for (i = 0; i < AH->n_failed; i++)
+		{
+			TocEntry   *te = AH->failed_objects[i];
+			const char *reason = te->failure_reason ? te->failure_reason : "unknown error";
+
+			if (te->namespace)
+				pg_log_info("  %s \"%s.%s\": %s", te->desc, te->namespace, te->tag, reason);
+			else
+				pg_log_info("  %s \"%s\": %s", te->desc, te->tag, reason);
+		}
+
+		pg_log_info("");
+		pg_log_info("Objects that might need retry due to dependencies:");
+		for (i = 0; i < AH->n_failed; i++)
+		{
+			TocEntry   *te = AH->failed_objects[i];
+			int			j;
+
+			/* Check if this object has dependents that also failed */
+			for (j = 0; j < te->nRevDeps; j++)
+			{
+				TocEntry   *dep_te = AH->tocsByDumpId[te->revDeps[j]];
+
+				if (dep_te != NULL)
+				{
+					bool		dep_failed = false;
+
+					/* Check if dependent also failed */
+					for (int k = 0; k < AH->n_failed; k++)
+					{
+						if (AH->failed_objects[k] == dep_te)
+						{
+							dep_failed = true;
+							break;
+						}
+					}
+
+					if (dep_failed)
+					{
+						if (dep_te->namespace)
+							pg_log_info("  %s \"%s.%s\" depends on failed %s \"%s.%s\"",
+										dep_te->desc, dep_te->namespace, dep_te->tag,
+										te->desc, te->namespace ? te->namespace : "", te->tag);
+						else
+							pg_log_info("  %s \"%s\" depends on failed %s \"%s\"",
+										dep_te->desc, dep_te->tag,
+										te->desc, te->tag);
+					}
+				}
+			}
+		}
+	}
+}
+
+/*
+ * Clean up object tracking memory
+ */
+void
+cleanup_object_tracking(ArchiveHandle *AH)
+{
+	TocEntry   *te;
+
+	/* Free failure reason strings */
+	for (te = AH->toc->next; te != AH->toc; te = te->next)
+	{
+		if (te->failure_reason)
+		{
+			free(te->failure_reason);
+			te->failure_reason = NULL;
+		}
+	}
+
+	/* Free tracking arrays */
+	if (AH->successful_objects)
+	{
+		free(AH->successful_objects);
+		AH->successful_objects = NULL;
+	}
+	if (AH->failed_objects)
+	{
+		free(AH->failed_objects);
+		AH->failed_objects = NULL;
+	}
+
+	AH->n_successful = 0;
+	AH->max_successful = 0;
+	AH->n_failed = 0;
+	AH->max_failed = 0;
 }
