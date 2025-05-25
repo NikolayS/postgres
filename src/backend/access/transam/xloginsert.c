@@ -21,7 +21,9 @@
 
 #ifdef USE_LZ4
 #include <lz4.h>
+#ifdef HAVE_LZ4HC_H
 #include <lz4hc.h>
+#endif
 #endif
 
 #ifdef USE_ZSTD
@@ -998,8 +1000,15 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 				else
 				{
 					/* Use LZ4HC for levels 10-12 */
+#ifdef HAVE_LZ4HC_H
 					len = LZ4_compress_HC(source, dest, orig_len,
 										  COMPRESS_BUFSIZE, level);
+#else
+					/* Fall back to standard LZ4 if LZ4HC not available */
+					elog(WARNING, "LZ4HC not available, using standard LZ4 compression for level %d", level);
+					len = LZ4_compress_default(source, dest, orig_len,
+											   COMPRESS_BUFSIZE);
+#endif
 				}
 			}
 			else

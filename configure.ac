@@ -1563,6 +1563,7 @@ fi
 PGAC_PATH_PROGS(LZ4, lz4)
 if test "$with_lz4" = yes; then
   AC_CHECK_HEADER(lz4.h, [], [AC_MSG_ERROR([lz4.h header file is required for LZ4])])
+  AC_CHECK_HEADER(lz4hc.h, [AC_DEFINE(HAVE_LZ4HC_H, 1, [Define to 1 if you have the <lz4hc.h> header file.])])
 fi
 
 PGAC_PATH_PROGS(ZSTD, zstd)
