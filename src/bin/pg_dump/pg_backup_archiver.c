@@ -816,6 +816,9 @@ RestoreArchive(Archive *AHX, bool append_data)
 	/* Print restoration summary */
 	print_restoration_summary(AH);
 
+	/* Write object lists to files for analysis and retry */
+	write_object_lists_to_files(AH);
+
 	if (ropt->filename || ropt->compression_spec.algorithm != PG_COMPRESSION_NONE)
 		RestoreOutput(AH, sav);
 
@@ -5410,6 +5413,121 @@ print_restoration_summary(ArchiveHandle *AH)
 					}
 				}
 			}
+		}
+	}
+}
+
+/*
+ * Write object lists to files for further analysis and retry
+ */
+void
+write_object_lists_to_files(ArchiveHandle *AH)
+{
+	FILE	   *fp;
+	int			i;
+	time_t		now;
+	char		timestamp[64];
+
+	/* Get current timestamp for file headers */
+	now = time(NULL);
+	strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S UTC", gmtime(&now));
+
+	/* Write successful objects list */
+	if (AH->n_successful > 0)
+	{
+		fp = fopen("successful_objects.txt", "w");
+		if (fp != NULL)
+		{
+			fprintf(fp, "# pg_restore successful objects list\n");
+			fprintf(fp, "# Generated: %s\n", timestamp);
+			fprintf(fp, "# Total successful objects: %d\n\n", AH->n_successful);
+
+			for (i = 0; i < AH->n_successful; i++)
+			{
+				TocEntry   *te = AH->successful_objects[i];
+
+				if (te->namespace)
+					fprintf(fp, "%s \"%s.%s\"\n", te->desc, te->namespace, te->tag);
+				else
+					fprintf(fp, "%s \"%s\"\n", te->desc, te->tag);
+			}
+			fclose(fp);
+			pg_log_info("Successful objects list written to: successful_objects.txt");
+		}
+		else
+		{
+			pg_log_warning("Could not create successful_objects.txt");
+		}
+	}
+
+	/* Write failed objects list with details */
+	if (AH->n_failed > 0)
+	{
+		fp = fopen("failed_objects.txt", "w");
+		if (fp != NULL)
+		{
+			fprintf(fp, "# pg_restore failed objects list\n");
+			fprintf(fp, "# Generated: %s\n", timestamp);
+			fprintf(fp, "# Total failed objects: %d\n\n", AH->n_failed);
+
+			for (i = 0; i < AH->n_failed; i++)
+			{
+				TocEntry   *te = AH->failed_objects[i];
+				const char *reason = te->failure_reason ? te->failure_reason : "unknown error";
+
+				if (te->namespace)
+					fprintf(fp, "%s \"%s.%s\": %s\n", te->desc, te->namespace, te->tag, reason);
+				else
+					fprintf(fp, "%s \"%s\": %s\n", te->desc, te->tag, reason);
+			}
+			fclose(fp);
+			pg_log_info("Failed objects list written to: failed_objects.txt");
+		}
+		else
+		{
+			pg_log_warning("Could not create failed_objects.txt");
+		}
+
+		/* Write retry SQL script for failed objects */
+		fp = fopen("retry_objects.sql", "w");
+		if (fp != NULL)
+		{
+			fprintf(fp, "-- pg_restore retry script for failed objects\n");
+			fprintf(fp, "-- Generated: %s\n", timestamp);
+			fprintf(fp, "-- Total failed objects: %d\n\n", AH->n_failed);
+			fprintf(fp, "-- NOTE: Review and modify this script before execution\n");
+			fprintf(fp, "-- Some objects may fail due to dependencies\n\n");
+
+			for (i = 0; i < AH->n_failed; i++)
+			{
+				TocEntry   *te = AH->failed_objects[i];
+
+				fprintf(fp, "-- Retry: %s", te->desc);
+				if (te->namespace)
+					fprintf(fp, " \"%s.%s\"", te->namespace, te->tag);
+				else
+					fprintf(fp, " \"%s\"", te->tag);
+				fprintf(fp, "\n");
+
+				if (te->failure_reason)
+					fprintf(fp, "-- Previous error: %s\n", te->failure_reason);
+
+				if (te->defn && strlen(te->defn) > 0)
+				{
+					fprintf(fp, "%s\n", te->defn);
+				}
+				else
+				{
+					fprintf(fp, "-- Definition not available for this object\n");
+				}
+				fprintf(fp, "\n");
+			}
+			fclose(fp);
+			pg_log_info("Retry script written to: retry_objects.sql");
+		}
+		else
+		{
+			pg_log_warning("Could not create retry_objects.sql");
 		}
 	}
 }

@@ -418,6 +418,7 @@ extern void init_object_tracking(ArchiveHandle *AH);
 extern void record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema);
 extern void record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const char *error_msg);
 extern void print_restoration_summary(ArchiveHandle *AH);
+extern void write_object_lists_to_files(ArchiveHandle *AH);
 extern void cleanup_object_tracking(ArchiveHandle *AH);
 
 /* Options for ArchiveEntry */
