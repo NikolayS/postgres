@@ -3419,6 +3419,31 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-wal-compression-level" xreflabel="wal_compression_level">
+      <term><varname>wal_compression_level</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>wal_compression_level</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Sets the compression level for WAL compression when
+        <xref linkend="guc-wal-compression"/> is enabled.
+        The valid range is 0 to 22, where 0 means use the default
+        compression level for the selected algorithm.
+        Higher values generally provide better compression at the cost
+        of increased CPU usage.
+        For <literal>lz4</literal>, valid levels are 1-12.
+        For <literal>zstd</literal>, valid levels are 1-22.
+        The <literal>pglz</literal> algorithm does not support
+        configurable compression levels.
+        The default value is <literal>0</literal>.
+        Only superusers and users with the appropriate <literal>SET</literal>
+        privilege can change this setting.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-wal-init-zero" xreflabel="wal_init_zero">
       <term><varname>wal_init_zero</varname> (<type>boolean</type>)
       <indexterm>

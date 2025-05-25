@@ -122,6 +122,7 @@ bool		EnableHotStandby = false;
 bool		fullPageWrites = true;
 bool		wal_log_hints = false;
 int			wal_compression = WAL_COMPRESSION_NONE;
+int			wal_compression_level = 0;
 char	   *wal_consistency_checking_string = NULL;
 bool	   *wal_consistency_checking = NULL;
 bool		wal_init_zero = true;
@@ -596,8 +597,8 @@ static ControlFileData *ControlFile = NULL;
 		(((idx) == XLogCtl->XLogCacheBlck) ? 0 : ((idx) + 1))
 
 /*
- * XLogRecPtrToBufIdx returns the index of the WAL buffer that holds, or
- * would hold if it was in cache, the page containing 'recptr'.
+ * XLogRecPtrToBufIdx returns the index of the WAL buffer that holds,
+ * or would hold if it was in cache, the page containing 'recptr'.
  */
 #define XLogRecPtrToBufIdx(recptr)	\
 	(((recptr) / XLOG_BLCKSZ) % (XLogCtl->XLogCacheBlck + 1))
@@ -2362,6 +2363,44 @@ check_max_slot_wal_keep_size(int *newval, void **extra, GucSource source)
 		return false;
 	}
 
+	return true;
+}
+
+bool
+check_wal_compression_level(int *newval, void **extra, GucSource source)
+{
+	/* 0 means use default compression level */
+	if (*newval == 0)
+		return true;
+
+	/* For LZ4, valid range is 1-12 */
+	if (wal_compression == WAL_COMPRESSION_LZ4)
+	{
+		if (*newval >= 1 && *newval <= 12)
+			return true;
+		GUC_check_errdetail("Valid compression levels for LZ4 are 1-12.");
+		return false;
+	}
+
+	/* For ZSTD, valid range is 1-22 */
+	if (wal_compression == WAL_COMPRESSION_ZSTD)
+	{
+		if (*newval >= 1 && *newval <= 22)
+			return true;
+		GUC_check_errdetail("Valid compression levels for ZSTD are 1-22.");
+		return false;
+	}
+
+	/* PGLZ doesn't support compression levels */
+	if (wal_compression == WAL_COMPRESSION_PGLZ)
+	{
+		if (*newval == 0)
+			return true;
+		GUC_check_errdetail("PGLZ compression does not support compression levels.");
+		return false;
+	}
+
+	/* If compression is off, any level is acceptable but ignored */
 	return true;
 }
 
@@ -8969,7 +9008,7 @@ void
 do_pg_backup_start(const char *backupidstr, bool fast, List **tablespaces,
 				   BackupState *state, StringInfo tblspcmapfile)
 {
-	bool		backup_started_in_recovery;
+	bool		backup_started_in_recovery = false;
 
 	Assert(state != NULL);
 	backup_started_in_recovery = RecoveryInProgress();

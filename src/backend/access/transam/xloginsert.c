@@ -21,6 +21,7 @@
 
 #ifdef USE_LZ4
 #include <lz4.h>
+#include <lz4hc.h>
 #endif
 
 #ifdef USE_ZSTD
@@ -976,8 +977,16 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 
 		case WAL_COMPRESSION_LZ4:
 #ifdef USE_LZ4
-			len = LZ4_compress_default(source, dest, orig_len,
-									   COMPRESS_BUFSIZE);
+			if (wal_compression_level > 0)
+			{
+				len = LZ4_compress_HC(source, dest, orig_len,
+									  COMPRESS_BUFSIZE, wal_compression_level);
+			}
+			else
+			{
+				len = LZ4_compress_default(source, dest, orig_len,
+										   COMPRESS_BUFSIZE);
+			}
 			if (len <= 0)
 				len = -1;		/* failure */
 #else
@@ -987,10 +996,14 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 
 		case WAL_COMPRESSION_ZSTD:
 #ifdef USE_ZSTD
-			len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len,
-								ZSTD_CLEVEL_DEFAULT);
-			if (ZSTD_isError(len))
-				len = -1;		/* failure */
+			{
+				int compression_level = (wal_compression_level > 0) ? 
+										wal_compression_level : ZSTD_CLEVEL_DEFAULT;
+				len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len,
+									compression_level);
+				if (ZSTD_isError(len))
+					len = -1;		/* failure */
+			}
 #else
 			elog(ERROR, "zstd is not supported by this build");
 #endif

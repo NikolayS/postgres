@@ -47,6 +47,7 @@ extern PGDLLIMPORT bool EnableHotStandby;
 extern PGDLLIMPORT bool fullPageWrites;
 extern PGDLLIMPORT bool wal_log_hints;
 extern PGDLLIMPORT int wal_compression;
+extern PGDLLIMPORT int wal_compression_level;
 extern PGDLLIMPORT bool wal_init_zero;
 extern PGDLLIMPORT bool wal_recycle;
 extern PGDLLIMPORT bool *wal_consistency_checking;

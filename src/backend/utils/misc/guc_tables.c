@@ -2319,6 +2319,16 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
+		{"wal_compression_level", PGC_SUSET, WAL_SETTINGS,
+			gettext_noop("Sets the compression level for WAL compression."),
+			gettext_noop("0 means use the default compression level for the selected algorithm.")
+		},
+		&wal_compression_level,
+		0, 0, 22,
+		check_wal_compression_level, NULL, NULL
+	},
+
+	{
 		{"max_connections", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the maximum number of concurrent connections."),
 			NULL

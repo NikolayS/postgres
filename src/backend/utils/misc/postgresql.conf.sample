@@ -248,6 +248,9 @@
 #wal_log_hints = off			# also do full page writes of non-critical updates
 					# (change requires restart)
 #wal_compression = off			# enables compression of full-page writes;
+					# off, pglz, lz4, zstd
+#wal_compression_level = 0		# compression level for WAL compression;
+					# 0 = default, 1-22 for zstd, 1-12 for lz4
 					# off, pglz, lz4, zstd, or on
 #wal_init_zero = on			# zero-fill new WAL files
 #wal_recycle = on			# recycle WAL files
