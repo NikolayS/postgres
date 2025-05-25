@@ -2369,38 +2369,12 @@ check_max_slot_wal_keep_size(int *newval, void **extra, GucSource source)
 bool
 check_wal_compression_level(int *newval, void **extra, GucSource source)
 {
-	/* 0 means use default compression level */
-	if (*newval == 0)
-		return true;
-
-	/* For LZ4, valid range is 1-12 */
-	if (wal_compression == WAL_COMPRESSION_LZ4)
-	{
-		if (*newval >= 1 && *newval <= 12)
-			return true;
-		GUC_check_errdetail("Valid compression levels for LZ4 are 1-12.");
-		return false;
-	}
-
-	/* For ZSTD, valid range is 1-22 */
-	if (wal_compression == WAL_COMPRESSION_ZSTD)
-	{
-		if (*newval >= 1 && *newval <= 22)
-			return true;
-		GUC_check_errdetail("Valid compression levels for ZSTD are 1-22.");
-		return false;
-	}
-
-	/* PGLZ doesn't support compression levels */
-	if (wal_compression == WAL_COMPRESSION_PGLZ)
-	{
-		if (*newval == 0)
-			return true;
-		GUC_check_errdetail("PGLZ compression does not support compression levels.");
-		return false;
-	}
-
-	/* If compression is off, any level is acceptable but ignored */
+	/*
+	 * Accept any value in the valid range 0-22.
+	 * Validation against the specific compression algorithm happens
+	 * at compression time, not at GUC setting time, since the
+	 * parameters can be set in any order.
+	 */
 	return true;
 }
 

@@ -18,7 +18,7 @@ SHOW wal_compression_level;
 SET wal_compression_level = 22;
 SHOW wal_compression_level;
 
--- Test invalid compression levels (should fail)
+-- Test invalid compression levels (should fail due to GUC range)
 SET wal_compression_level = -1;
 SET wal_compression_level = 23;
 

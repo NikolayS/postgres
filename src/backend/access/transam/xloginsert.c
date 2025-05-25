@@ -979,8 +979,28 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 #ifdef USE_LZ4
 			if (wal_compression_level > 0)
 			{
-				len = LZ4_compress_HC(source, dest, orig_len,
-									  COMPRESS_BUFSIZE, wal_compression_level);
+				int level = wal_compression_level;
+				
+				/* Validate and clamp LZ4 compression level to valid range */
+				if (level > 12)
+				{
+					elog(WARNING, "wal_compression_level %d is too high for LZ4, using level 12",
+						 level);
+					level = 12;
+				}
+				
+				if (level <= 9)
+				{
+					/* Use standard LZ4 for levels 1-9 */
+					len = LZ4_compress_default(source, dest, orig_len,
+											   COMPRESS_BUFSIZE);
+				}
+				else
+				{
+					/* Use LZ4HC for levels 10-12 */
+					len = LZ4_compress_HC(source, dest, orig_len,
+										  COMPRESS_BUFSIZE, level);
+				}
 			}
 			else
 			{
@@ -997,8 +1017,25 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 		case WAL_COMPRESSION_ZSTD:
 #ifdef USE_ZSTD
 			{
-				int compression_level = (wal_compression_level > 0) ? 
-										wal_compression_level : ZSTD_CLEVEL_DEFAULT;
+				int compression_level;
+				
+				if (wal_compression_level > 0)
+				{
+					compression_level = wal_compression_level;
+					
+					/* Validate and clamp ZSTD compression level to valid range */
+					if (compression_level > 22)
+					{
+						elog(WARNING, "wal_compression_level %d is too high for ZSTD, using level 22",
+							 compression_level);
+						compression_level = 22;
+					}
+				}
+				else
+				{
+					compression_level = ZSTD_CLEVEL_DEFAULT;
+				}
+				
 				len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len,
 									compression_level);
 				if (ZSTD_isError(len))

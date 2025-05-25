@@ -1,0 +1,3 @@
+# initializing database system by copying initdb template
+# using temp instance on port 65312 with PID 78590
+# command failed: "psql" -X -q -c "CREATE DATABASE \"regression\" TEMPLATE=template0" -c "ALTER DATABASE \"regression\" SET lc_messages TO 'C';ALTER DATABASE \"regression\" SET lc_monetary TO 'C';ALTER DATABASE \"regression\" SET lc_numeric TO 'C';ALTER DATABASE \"regression\" SET lc_time TO 'C';ALTER DATABASE \"regression\" SET bytea_output TO 'hex';ALTER DATABASE \"regression\" SET timezone_abbreviations TO 'Default';" "postgres"Bail out!
