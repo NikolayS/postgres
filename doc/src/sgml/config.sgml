@@ -3465,6 +3465,17 @@ include_dir 'conf.d'
         your workload characteristics and the balance between I/O reduction
         and CPU overhead in your environment.
        </para>
+
+       <para>
+        Higher compression levels increase CPU usage both during WAL generation
+        on the primary server and during WAL replay on standby servers. On
+        standby servers, decompression occurs in the single-threaded WAL replay
+        process, which can become a bottleneck if very high compression levels
+        are used. This is particularly important to consider in streaming
+        replication setups where standby lag could increase due to slower
+        WAL replay. Monitor standby lag when using higher compression levels
+        to ensure acceptable replication performance.
+       </para>
       </listitem>
      </varlistentry>
 
