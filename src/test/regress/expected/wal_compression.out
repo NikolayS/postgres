@@ -1,0 +1,120 @@
+--
+-- Test WAL compression level functionality
+--
+-- Test basic parameter existence and default value
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 0
+(1 row)
+
+-- Test setting valid compression levels
+SET wal_compression_level = 0;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 0
+(1 row)
+
+SET wal_compression_level = 1;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 1
+(1 row)
+
+SET wal_compression_level = 9;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 9
+(1 row)
+
+SET wal_compression_level = 22;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 22
+(1 row)
+
+-- Test invalid compression levels (should fail)
+SET wal_compression_level = -1;
+ERROR:  -1 is outside the valid range for parameter "wal_compression_level" (0 .. 22)
+SET wal_compression_level = 23;
+ERROR:  23 is outside the valid range for parameter "wal_compression_level" (0 .. 22)
+-- Test with different compression algorithms
+-- Note: These tests check parameter validation, not actual compression
+-- since compression effectiveness depends on the specific workload
+-- Test ZSTD compression levels
+SET wal_compression = 'zstd';
+SET wal_compression_level = 1;
+SHOW wal_compression;
+ wal_compression 
+-----------------
+ zstd
+(1 row)
+
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 1
+(1 row)
+
+SET wal_compression_level = 22;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 22
+(1 row)
+
+-- Test LZ4 compression levels  
+SET wal_compression = 'lz4';
+SET wal_compression_level = 1;
+SHOW wal_compression;
+ wal_compression 
+-----------------
+ lz4
+(1 row)
+
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 1
+(1 row)
+
+SET wal_compression_level = 12;
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 12
+(1 row)
+
+-- Test PGLZ (compression level should be accepted but ignored)
+SET wal_compression = 'pglz';
+SET wal_compression_level = 5;
+SHOW wal_compression;
+ wal_compression 
+-----------------
+ pglz
+(1 row)
+
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 5
+(1 row)
+
+-- Reset to defaults
+SET wal_compression = 'off';
+SET wal_compression_level = 0;
+SHOW wal_compression;
+ wal_compression 
+-----------------
+ off
+(1 row)
+
+SHOW wal_compression_level;
+ wal_compression_level 
+-----------------------
+ 0
+(1 row) 
