@@ -3441,6 +3441,17 @@ include_dir 'conf.d'
         Only superusers and users with the appropriate <literal>SET</literal>
         privilege can change this setting.
        </para>
+
+       <para>
+        If an invalid compression level is specified for the current
+        compression algorithm, the level will be automatically clamped
+        to the valid range and a warning will be logged. For example,
+        if <varname>wal_compression_level</varname> is set to 15 but
+        <varname>wal_compression</varname> is <literal>lz4</literal>
+        (which supports levels 1-12), the level will be clamped to 12
+        and a warning will be issued. This ensures that WAL compression
+        continues to function even with suboptimal configuration.
+       </para>
       </listitem>
      </varlistentry>
 
