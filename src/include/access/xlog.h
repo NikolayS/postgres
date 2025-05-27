@@ -46,7 +46,7 @@ extern PGDLLIMPORT char *XLogArchiveCommand;
 extern PGDLLIMPORT bool EnableHotStandby;
 extern PGDLLIMPORT bool fullPageWrites;
 extern PGDLLIMPORT bool wal_log_hints;
-extern PGDLLIMPORT int wal_compression;
+extern PGDLLIMPORT char *wal_compression;
 extern PGDLLIMPORT bool wal_init_zero;
 extern PGDLLIMPORT bool wal_recycle;
 extern PGDLLIMPORT bool *wal_consistency_checking;
@@ -84,6 +84,27 @@ typedef enum WalCompression
 	WAL_COMPRESSION_LZ4,
 	WAL_COMPRESSION_ZSTD,
 } WalCompression;
+
+/* Special value to indicate compression level is not applicable */
+#define WAL_COMPRESSION_LEVEL_NONE	(-1)
+
+/* Default compression levels for each algorithm */
+#define LZ4_DEFAULT_COMPRESSION_LEVEL	1
+#define ZSTD_DEFAULT_COMPRESSION_LEVEL	3
+
+/* Compression level ranges */
+#define LZ4_MIN_LEVEL		1
+#define LZ4_MAX_LEVEL		12
+#define LZ4HC_MIN_LEVEL		10
+#define ZSTD_MIN_LEVEL		1
+#define ZSTD_MAX_LEVEL		22
+
+/* Function to parse wal_compression string into method and level */
+extern bool ParseWalCompression(const char *compression_str, 
+								WalCompression *method, int *level);
+
+/* Get the parsed WAL compression method and level (avoids re-parsing) */
+extern void GetWalCompressionMethod(WalCompression *method, int *level);
 
 /* Recovery states */
 typedef enum RecoveryState

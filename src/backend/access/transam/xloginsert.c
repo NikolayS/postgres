@@ -21,6 +21,9 @@
 
 #ifdef USE_LZ4
 #include <lz4.h>
+#ifdef HAVE_LZ4HC_H
+#include <lz4hc.h>
+#endif
 #endif
 
 #ifdef USE_ZSTD
@@ -685,13 +688,19 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 			/*
 			 * Try to compress a block image if wal_compression is enabled
 			 */
-			if (wal_compression != WAL_COMPRESSION_NONE)
 			{
-				is_compressed =
-					XLogCompressBackupBlock(page, bimg.hole_offset,
-											cbimg.hole_length,
-											regbuf->compressed_page,
-											&compressed_len);
+				WalCompression method;
+				int level;
+				
+				GetWalCompressionMethod(&method, &level);
+				if (method != WAL_COMPRESSION_NONE)
+				{
+					is_compressed =
+						XLogCompressBackupBlock(page, bimg.hole_offset,
+												cbimg.hole_length,
+												regbuf->compressed_page,
+												&compressed_len);
+				}
 			}
 
 			/*
@@ -726,7 +735,13 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 				bimg.length = compressed_len;
 
 				/* Set the compression method used for this block */
-				switch ((WalCompression) wal_compression)
+				WalCompression method;
+				int level;
+				
+				/* Get the pre-parsed compression method and level (avoids re-parsing) */
+				GetWalCompressionMethod(&method, &level);
+			
+				switch (method)
 				{
 					case WAL_COMPRESSION_PGLZ:
 						bimg.bimg_info |= BKPIMAGE_COMPRESS_PGLZ;
@@ -846,7 +861,7 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 		scratch += sizeof(replorigin_session_origin);
 	}
 
-	/* followed by toplevel XID, if not already included in previous record */
+			/* followed by toplevel XID, if not already included in previous record */
 	if (IsSubxactTopXidLogPending())
 	{
 		TransactionId xid = GetTopTransactionIdIfAny();
@@ -968,16 +983,61 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 	else
 		source = page;
 
-	switch ((WalCompression) wal_compression)
+	{
+		WalCompression method;
+		int wal_compression_level;
+		
+		/* Get the pre-parsed compression method and level (avoids re-parsing) */
+		GetWalCompressionMethod(&method, &wal_compression_level);
+	
+	switch (method)
 	{
 		case WAL_COMPRESSION_PGLZ:
+			/* PGLZ doesn't use levels - warn if level is set but continue */
+			if (wal_compression_level != WAL_COMPRESSION_LEVEL_NONE)
+				elog(WARNING, "PGLZ compression level %d ignored, PGLZ does not support compression levels", 
+					 wal_compression_level);
 			len = pglz_compress(source, orig_len, dest, PGLZ_strategy_default);
 			break;
 
 		case WAL_COMPRESSION_LZ4:
 #ifdef USE_LZ4
-			len = LZ4_compress_default(source, dest, orig_len,
-									   COMPRESS_BUFSIZE);
+			{
+				/* Validate LZ4 compression level range */
+				if (wal_compression_level < LZ4_MIN_LEVEL || wal_compression_level > LZ4_MAX_LEVEL)
+				{
+					elog(ERROR, "Invalid LZ4 compression level %d, must be between %d and %d", 
+						 wal_compression_level, LZ4_MIN_LEVEL, LZ4_MAX_LEVEL);
+				}
+				
+				if (wal_compression_level <= 9)
+				{
+					/* 
+					 * Use standard LZ4 for levels 1-9. 
+					 * Note: LZ4_compress_default() ignores the level parameter,
+					 * so all levels 1-9 produce the same result but we accept
+					 * them for user convenience and future compatibility.
+					 */
+					len = LZ4_compress_default(source, dest, orig_len,
+											   COMPRESS_BUFSIZE);
+				}
+				else
+				{
+					/* Use LZ4HC for levels 10-12 for better compression */
+#ifdef HAVE_LZ4HC_H
+					len = LZ4_compress_HC(source, dest, orig_len,
+										  COMPRESS_BUFSIZE, wal_compression_level);
+#else
+					/* 
+					 * This should not happen since we validate LZ4HC availability
+					 * at SET time in check_wal_compression(). If we reach here,
+					 * it means there's a bug in the validation logic.
+					 */
+					elog(ERROR, "LZ4HC compression level %d requested but LZ4HC is not available", 
+						 wal_compression_level);
+#endif
+				}
+			}
 			if (len <= 0)
 				len = -1;		/* failure */
 #else
@@ -987,19 +1047,28 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 
 		case WAL_COMPRESSION_ZSTD:
 #ifdef USE_ZSTD
-			len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len,
-								ZSTD_CLEVEL_DEFAULT);
-			if (ZSTD_isError(len))
-				len = -1;		/* failure */
+			{
+				/* Validate ZSTD compression level range */
+				if (wal_compression_level < ZSTD_MIN_LEVEL || wal_compression_level > ZSTD_MAX_LEVEL)
+				{
+					elog(ERROR, "Invalid ZSTD compression level %d, must be between %d and %d", 
+						 wal_compression_level, ZSTD_MIN_LEVEL, ZSTD_MAX_LEVEL);
+				}
+
+				len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len, wal_compression_level);
+				if (ZSTD_isError(len))
+					len = -1;		/* failure */
+			}
 #else
 			elog(ERROR, "zstd is not supported by this build");
 #endif
 			break;
 
 		case WAL_COMPRESSION_NONE:
-			Assert(false);		/* cannot happen */
+			elog(ERROR, "WAL_COMPRESSION_NONE should not reach compression function");
 			break;
 			/* no default case, so that compiler will warn */
+	}
 	}
 
 	/*
@@ -1011,8 +1080,15 @@ XLogCompressBackupBlock(const PageData *page, uint16 hole_offset, uint16 hole_le
 		len + extra_bytes < orig_len)
 	{
 		*dlen = (uint16) len;	/* successful compression */
+		elog(DEBUG2, "WAL compression successful: %s, orig=%d, compressed=%d+%d=%d (%.1f%%)",
+			 wal_compression, orig_len, len, extra_bytes, len + extra_bytes,
+			 100.0 * (orig_len - (len + extra_bytes)) / orig_len);
 		return true;
 	}
+
+	elog(DEBUG3, "WAL compression failed: %s, orig=%d, compressed=%d+%d=%d",
+		 wal_compression, orig_len, len >= 0 ? len : 0, extra_bytes,
+		 len >= 0 ? len + extra_bytes : 0);
 	return false;
 }
 

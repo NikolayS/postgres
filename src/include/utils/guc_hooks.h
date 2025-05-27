@@ -168,9 +168,12 @@ extern bool check_transaction_read_only(bool *newval, void **extra, GucSource so
 extern void assign_transaction_timeout(int newval, void *extra);
 extern const char *show_unix_socket_permissions(void);
 extern bool check_wal_buffers(int *newval, void **extra, GucSource source);
+extern bool check_wal_compression(char **newval, void **extra, GucSource source);
+extern void assign_wal_compression(const char *newval, void *extra);
 extern bool check_wal_consistency_checking(char **newval, void **extra,
-										   GucSource source);
+										 GucSource source);
 extern void assign_wal_consistency_checking(const char *newval, void *extra);
+
 extern bool check_wal_segment_size(int *newval, void **extra, GucSource source);
 extern void assign_wal_sync_method(int new_wal_sync_method, void *extra);
 extern bool check_synchronized_standby_slots(char **newval, void **extra,

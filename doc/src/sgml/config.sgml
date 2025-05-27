@@ -3387,7 +3387,7 @@ include_dir 'conf.d'
      </varlistentry>
 
      <varlistentry id="guc-wal-compression" xreflabel="wal_compression">
-      <term><varname>wal_compression</varname> (<type>enum</type>)
+      <term><varname>wal_compression</varname> (<type>string</type>)
       <indexterm>
        <primary><varname>wal_compression</varname> configuration parameter</primary>
       </indexterm>
@@ -3395,19 +3395,51 @@ include_dir 'conf.d'
       <listitem>
        <para>
         This parameter enables compression of WAL using the specified
-        compression method.
+        compression method and optional compression level.
         When enabled, the <productname>PostgreSQL</productname>
         server compresses full page images written to WAL when
         <xref linkend="guc-full-page-writes"/> is on or during a base backup.
         A compressed page image will be decompressed during WAL replay.
-        The supported methods are <literal>pglz</literal>,
-        <literal>lz4</literal> (if <productname>PostgreSQL</productname>
-        was compiled with <option>--with-lz4</option>) and
-        <literal>zstd</literal> (if <productname>PostgreSQL</productname>
-        was compiled with <option>--with-zstd</option>).
-        The default value is <literal>off</literal>.
+       </para>
+
+       <para>
+        The parameter accepts values in the format <literal>method</literal> or
+        <literal>method:level</literal>. Supported values include:
+        <itemizedlist>
+         <listitem>
+          <para><literal>off</literal> — no compression (default)</para>
+         </listitem>
+         <listitem>
+          <para><literal>pglz</literal> — use PGLZ compression (no levels supported)</para>
+         </listitem>
+         <listitem>
+          <para><literal>lz4</literal> or <literal>lz4:level</literal> — use LZ4 compression
+          (if <productname>PostgreSQL</productname> was compiled with <option>--with-lz4</option>).
+          Valid levels are 1-12. When no level is specified, <literal>lz4</literal> defaults to level 1.
+          Levels 1-9 use standard LZ4, while levels 10-12 use LZ4HC for better compression at higher CPU cost.
+          <emphasis>Important:</emphasis> If built without LZ4HC support, compression 
+          levels 10-12 are rejected at configuration time with a clear error message. 
+          To use these levels, PostgreSQL must be compiled with LZ4HC headers available.</para>
+         </listitem>
+         <listitem>
+          <para><literal>zstd</literal> or <literal>zstd:level</literal> — use ZSTD compression
+          (if <productname>PostgreSQL</productname> was compiled with <option>--with-zstd</option>).
+          Valid levels are 1-22. When no level is specified, <literal>zstd</literal> defaults to level 3.</para>
+         </listitem>
+        </itemizedlist>
+       </para>
+
+       <para>
+        Examples: <literal>'off'</literal>, <literal>'pglz'</literal>, 
+        <literal>'lz4'</literal>, <literal>'lz4:9'</literal>, 
+        <literal>'zstd'</literal>, <literal>'zstd:15'</literal>.
         Only superusers and users with the appropriate <literal>SET</literal>
         privilege can change this setting.
+       </para>
+
+       <para>
+        Values like <literal>'0'</literal>, <literal>'false'</literal>, and <literal>'no'</literal> 
+        are recognized as aliases for <literal>'off'</literal> to preserve backward compatibility.
        </para>
 
        <para>
@@ -3415,9 +3447,47 @@ include_dir 'conf.d'
         increasing the risk of unrecoverable data corruption,
         but at the cost of some extra CPU spent on the compression during
         WAL logging and on the decompression during WAL replay.
+        Higher compression levels generally provide better compression
+        at the cost of increased CPU usage.
+       </para>
+
+       <para>
+        Different compression levels provide varying trade-offs between compression
+        ratio and CPU usage. For <literal>zstd</literal>, higher levels can achieve
+        substantially better compression ratios, though with increased CPU overhead.
+        For <literal>lz4</literal>, levels 10-12 use the high-compression LZ4HC algorithm
+        and provide better compression than levels 1-9 (standard LZ4) at the cost of
+        higher CPU usage during compression. The optimal level depends on
+        your workload characteristics and the balance between I/O reduction
+        and CPU overhead in your environment.
+       </para>
+
+       <para>
+        <emphasis>Performance Guidelines:</emphasis> For I/O-bound systems with
+        spare CPU capacity, higher compression levels (e.g., <literal>zstd:9</literal>
+        or <literal>lz4:12</literal> if LZ4HC is available) can significantly reduce 
+        WAL volume and improve overall throughput. For CPU-bound systems, lower levels
+        (e.g., <literal>lz4:1</literal> or <literal>zstd:3</literal>) provide
+        good compression with minimal CPU overhead. In high-transaction environments,
+        <literal>lz4</literal> typically offers the best balance of compression
+        speed and CPU efficiency, while <literal>zstd</literal> excels when
+        maximum compression is needed and CPU resources are available.
+       </para>
+
+       <para>
+        Higher compression levels increase CPU usage both during WAL generation
+        on the primary server and during WAL replay on standby servers. On
+        standby servers, decompression occurs in the single-threaded WAL replay
+        process, which can become a bottleneck if very high compression levels
+        are used. This is particularly important to consider in streaming
+        replication setups where standby lag could increase due to slower
+        WAL replay. Monitor standby lag when using higher compression levels
+        to ensure acceptable replication performance. Consider using lower
+        compression levels if standby lag becomes problematic.
        </para>
       </listitem>
      </varlistentry>
+
 
      <varlistentry id="guc-wal-init-zero" xreflabel="wal_init_zero">
       <term><varname>wal_init_zero</varname> (<type>boolean</type>)

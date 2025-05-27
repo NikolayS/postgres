@@ -121,9 +121,21 @@ char	   *XLogArchiveCommand = NULL;
 bool		EnableHotStandby = false;
 bool		fullPageWrites = true;
 bool		wal_log_hints = false;
-int			wal_compression = WAL_COMPRESSION_NONE;
+char	   *wal_compression = NULL;
 char	   *wal_consistency_checking_string = NULL;
 bool	   *wal_consistency_checking = NULL;
+
+/* 
+ * Parsed values from wal_compression string - updated by assign_wal_compression()
+ * 
+ * Thread safety: These variables are written only during GUC assignment, which
+ * is serialized by PostgreSQL's GUC mechanism. They are read during WAL insertion
+ * via GetWalCompressionMethod(). Since GUC changes are rare and atomic pointer
+ * reads/writes are guaranteed on all supported platforms, no additional locking
+ * is required.
+ */
+static WalCompression wal_compression_method = WAL_COMPRESSION_NONE;
+static int wal_compression_level = WAL_COMPRESSION_LEVEL_NONE;
 bool		wal_init_zero = true;
 bool		wal_recycle = true;
 bool		log_checkpoints = true;
@@ -596,8 +608,8 @@ static ControlFileData *ControlFile = NULL;
 		(((idx) == XLogCtl->XLogCacheBlck) ? 0 : ((idx) + 1))
 
 /*
- * XLogRecPtrToBufIdx returns the index of the WAL buffer that holds, or
- * would hold if it was in cache, the page containing 'recptr'.
+ * XLogRecPtrToBufIdx returns the index of the WAL buffer that holds,
+ * or would hold if it was in cache, the page containing 'recptr'.
  */
 #define XLogRecPtrToBufIdx(recptr)	\
 	(((recptr) / XLOG_BLCKSZ) % (XLogCtl->XLogCacheBlck + 1))
@@ -2364,6 +2376,8 @@ check_max_slot_wal_keep_size(int *newval, void **extra, GucSource source)
 
 	return true;
 }
+
+
 
 /*
  * At a checkpoint, how many WAL segments to recycle as preallocated future
@@ -4982,6 +4996,254 @@ InitializeWalConsistencyChecking(void)
 		/* checking should not be deferred again */
 		Assert(!check_wal_consistency_checking_deferred);
 	}
+}
+
+/*
+ * Helper function to parse compression level from colon-separated format
+ * Returns true if level was successfully parsed, false on error
+ */
+static bool
+ParseCompressionLevel(const char *level_str, int *level)
+{
+	if (strlen(level_str) == 0)
+		return false;
+	
+	*level = atoi(level_str);
+	
+	/* Ensure level_str represents a numeric level explicitly (reject non-numeric inputs) */
+	if (*level == 0 && strcmp(level_str, "0") != 0)
+		return false;
+	
+	return true;
+}
+
+/*
+ * Helper function to determine compression method from method string
+ * Sets method and default level if no level was specified
+ */
+static bool
+ParseCompressionMethod(const char *method_str, bool level_specified, 
+					   WalCompression *method, int *level)
+{
+	if (strcmp(method_str, "pglz") == 0)
+	{
+		*method = WAL_COMPRESSION_PGLZ;
+		if (!level_specified)
+			*level = WAL_COMPRESSION_LEVEL_NONE;
+		return true;
+	}
+	else if (strcmp(method_str, "lz4") == 0)
+	{
+		*method = WAL_COMPRESSION_LZ4;
+		if (!level_specified)
+			*level = LZ4_DEFAULT_COMPRESSION_LEVEL;
+		return true;
+	}
+	else if (strcmp(method_str, "zstd") == 0)
+	{
+		*method = WAL_COMPRESSION_ZSTD;
+		if (!level_specified)
+			*level = ZSTD_DEFAULT_COMPRESSION_LEVEL;
+		return true;
+	}
+	else if (strcmp(method_str, "on") == 0 || strcmp(method_str, "true") == 0 || 
+			 strcmp(method_str, "yes") == 0 || strcmp(method_str, "1") == 0)
+	{
+		*method = WAL_COMPRESSION_PGLZ;
+		*level = WAL_COMPRESSION_LEVEL_NONE;
+		return true;
+	}
+	else if (strcmp(method_str, "off") == 0 || strcmp(method_str, "false") == 0 || 
+			 strcmp(method_str, "no") == 0 || strcmp(method_str, "0") == 0)
+	{
+		*method = WAL_COMPRESSION_NONE;
+		*level = WAL_COMPRESSION_LEVEL_NONE;
+		return true;
+	}
+	
+	/* Unrecognized method */
+	return false;
+}
+
+/*
+ * Parse wal_compression string into method and level components
+ *
+ * Supports formats like:
+ *   "off" -> WAL_COMPRESSION_NONE, level WAL_COMPRESSION_LEVEL_NONE
+ *   "pglz" -> WAL_COMPRESSION_PGLZ, level WAL_COMPRESSION_LEVEL_NONE
+ *   "lz4" -> WAL_COMPRESSION_LZ4, level 1
+ *   "lz4:9" -> WAL_COMPRESSION_LZ4, level 9
+ *   "zstd" -> WAL_COMPRESSION_ZSTD, level 3
+ *   "zstd:15" -> WAL_COMPRESSION_ZSTD, level 15
+ *
+ * Returns true if parsing was successful, false if invalid format
+ */
+bool
+ParseWalCompression(const char *compression_str, WalCompression *method, int *level)
+{
+	char	   *str_copy;
+	char	   *colon_pos;
+	bool		level_specified = false;
+	bool		method_valid;
+	
+	/* Set defaults */
+	*method = WAL_COMPRESSION_NONE;
+	*level = WAL_COMPRESSION_LEVEL_NONE;
+	
+	/* Handle "off" and equivalent values */
+	if (!compression_str || strcmp(compression_str, "off") == 0 || 
+		strcmp(compression_str, "false") == 0 || strcmp(compression_str, "no") == 0 ||
+		strcmp(compression_str, "0") == 0)
+	{
+		return true;
+	}
+	
+	/* Look for colon separator */
+	colon_pos = strchr(compression_str, ':');
+	if (colon_pos)
+	{
+		/* Check for malformed syntax like "method:" or ":level" */
+		if (colon_pos == compression_str)
+			return false; /* Starts with colon */
+		if (*(colon_pos + 1) == '\0')
+			return false; /* Ends with colon */
+			
+		/* Extract method name and parse level */
+		size_t method_len = colon_pos - compression_str;
+		str_copy = palloc(method_len + 1);
+		memcpy(str_copy, compression_str, method_len);
+		str_copy[method_len] = '\0';
+		
+		level_specified = true;
+		if (!ParseCompressionLevel(colon_pos + 1, level))
+		{
+			pfree(str_copy);
+			return false; /* Invalid level format */
+		}
+	}
+	else
+	{
+		/* No colon, duplicate the string for consistent memory management */
+		str_copy = pstrdup(compression_str);
+	}
+	
+	/* Parse method and set defaults */
+	method_valid = ParseCompressionMethod(str_copy, level_specified, method, level);
+	
+	/* Clean up allocated memory */
+	pfree(str_copy);
+		
+	return method_valid;
+}
+
+/*
+ * GUC check_hook for wal_compression
+ */
+bool
+check_wal_compression(char **newval, void **extra, GucSource source)
+{
+	WalCompression method;
+	int level;
+	
+	/* Parse the compression string */
+	if (!ParseWalCompression(*newval, &method, &level))
+	{
+		GUC_check_errdetail("Unrecognized compression method: \"%s\".", *newval);
+		return false;
+	}
+	
+	/* Validate the method is supported */
+	switch (method)
+	{
+		case WAL_COMPRESSION_NONE:
+		case WAL_COMPRESSION_PGLZ:
+			/* Always supported */
+			break;
+			
+		case WAL_COMPRESSION_LZ4:
+#ifndef USE_LZ4
+			GUC_check_errdetail("LZ4 compression is not supported by this build.");
+			return false;
+#endif
+			/* Validate level range for LZ4 */
+			if (level < LZ4_MIN_LEVEL || level > LZ4_MAX_LEVEL)
+			{
+				GUC_check_errdetail("LZ4 compression level must be between %d and %d.", 
+									LZ4_MIN_LEVEL, LZ4_MAX_LEVEL);
+				return false;
+			}
+			/* Check LZ4HC availability for levels 10-12 */
+#ifndef HAVE_LZ4HC_H
+			if (level >= LZ4HC_MIN_LEVEL)
+			{
+				GUC_check_errdetail("LZ4HC (required for compression levels %d-%d) is not available in this PostgreSQL build.", 
+									LZ4HC_MIN_LEVEL, LZ4_MAX_LEVEL);
+				GUC_check_errhint("Please rebuild PostgreSQL with LZ4HC support or select compression levels between %d and %d.", 
+								   LZ4_MIN_LEVEL, LZ4HC_MIN_LEVEL - 1);
+				return false;
+			}
+#endif
+			break;
+			
+		case WAL_COMPRESSION_ZSTD:
+#ifndef USE_ZSTD
+			GUC_check_errdetail("ZSTD compression is not supported by this build.");
+			return false;
+#endif
+			/* Validate level range for ZSTD */
+			if (level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL)
+			{
+				GUC_check_errdetail("ZSTD compression level must be between %d and %d.", 
+									ZSTD_MIN_LEVEL, ZSTD_MAX_LEVEL);
+				return false;
+			}
+			break;
+			
+		default:
+			GUC_check_errdetail("Unrecognized compression method: \"%s\".", *newval);
+			return false;
+	}
+	
+	/* Methods that don't support levels should have level set to WAL_COMPRESSION_LEVEL_NONE */
+	if ((method == WAL_COMPRESSION_PGLZ || method == WAL_COMPRESSION_NONE) && 
+		level != WAL_COMPRESSION_LEVEL_NONE)
+	{
+		GUC_check_errdetail("Compression method \"%s\" does not support compression levels.", 
+							method == WAL_COMPRESSION_PGLZ ? "pglz" : "off");
+		return false;
+	}
+	
+	return true;
+}
+
+/*
+ * GUC assign_hook for wal_compression
+ */
+void
+assign_wal_compression(const char *newval, void *extra)
+{
+	/* 
+	 * Parse and store the compression method and level for fast access
+	 * during compression operations. This avoids parsing on every compression.
+	 */
+	if (newval)
+		ParseWalCompression(newval, &wal_compression_method, &wal_compression_level);
+	else
+	{
+		wal_compression_method = WAL_COMPRESSION_NONE;
+		wal_compression_level = WAL_COMPRESSION_LEVEL_NONE;
+	}
+}
+
+/*
+ * Get the parsed WAL compression method and level.
+ * This is used by xloginsert.c to avoid parsing on every compression.
+ */
+void
+GetWalCompressionMethod(WalCompression *method, int *level)
+{
+	*method = wal_compression_method;
+	*level = wal_compression_level;
 }
 
 /*
