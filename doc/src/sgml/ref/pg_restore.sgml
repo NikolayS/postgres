@@ -1298,17 +1298,12 @@ CREATE DATABASE foo WITH TEMPLATE template0;
   <itemizedlist>
    <listitem>
     <para>
-     <filename>successful_objects.txt</filename> - List of successfully restored objects
-    </para>
-   </listitem>
-   <listitem>
-    <para>
      <filename>successful_objects.list</filename> - Successfully restored objects in pg_restore -l format
     </para>
    </listitem>
    <listitem>
     <para>
-     <filename>failed_objects.txt</filename> - Detailed information about failed objects (if any)
+     <filename>failed_objects.list</filename> - Failed objects in pg_restore -l format with failure details
     </para>
    </listitem>
    <listitem>

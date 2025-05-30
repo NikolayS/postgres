@@ -120,8 +120,8 @@ like($conflict_stderr, qr/Successful objects list written to:/, 'successful obje
 like($conflict_stderr, qr/Failed objects list written to:/, 'failed objects file message found');
 
 # Check files exist
-ok(-f 'successful_objects.txt', 'successful_objects.txt file created') if -f 'successful_objects.txt';
-ok(-f 'failed_objects.txt', 'failed_objects.txt file created') if -f 'failed_objects.txt';
+ok(-f 'successful_objects.list', 'successful_objects.list file created') if -f 'successful_objects.list';
+ok(-f 'failed_objects.list', 'failed_objects.list file created') if -f 'failed_objects.list';
 ok(-f 'retry_objects.sql', 'retry_objects.sql file created') if -f 'retry_objects.sql';
 
 # Test 5: Test that normal functionality still works
@@ -139,9 +139,8 @@ my $sql_content = slurp_file($normal_output);
 like($sql_content, qr/CREATE TABLE.*users/, 'generated SQL contains expected content');
 
 # Cleanup generated files
-unlink('successful_objects.txt') if -f 'successful_objects.txt';
 unlink('successful_objects.list') if -f 'successful_objects.list';
-unlink('failed_objects.txt') if -f 'failed_objects.txt';
+unlink('failed_objects.list') if -f 'failed_objects.list';
 unlink('retry_objects.sql') if -f 'retry_objects.sql';
 
 $node->stop;

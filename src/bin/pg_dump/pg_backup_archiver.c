@@ -5435,57 +5435,62 @@ write_object_lists_to_files(ArchiveHandle *AH)
 	/* Write successful objects list */
 	if (AH->n_successful > 0)
 	{
-		fp = fopen("successful_objects.txt", "w");
+		fp = fopen("successful_objects.list", "w");
 		if (fp != NULL)
 		{
-			fprintf(fp, "# pg_restore successful objects list\n");
-			fprintf(fp, "# Generated: %s\n", timestamp);
-			fprintf(fp, "# Total successful objects: %d\n\n", AH->n_successful);
+			fprintf(fp, ";\n");
+			fprintf(fp, "; pg_restore successful objects list\n");
+			fprintf(fp, "; Generated: %s\n", timestamp);
+			fprintf(fp, "; Total successful objects: %d\n", AH->n_successful);
+			fprintf(fp, ";\n");
 
 			for (i = 0; i < AH->n_successful; i++)
 			{
 				TocEntry   *te = AH->successful_objects[i];
 
-				if (te->namespace)
-					fprintf(fp, "%s \"%s.%s\"\n", te->desc, te->namespace, te->tag);
-				else
-					fprintf(fp, "%s \"%s\"\n", te->desc, te->tag);
+				/* Format as pg_restore -l compatible entry */
+				fprintf(fp, "%d; %u %u %s %s %s\n",
+						te->dumpId, te->catalogId.tableoid, te->catalogId.oid,
+						te->desc, te->namespace ? te->namespace : "-", te->tag);
 			}
 			fclose(fp);
-			pg_log_info("Successful objects list written to: successful_objects.txt");
+			pg_log_info("Successful objects list written to: successful_objects.list");
 		}
 		else
 		{
-			pg_log_warning("Could not create successful_objects.txt");
+			pg_log_warning("Could not create successful_objects.list");
 		}
 	}
 
 	/* Write failed objects list with details */
 	if (AH->n_failed > 0)
 	{
-		fp = fopen("failed_objects.txt", "w");
+		fp = fopen("failed_objects.list", "w");
 		if (fp != NULL)
 		{
-			fprintf(fp, "# pg_restore failed objects list\n");
-			fprintf(fp, "# Generated: %s\n", timestamp);
-			fprintf(fp, "# Total failed objects: %d\n\n", AH->n_failed);
+			fprintf(fp, ";\n");
+			fprintf(fp, "; pg_restore failed objects list\n");
+			fprintf(fp, "; Generated: %s\n", timestamp);
+			fprintf(fp, "; Total failed objects: %d\n", AH->n_failed);
+			fprintf(fp, ";\n");
 
 			for (i = 0; i < AH->n_failed; i++)
 			{
 				TocEntry   *te = AH->failed_objects[i];
 				const char *reason = te->failure_reason ? te->failure_reason : "unknown error";
 
-				if (te->namespace)
-					fprintf(fp, "%s \"%s.%s\": %s\n", te->desc, te->namespace, te->tag, reason);
-				else
-					fprintf(fp, "%s \"%s\": %s\n", te->desc, te->tag, reason);
+				/* Format as pg_restore -l compatible entry with failure reason as comment */
+				fprintf(fp, "; FAILED: %s\n", reason);
+				fprintf(fp, "%d; %u %u %s %s %s\n",
+						te->dumpId, te->catalogId.tableoid, te->catalogId.oid,
+						te->desc, te->namespace ? te->namespace : "-", te->tag);
 			}
 			fclose(fp);
-			pg_log_info("Failed objects list written to: failed_objects.txt");
+			pg_log_info("Failed objects list written to: failed_objects.list");
 		}
 		else
 		{
-			pg_log_warning("Could not create failed_objects.txt");
+			pg_log_warning("Could not create failed_objects.list");
 		}
 
 		/* Write retry SQL script for failed objects */
