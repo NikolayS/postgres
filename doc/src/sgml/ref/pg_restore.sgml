@@ -1312,5 +1312,13 @@ CREATE DATABASE foo WITH TEMPLATE template0;
    When failures occur, instructions are provided on how to retry only the failed objects using:
    <command>pg_restore -L failed_objects.list [other options] &lt;archive_file&gt;</command>
   </para>
+
+  <note>
+   <para>
+    The restoration summary and output files are only generated when restoring
+    directly to a database using the <option>-d</option> option. They are not
+    created when using <option>-f</option> to output to a file.
+   </para>
+  </note>
  </refsect1>
 </refentry>

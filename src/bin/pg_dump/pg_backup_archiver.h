@@ -347,6 +347,11 @@ struct _archiveHandle
 	struct _tocEntry **failed_objects;		/* array of failed objects */
 	int			n_failed;					/* count of failed objects */
 	int			max_failed;					/* allocated size of failed_objects array */
+
+	/* Object tracking options */
+	char	   *success_list_file;		/* path for successful objects list */
+	char	   *failed_list_file;		/* path for failed objects list */
+	bool		disable_object_tracking; /* disable object tracking entirely */
 };
 
 

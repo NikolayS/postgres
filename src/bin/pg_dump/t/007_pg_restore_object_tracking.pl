@@ -61,11 +61,11 @@ like($clean_stderr, qr/Restoration Summary:/, 'restoration summary header found'
 like($clean_stderr, qr/Successfully restored objects: \d+/, 'successful objects count found');
 like($clean_stderr, qr/Failed objects: 0/, 'no failed objects in clean restore');
 
-# Test 2: Create failure scenario using unique index corruption trick
+# Test 2: Create failure scenario using check constraint
 $node->safe_psql('postgres', 'CREATE DATABASE test_failures;');
 
-# Set up the unique index corruption scenario
-my $corruption_setup = q{
+# Set up the failure scenario using check constraint
+my $failure_setup = q{
     -- Create the same table structure
     CREATE TABLE users (
         id BIGSERIAL PRIMARY KEY,
@@ -76,27 +76,18 @@ my $corruption_setup = q{
     -- Create a named unique index
     CREATE UNIQUE INDEX users_email_unique ON users(email);
     
-    -- Insert conflicting data
+    -- Insert some data first
     INSERT INTO users (email, name) VALUES 
         ('user1@example.com', 'Conflicting User'),
         ('user2@example.com', 'Another Conflict');
     
-    -- Now corrupt the unique index to allow duplicates temporarily
-    -- This simulates a corrupted index scenario
-    UPDATE pg_index SET indisunique = false 
-    WHERE indexrelid = 'users_email_unique'::regclass;
-    
-    -- Insert more duplicates while index is "corrupted"
-    INSERT INTO users (email, name) VALUES 
-        ('user1@example.com', 'Third Duplicate'),
-        ('user3@example.com', 'Will Conflict Later');
-    
-    -- Restore the unique constraint (this will cause issues during restore)
-    UPDATE pg_index SET indisunique = true 
-    WHERE indexrelid = 'users_email_unique'::regclass;
+    -- Add a check constraint that will cause failures during restore
+    -- This will prevent the original data from being inserted
+    ALTER TABLE users ADD CONSTRAINT email_check 
+        CHECK (email NOT IN ('user1@example.com', 'user3@example.com'));
 };
 
-$node->safe_psql('test_failures', $corruption_setup);
+$node->safe_psql('test_failures', $failure_setup);
 
 # Test 3: Attempt restoration with conflicts (should have failures)
 my @restore_conflict_cmd = (
