@@ -2,23 +2,6 @@
 
 # Copyright (c) 2025, PostgreSQL Global Development Group
 
-=pod
-
-=head1 NAME
-
-007_pg_restore_object_tracking.pl - test pg_restore object tracking enhancement
-
-=head1 SYNOPSIS
-
-  prove src/bin/pg_dump/t/007_pg_restore_object_tracking.pl
-
-=head1 DESCRIPTION
-
-Test the enhanced pg_restore object tracking functionality that provides
-detailed information about successful and failed object restorations.
-
-=cut
-
 use strict;
 use warnings FATAL => 'all';
 
