@@ -75,6 +75,7 @@ static uint32 minXlogTli = 0;
 static XLogSegNo minXlogSegNo = 0;
 static int	WalSegSz;
 static int	set_wal_segsize;
+static uint64 set_sysid = 0;
 
 static void CheckDataVersion(void);
 static bool read_controlfile(void);
@@ -102,6 +103,7 @@ main(int argc, char *argv[])
 		{"dry-run", no_argument, NULL, 'n'},
 		{"next-oid", required_argument, NULL, 'o'},
 		{"multixact-offset", required_argument, NULL, 'O'},
+		{"system-identifier", required_argument, NULL, 's'},
 		{"oldest-transaction-id", required_argument, NULL, 'u'},
 		{"next-transaction-id", required_argument, NULL, 'x'},
 		{"wal-segsize", required_argument, NULL, 1},
@@ -137,7 +139,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt_long(argc, argv, "c:D:e:fl:m:no:O:u:x:", long_options, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "c:D:e:fl:m:no:O:s:u:x:", long_options, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -287,6 +289,32 @@ main(int argc, char *argv[])
 				 * set. Hence wal details are set later on.
 				 */
 				log_fname = pg_strdup(optarg);
+				break;
+
+			case 's':
+				errno = 0;
+				if (optarg[0] == '-')
+				{
+					pg_log_error("invalid argument for option %s", "-s");
+					pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+					exit(1);
+				}
+				set_sysid = strtou64(optarg, &endptr, 0);
+				if (endptr == optarg || *endptr != '\0' || errno == ERANGE)
+				{
+					if (errno == ERANGE)
+						pg_log_error("system identifier value is out of range");
+					else
+						pg_log_error("invalid argument for option %s", "-s");
+					pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+					exit(1);
+				}
+				if (set_sysid == 0)
+				{
+					pg_log_error("system identifier must be greater than 0");
+					pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+					exit(1);
+				}
 				break;
 
 			case 1:
@@ -454,6 +482,43 @@ main(int argc, char *argv[])
 
 	if (minXlogSegNo > newXlogSegNo)
 		newXlogSegNo = minXlogSegNo;
+
+	if (set_sysid != 0)
+	{
+		/* Safety check: prompt for confirmation when changing system identifier unless force flag is used */
+		if (!force)
+		{
+			char response[10];
+			
+			if (!isatty(fileno(stdin)))
+			{
+				pg_log_error("standard input is not a TTY and --force was not specified");
+				pg_log_error_hint("Cannot prompt for system identifier change confirmation in non-interactive mode. Use --force to proceed.");
+				exit(1);
+			}
+			
+			printf(_("WARNING: Changing the system identifier will make this cluster incompatible with existing backups and standby servers.\n"));
+			printf(_("Current system identifier: " UINT64_FORMAT "\n"), ControlFile.system_identifier);
+			printf(_("New system identifier: " UINT64_FORMAT "\n"), set_sysid);
+			printf(_("Continue? (y/n) "));
+			fflush(stdout);
+			
+			if (fgets(response, sizeof(response), stdin) == NULL ||
+				(response[0] != 'y' && response[0] != 'Y'))
+			{
+				printf(_("System identifier change cancelled.\n"));
+				exit(1);
+			}
+		}
+		
+		if (!noupdate)
+		{
+			printf(_("Changing system identifier from " UINT64_FORMAT " to " UINT64_FORMAT "\n"),
+				   ControlFile.system_identifier, set_sysid);
+		}
+		
+		ControlFile.system_identifier = set_sysid;
+	}
 
 	/*
 	 * If we had to guess anything, and -f was not given, just print the
@@ -1145,6 +1210,7 @@ usage(void)
 	printf(_("  -n, --dry-run                    no update, just show what would be done\n"));
 	printf(_("  -o, --next-oid=OID               set next OID\n"));
 	printf(_("  -O, --multixact-offset=OFFSET    set next multitransaction offset\n"));
+	printf(_("  -s, --system-identifier=SYSID    set system identifier (requires confirmation or --force)\n"));
 	printf(_("  -u, --oldest-transaction-id=XID  set oldest transaction ID\n"));
 	printf(_("  -V, --version                    output version information, then exit\n"));
 	printf(_("  -x, --next-transaction-id=XID    set next transaction ID\n"));
