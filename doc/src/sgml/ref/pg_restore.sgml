@@ -1274,4 +1274,48 @@ CREATE DATABASE foo WITH TEMPLATE template0;
    <member><xref linkend="app-psql"/></member>
   </simplelist>
  </refsect1>
+
+ <refsect1>
+  <title>Restoration Summary</title>
+
+  <para>
+   <application>pg_restore</application> will exit with status 0 if all
+   objects were restored successfully, 1 if some objects could not be
+   restored (e.g., because the command was used with
+   <option>--if-exists</option> and the object did not exist), and 2 if
+   a fatal error occurred.
+  </para>
+
+  <para>
+   When restoring to a database (using <option>-d</option>), 
+   <application>pg_restore</application> displays a restoration summary
+   at the end showing the count of successfully restored objects and
+   any failed objects. For failed objects, detailed error information
+   is provided including dependency relationships. Additionally, the
+   following files are generated in the current directory:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <filename>successful_objects.txt</filename> - List of successfully restored objects
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>successful_objects.list</filename> - Successfully restored objects in pg_restore -l format
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>failed_objects.txt</filename> - Detailed information about failed objects (if any)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>retry_objects.sql</filename> - SQL script for retrying failed objects (if any)
+    </para>
+   </listitem>
+  </itemizedlist>
+ </refsect1>
 </refentry>
