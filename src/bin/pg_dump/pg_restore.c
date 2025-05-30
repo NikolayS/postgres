@@ -176,6 +176,11 @@ main(int argc, char **argv)
 		{"filter", required_argument, NULL, 4},
 		{"exclude-database", required_argument, NULL, 6},
 
+		/* Object tracking options */
+		{"success-list-file", required_argument, NULL, 7},
+		{"failed-list-file", required_argument, NULL, 8},
+		{"disable-object-tracking", no_argument, NULL, 9},
+
 		{NULL, 0, NULL, 0}
 	};
 
@@ -354,6 +359,18 @@ main(int argc, char **argv)
 				break;
 			case 6:				/* database patterns to skip */
 				simple_string_list_append(&db_exclude_patterns, optarg);
+				break;
+
+			case 7:				/* success-list-file */
+				opts->success_list_file = pg_strdup(optarg);
+				break;
+
+			case 8:				/* failed-list-file */
+				opts->failed_list_file = pg_strdup(optarg);
+				break;
+
+			case 9:				/* disable-object-tracking */
+				opts->disable_object_tracking = true;
 				break;
 
 			default:
@@ -715,6 +732,11 @@ usage(const char *progname)
 	printf(_("  --with-data                  dump the data\n"));
 	printf(_("  --with-schema                dump the schema\n"));
 	printf(_("  --with-statistics            dump the statistics\n"));
+
+	printf(_("\nObject tracking options:\n"));
+	printf(_("  --success-list-file=FILENAME write successful objects to FILENAME\n"));
+	printf(_("  --failed-list-file=FILENAME  write failed objects to FILENAME\n"));
+	printf(_("  --disable-object-tracking    disable object success/failure tracking\n"));
 
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME      database server host or socket directory\n"));

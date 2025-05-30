@@ -159,6 +159,11 @@ typedef struct _restoreOptions
 	int			sequence_data;	/* dump sequence data even in schema-only mode */
 	int			binary_upgrade;
 
+	/* Object tracking options */
+	char	   *success_list_file;	/* path for successful objects list */
+	char	   *failed_list_file;	/* path for failed objects list */
+	bool		disable_object_tracking; /* disable object tracking */
+
 	/* flags derived from the user-settable flags */
 	bool		dumpSchema;
 	bool		dumpData;

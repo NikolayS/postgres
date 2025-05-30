@@ -898,7 +898,17 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 		/* Track schema restoration status */
 		if (AH->lastErrorTE == te)
 		{
-			record_object_failure(AH, te, true, "Schema creation failed");
+			const char *actual_error = NULL;
+			
+			/* Try to get the actual PostgreSQL error message */
+			if (AH->connection)
+				actual_error = PQerrorMessage(AH->connection);
+			
+			/* Use actual error if available, otherwise fall back to generic message */
+			if (actual_error && strlen(actual_error) > 0)
+				record_object_failure(AH, te, true, actual_error);
+			else
+				record_object_failure(AH, te, true, "Schema creation failed");
 		}
 		else
 		{
@@ -976,7 +986,17 @@ restore_toc_entry(ArchiveHandle *AH, TocEntry *te, bool is_parallel)
 				/* Track data restoration status */
 				if (AH->lastErrorTE == te)
 				{
-					record_object_failure(AH, te, false, "Data restoration failed");
+					const char *actual_error = NULL;
+					
+					/* Try to get the actual PostgreSQL error message */
+					if (AH->connection)
+						actual_error = PQerrorMessage(AH->connection);
+					
+					/* Use actual error if available, otherwise fall back to generic message */
+					if (actual_error && strlen(actual_error) > 0)
+						record_object_failure(AH, te, false, actual_error);
+					else
+						record_object_failure(AH, te, false, "Data restoration failed");
 				}
 				else
 				{
@@ -1156,6 +1176,11 @@ NewRestoreOptions(void)
 	opts->dumpSchema = true;
 	opts->dumpData = true;
 	opts->dumpStatistics = true;
+
+	/* Initialize object tracking options */
+	opts->success_list_file = NULL;
+	opts->failed_list_file = NULL;
+	opts->disable_object_tracking = false;
 
 	return opts;
 }
@@ -5308,6 +5333,8 @@ DeCloneArchive(ArchiveHandle *AH)
 void
 init_object_tracking(ArchiveHandle *AH)
 {
+	RestoreOptions *ropt = AH->public.ropt;
+
 	AH->successful_objects = NULL;
 	AH->n_successful = 0;
 	AH->max_successful = 0;
@@ -5315,6 +5342,20 @@ init_object_tracking(ArchiveHandle *AH)
 	AH->n_failed = 0;
 	AH->max_failed = 0;
 	AH->is_main_process = true;  /* Initially true, set to false in worker processes */
+
+	/* Copy object tracking options from RestoreOptions */
+	if (ropt)
+	{
+		AH->success_list_file = ropt->success_list_file;
+		AH->failed_list_file = ropt->failed_list_file;
+		AH->disable_object_tracking = ropt->disable_object_tracking;
+	}
+	else
+	{
+		AH->success_list_file = NULL;
+		AH->failed_list_file = NULL;
+		AH->disable_object_tracking = false;
+	}
 }
 
 /*
@@ -5331,8 +5372,16 @@ init_object_tracking(ArchiveHandle *AH)
 void
 record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 {
+	/* Defensive programming: check for NULL pointers */
+	if (!AH || !te)
+		return;
+
 	/* Only track objects in the main process to avoid race conditions */
 	if (!AH->is_main_process)
+		return;
+
+	/* Check if object tracking is disabled */
+	if (AH->disable_object_tracking)
 		return;
 
 	/* Update object status */
@@ -5343,6 +5392,7 @@ record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 	}
 	else
 	{
+		
 		te->data_attempted = true;
 		te->data_success = true;
 	}
@@ -5365,6 +5415,11 @@ record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 				return;
 		}
 
+		/*
+		 * TODO: This O(n) duplicate checking could be slow for large databases
+		 * with many objects. Consider using a hash table for better performance
+		 * in future versions.
+		 */
 		AH->successful_objects[AH->n_successful++] = te;
 	}
 }
@@ -5384,8 +5439,16 @@ record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 void
 record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const char *error_msg)
 {
+	/* Defensive programming: check for NULL pointers */
+	if (!AH || !te)
+		return;
+
 	/* Only track objects in the main process to avoid race conditions */
 	if (!AH->is_main_process)
+		return;
+
+	/* Check if object tracking is disabled */
+	if (AH->disable_object_tracking)
 		return;
 
 	/* Update object status */
@@ -5419,6 +5482,12 @@ record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const cha
 			return;
 	}
 
+	/*
+	 * TODO: This O(n) duplicate checking could be slow for large databases
+	 * with many objects. Consider using a hash table for better performance
+	 * in future versions.
+	 */
+
 	AH->failed_objects[AH->n_failed++] = te;
 }
 
@@ -5429,6 +5498,10 @@ void
 print_restoration_summary(ArchiveHandle *AH)
 {
 	int			i;
+
+	/* Skip if object tracking is disabled */
+	if (AH->disable_object_tracking)
+		return;
 
 	pg_log_info("Restoration Summary:");
 	pg_log_info("===================");
@@ -5503,15 +5576,28 @@ write_object_lists_to_files(ArchiveHandle *AH)
 	int			i;
 	time_t		now;
 	char		timestamp[64];
+	char		success_filename[MAXPGPATH];
+	char		failed_filename[MAXPGPATH];
 
 	/* Get current timestamp for file headers */
 	now = time(NULL);
 	strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S UTC", gmtime(&now));
 
+	/* Determine filenames - use provided names or generate with PID */
+	if (AH->success_list_file)
+		strlcpy(success_filename, AH->success_list_file, sizeof(success_filename));
+	else
+		snprintf(success_filename, sizeof(success_filename), "successful_objects_%ld.list", (long)getpid());
+
+	if (AH->failed_list_file)
+		strlcpy(failed_filename, AH->failed_list_file, sizeof(failed_filename));
+	else
+		snprintf(failed_filename, sizeof(failed_filename), "failed_objects_%ld.list", (long)getpid());
+
 	/* Write successful objects list */
 	if (AH->n_successful > 0)
 	{
-		fp = fopen("successful_objects.list", "w");
+		fp = fopen(success_filename, "w");
 		if (fp != NULL)
 		{
 			fprintf(fp, ";\n");
@@ -5530,18 +5616,18 @@ write_object_lists_to_files(ArchiveHandle *AH)
 						te->desc, te->namespace ? te->namespace : "-", te->tag);
 			}
 			fclose(fp);
-			pg_log_info("Successful objects list written to: successful_objects.list");
+			pg_log_info("Successful objects list written to: %s", success_filename);
 		}
 		else
 		{
-			pg_log_warning("Could not create successful_objects.list");
+			pg_log_warning("Could not create %s: %m", success_filename);
 		}
 	}
 
 	/* Write failed objects list with details */
 	if (AH->n_failed > 0)
 	{
-		fp = fopen("failed_objects.list", "w");
+		fp = fopen(failed_filename, "w");
 		if (fp != NULL)
 		{
 			fprintf(fp, ";\n");
@@ -5562,19 +5648,19 @@ write_object_lists_to_files(ArchiveHandle *AH)
 						te->desc, te->namespace ? te->namespace : "-", te->tag);
 			}
 			fclose(fp);
-			pg_log_info("Failed objects list written to: failed_objects.list");
+			pg_log_info("Failed objects list written to: %s", failed_filename);
 		}
 		else
 		{
-			pg_log_warning("Could not create failed_objects.list");
+			pg_log_warning("Could not create %s: %m", failed_filename);
 		}
 
 		/* Print instructions for retrying failed objects */
 		pg_log_info("");
 		pg_log_info("To retry only the failed objects, use:");
-		pg_log_info("  pg_restore -L failed_objects.list [other options] <archive_file>");
+		pg_log_info("  pg_restore -L %s [other options] <archive_file>", failed_filename);
 		pg_log_info("");
-		pg_log_info("You can edit failed_objects.list to select specific objects to retry.");
+		pg_log_info("You can edit %s to select specific objects to retry.", failed_filename);
 	}
 }
 
