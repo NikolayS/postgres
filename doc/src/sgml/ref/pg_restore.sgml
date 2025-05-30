@@ -1306,11 +1306,11 @@ CREATE DATABASE foo WITH TEMPLATE template0;
      <filename>failed_objects.list</filename> - Failed objects in pg_restore -l format with failure details
     </para>
    </listitem>
-   <listitem>
-    <para>
-     <filename>retry_objects.sql</filename> - SQL script for retrying failed objects (if any)
-    </para>
-   </listitem>
   </itemizedlist>
+  
+  <para>
+   When failures occur, instructions are provided on how to retry only the failed objects using:
+   <command>pg_restore -L failed_objects.list [other options] &lt;archive_file&gt;</command>
+  </para>
  </refsect1>
 </refentry>

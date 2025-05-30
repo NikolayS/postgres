@@ -122,7 +122,6 @@ like($conflict_stderr, qr/Failed objects list written to:/, 'failed objects file
 # Check files exist
 ok(-f 'successful_objects.list', 'successful_objects.list file created') if -f 'successful_objects.list';
 ok(-f 'failed_objects.list', 'failed_objects.list file created') if -f 'failed_objects.list';
-ok(-f 'retry_objects.sql', 'retry_objects.sql file created') if -f 'retry_objects.sql';
 
 # Test 5: Test that normal functionality still works
 my $normal_output = "$tempdir/normal_output.sql";
@@ -141,7 +140,6 @@ like($sql_content, qr/CREATE TABLE.*users/, 'generated SQL contains expected con
 # Cleanup generated files
 unlink('successful_objects.list') if -f 'successful_objects.list';
 unlink('failed_objects.list') if -f 'failed_objects.list';
-unlink('retry_objects.sql') if -f 'retry_objects.sql';
 
 $node->stop;
 

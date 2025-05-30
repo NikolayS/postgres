@@ -5493,47 +5493,12 @@ write_object_lists_to_files(ArchiveHandle *AH)
 			pg_log_warning("Could not create failed_objects.list");
 		}
 
-		/* Write retry SQL script for failed objects */
-		fp = fopen("retry_objects.sql", "w");
-		if (fp != NULL)
-		{
-			fprintf(fp, "-- pg_restore retry script for failed objects\n");
-			fprintf(fp, "-- Generated: %s\n", timestamp);
-			fprintf(fp, "-- Total failed objects: %d\n\n", AH->n_failed);
-			fprintf(fp, "-- NOTE: Review and modify this script before execution\n");
-			fprintf(fp, "-- Some objects may fail due to dependencies\n\n");
-
-			for (i = 0; i < AH->n_failed; i++)
-			{
-				TocEntry   *te = AH->failed_objects[i];
-
-				fprintf(fp, "-- Retry: %s", te->desc);
-				if (te->namespace)
-					fprintf(fp, " \"%s.%s\"", te->namespace, te->tag);
-				else
-					fprintf(fp, " \"%s\"", te->tag);
-				fprintf(fp, "\n");
-
-				if (te->failure_reason)
-					fprintf(fp, "-- Previous error: %s\n", te->failure_reason);
-
-				if (te->defn && strlen(te->defn) > 0)
-				{
-					fprintf(fp, "%s\n", te->defn);
-				}
-				else
-				{
-					fprintf(fp, "-- Definition not available for this object\n");
-				}
-				fprintf(fp, "\n");
-			}
-			fclose(fp);
-			pg_log_info("Retry script written to: retry_objects.sql");
-		}
-		else
-		{
-			pg_log_warning("Could not create retry_objects.sql");
-		}
+		/* Print instructions for retrying failed objects */
+		pg_log_info("");
+		pg_log_info("To retry only the failed objects, use:");
+		pg_log_info("  pg_restore -L failed_objects.list [other options] <archive_file>");
+		pg_log_info("");
+		pg_log_info("You can edit failed_objects.list to select specific objects to retry.");
 	}
 }
 
