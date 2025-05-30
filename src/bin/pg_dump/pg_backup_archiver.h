@@ -352,6 +352,7 @@ struct _archiveHandle
 	char	   *success_list_file;		/* path for successful objects list */
 	char	   *failed_list_file;		/* path for failed objects list */
 	bool		disable_object_tracking; /* disable object tracking entirely */
+	bool		is_main_process;		/* true only in main process for parallel safety */
 };
 
 

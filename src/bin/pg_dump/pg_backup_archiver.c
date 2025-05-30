@@ -4828,6 +4828,29 @@ mark_restore_job_done(ArchiveHandle *AH,
 	pg_log_info("finished item %d %s %s",
 				te->dumpId, te->desc, te->tag);
 
+	/*
+	 * Track object restoration status in main process based on worker results.
+	 * This is the primary mechanism for collecting success/failure information
+	 * from parallel worker processes. The record_object_* functions will
+	 * automatically skip tracking in worker processes via is_main_process check.
+	 */
+	if (status == WORKER_OK || status == WORKER_CREATE_DONE || status == WORKER_IGNORED_ERRORS)
+	{
+		/* Worker completed successfully (possibly with ignored errors) */
+		record_object_success(AH, te, true);  /* Schema success */
+		if (te->reqs & REQ_DATA)
+			record_object_success(AH, te, false);  /* Data success if data was requested */
+	}
+	else
+	{
+		/* Worker failed */
+		const char *error_msg = (status == WORKER_INHIBIT_DATA) ? 
+								"Table creation failed" : "Restoration failed";
+		record_object_failure(AH, te, true, error_msg);  /* Schema failure */
+		if (te->reqs & REQ_DATA)
+			record_object_failure(AH, te, false, error_msg);  /* Data failure if data was requested */
+	}
+
 	if (status == WORKER_CREATE_DONE)
 		mark_create_done(AH, te);
 	else if (status == WORKER_INHIBIT_DATA)
@@ -5213,6 +5236,19 @@ CloneArchive(ArchiveHandle *AH)
 		_doSetFixedOutputState(clone);
 	/* in write case, setupDumpWorker will fix up connection state */
 
+	/*
+	 * Worker processes should not track objects to avoid race conditions.
+	 * Set is_main_process to false and clear tracking arrays. Object tracking
+	 * will be handled by the main process through callback mechanisms.
+	 */
+	clone->is_main_process = false;
+	clone->successful_objects = NULL;
+	clone->n_successful = 0;
+	clone->max_successful = 0;
+	clone->failed_objects = NULL;
+	clone->n_failed = 0;
+	clone->max_failed = 0;
+
 	/* Let the format-specific code have a chance too */
 	clone->ClonePtr(clone);
 
@@ -5254,6 +5290,20 @@ DeCloneArchive(ArchiveHandle *AH)
 
 /*
  * Initialize object tracking arrays
+ *
+ * Sets up object tracking for the restoration process. The is_main_process
+ * flag is crucial for thread safety in parallel restore mode:
+ *
+ * - Main Process: is_main_process = true
+ *   Handles all object tracking through callback mechanisms, receives worker
+ *   results via mark_restore_job_done(), and generates summary and output files.
+ *
+ * - Worker Processes: is_main_process = false (set in CloneArchive)
+ *   Object tracking functions become no-ops to prevent race conditions.
+ *   No memory allocated for tracking arrays, focus solely on restoration work.
+ *
+ * This approach eliminates race conditions without requiring mutex locks
+ * by ensuring only the main process modifies tracking data structures.
  */
 void
 init_object_tracking(ArchiveHandle *AH)
@@ -5264,14 +5314,27 @@ init_object_tracking(ArchiveHandle *AH)
 	AH->failed_objects = NULL;
 	AH->n_failed = 0;
 	AH->max_failed = 0;
+	AH->is_main_process = true;  /* Initially true, set to false in worker processes */
 }
 
 /*
  * Record successful restoration of an object
+ *
+ * Updates object status and adds to successful objects list. In parallel
+ * restore mode, this function is only called by the main process to avoid
+ * race conditions. Worker processes skip tracking via is_main_process check.
+ *
+ * Parameters:
+ *   te: TocEntry for the restored object
+ *   is_schema: true for schema restoration, false for data restoration
  */
 void
 record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 {
+	/* Only track objects in the main process to avoid race conditions */
+	if (!AH->is_main_process)
+		return;
+
 	/* Update object status */
 	if (is_schema)
 	{
@@ -5308,10 +5371,23 @@ record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 
 /*
  * Record failed restoration of an object
+ *
+ * Updates object status, stores error message, and adds to failed objects list.
+ * In parallel restore mode, this function is only called by the main process
+ * to avoid race conditions. Worker processes skip tracking via is_main_process check.
+ *
+ * Parameters:
+ *   te: TocEntry for the failed object
+ *   is_schema: true for schema restoration, false for data restoration
+ *   error_msg: error message describing the failure (can be NULL)
  */
 void
 record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const char *error_msg)
 {
+	/* Only track objects in the main process to avoid race conditions */
+	if (!AH->is_main_process)
+		return;
+
 	/* Update object status */
 	if (is_schema)
 	{

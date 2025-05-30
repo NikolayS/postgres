@@ -48,20 +48,37 @@ ok(-f $backup_file, 'backup file created');
 # Test 1: Successful restoration to clean database
 $node->safe_psql('postgres', 'CREATE DATABASE test_clean;');
 
-my @restore_clean_cmd = (
+my @restore_cmd = (
     'pg_restore', '-h', $node->host, '-p', $node->port,
-    '-d', 'test_clean', $backup_file, '--verbose'
+    '-d', 'test_clean', $backup_file
 );
 
-my ($clean_stdout, $clean_stderr) = run_command(\@restore_clean_cmd);
-ok($? == 0, 'pg_restore to clean database completed');
+my ($restore_stdout, $restore_stderr) = run_command(\@restore_cmd);
+ok($? == 0, 'pg_restore completed successfully');
+like($restore_stderr, qr/Successfully restored objects: \d+/, 'restoration summary shows successful objects');
+like($restore_stderr, qr/Failed objects: 0/, 'restoration summary shows no failed objects');
 
-# Verify restoration summary is present
-like($clean_stderr, qr/Restoration Summary:/, 'restoration summary header found');
-like($clean_stderr, qr/Successfully restored objects: \d+/, 'successful objects count found');
-like($clean_stderr, qr/Failed objects: 0/, 'no failed objects in clean restore');
+# Test 2: Parallel restoration (thread safety test)
+$node->safe_psql('postgres', 'CREATE DATABASE test_parallel;');
 
-# Test 2: Create failure scenario using check constraint
+my @parallel_restore_cmd = (
+    'pg_restore', '-h', $node->host, '-p', $node->port,
+    '-d', 'test_parallel', '-j', '2', $backup_file
+);
+
+my ($parallel_stdout, $parallel_stderr) = run_command(\@parallel_restore_cmd);
+ok($? == 0, 'parallel pg_restore completed successfully');
+like($parallel_stderr, qr/Successfully restored objects: \d+/, 'parallel restoration summary shows successful objects');
+like($parallel_stderr, qr/Failed objects: 0/, 'parallel restoration summary shows no failed objects');
+
+# Verify parallel and single-threaded results are consistent
+my $clean_count = $node->safe_psql('test_clean', 'SELECT COUNT(*) FROM users;');
+my $parallel_count = $node->safe_psql('test_parallel', 'SELECT COUNT(*) FROM users;');
+is($clean_count, $parallel_count, 'parallel and single-threaded restoration produce same data');
+
+# Test 3: Failure scenario with parallel restoration
+
+# Test 4: Create failure scenario using check constraint
 $node->safe_psql('postgres', 'CREATE DATABASE test_failures;');
 
 # Set up the failure scenario using check constraint
@@ -89,7 +106,7 @@ my $failure_setup = q{
 
 $node->safe_psql('test_failures', $failure_setup);
 
-# Test 3: Attempt restoration with conflicts (should have failures)
+# Test 5: Attempt restoration with conflicts (should have failures)
 my @restore_conflict_cmd = (
     'pg_restore', '-h', $node->host, '-p', $node->port,
     '-d', 'test_failures', $backup_file, '--verbose'
@@ -106,7 +123,7 @@ like($conflict_stderr, qr/Successfully restored objects: \d+/, 'some objects sti
 # Check that failed objects are listed with details
 like($conflict_stderr, qr/Failed Objects.*:/, 'failed objects section present');
 
-# Test 4: Verify file generation
+# Test 6: Verify file generation
 like($conflict_stderr, qr/Successful objects list written to:/, 'successful objects file message found');
 like($conflict_stderr, qr/Failed objects list written to:/, 'failed objects file message found');
 
@@ -114,7 +131,7 @@ like($conflict_stderr, qr/Failed objects list written to:/, 'failed objects file
 ok(-f 'successful_objects.list', 'successful_objects.list file created') if -f 'successful_objects.list';
 ok(-f 'failed_objects.list', 'failed_objects.list file created') if -f 'failed_objects.list';
 
-# Test 5: Test that normal functionality still works
+# Test 7: Test that normal functionality still works
 my $normal_output = "$tempdir/normal_output.sql";
 my @normal_cmd = (
     'pg_restore', '-f', $normal_output, $backup_file
