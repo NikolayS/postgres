@@ -298,6 +298,40 @@ PostgreSQL documentation
    </varlistentry>
 
    <varlistentry>
+    <term><option>-s <replaceable class="parameter">sysid</replaceable></option></term>
+    <term><option>--system-identifier=<replaceable class="parameter">sysid</replaceable></option></term>
+    <listitem>
+     <para>
+      Manually set the database system identifier.
+     </para>
+
+     <para>
+      The system identifier is a unique 64-bit number that identifies the
+      database cluster. It is used by replication systems and backup tools
+      to ensure they are working with the correct cluster. Changing the
+      system identifier makes the cluster incompatible with existing
+      backups, standby servers, and replication setups. The system identifier
+      cannot be set to zero.
+     </para>
+
+     <para>
+      This option should only be used in recovery scenarios where you need
+      to make a restored cluster distinct from the original, or when cloning
+      a cluster for testing purposes. The value must be a positive 64-bit
+      integer and cannot be zero.
+     </para>
+
+     <para>
+      Unless the <option>--force</option> option is specified,
+      <command>pg_resetwal</command> will prompt for confirmation before
+      changing the system identifier, displaying both the current and new
+      values. In non-interactive environments, the <option>--force</option>
+      option must be used to proceed without confirmation.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
     <term><option>-u <replaceable class="parameter">xid</replaceable></option></term>
     <term><option>--oldest-transaction-id=<replaceable class="parameter">xid</replaceable></option></term>
     <listitem>
