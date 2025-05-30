@@ -21,7 +21,7 @@ $node->safe_psql('postgres', 'CREATE DATABASE test_tracking;');
 
 my $test_schema = q{
     CREATE TABLE users (
-        id SERIAL PRIMARY KEY,
+        id BIGSERIAL PRIMARY KEY,
         email VARCHAR(100) UNIQUE NOT NULL,
         name VARCHAR(100) NOT NULL
     );
@@ -68,10 +68,13 @@ $node->safe_psql('postgres', 'CREATE DATABASE test_failures;');
 my $corruption_setup = q{
     -- Create the same table structure
     CREATE TABLE users (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(100) UNIQUE NOT NULL,
+        id BIGSERIAL PRIMARY KEY,
+        email VARCHAR(100) NOT NULL,
         name VARCHAR(100) NOT NULL
     );
+    
+    -- Create a named unique index
+    CREATE UNIQUE INDEX users_email_unique ON users(email);
     
     -- Insert conflicting data
     INSERT INTO users (email, name) VALUES 
@@ -81,11 +84,7 @@ my $corruption_setup = q{
     -- Now corrupt the unique index to allow duplicates temporarily
     -- This simulates a corrupted index scenario
     UPDATE pg_index SET indisunique = false 
-    WHERE indexrelid = (
-        SELECT indexrelid FROM pg_index i
-        JOIN pg_class c ON i.indexrelid = c.oid
-        WHERE c.relname = 'users_email_key'
-    );
+    WHERE indexrelid = 'users_email_unique'::regclass;
     
     -- Insert more duplicates while index is "corrupted"
     INSERT INTO users (email, name) VALUES 
@@ -94,11 +93,7 @@ my $corruption_setup = q{
     
     -- Restore the unique constraint (this will cause issues during restore)
     UPDATE pg_index SET indisunique = true 
-    WHERE indexrelid = (
-        SELECT indexrelid FROM pg_index i
-        JOIN pg_class c ON i.indexrelid = c.oid
-        WHERE c.relname = 'users_email_key'
-    );
+    WHERE indexrelid = 'users_email_unique'::regclass;
 };
 
 $node->safe_psql('test_failures', $corruption_setup);
