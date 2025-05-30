@@ -661,6 +661,25 @@ restore_one_database(const char *inputFileSpec, RestoreOptions *opts,
 
 	n_errors = AH->n_errors;
 
+	/*
+	 * Enhanced exit status: consider object tracking failures in addition to
+	 * regular restoration errors. This provides more accurate exit codes
+	 * when object tracking is enabled.
+	 */
+	{
+		ArchiveHandle *ah = (ArchiveHandle *) AH;
+		
+		if (!ah->disable_object_tracking && ah->n_failed > 0)
+		{
+			/* If we have tracked failures but no regular errors, use tracked count */
+			if (n_errors == 0)
+				n_errors = ah->n_failed;
+			/* If we have both, use the higher count for more accurate reporting */
+			else if (ah->n_failed > n_errors)
+				n_errors = ah->n_failed;
+		}
+	}
+
 	/* AH may be freed in CloseArchive? */
 	CloseArchive(AH);
 

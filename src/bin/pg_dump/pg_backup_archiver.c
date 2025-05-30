@@ -5403,9 +5403,19 @@ record_object_success(ArchiveHandle *AH, TocEntry *te, bool is_schema)
 		/* Resize array if needed */
 		if (AH->n_successful >= AH->max_successful)
 		{
-			AH->max_successful = AH->max_successful ? AH->max_successful * 2 : 100;
-			AH->successful_objects = (TocEntry **) pg_realloc(AH->successful_objects,
-															 AH->max_successful * sizeof(TocEntry *));
+			int new_max = AH->max_successful ? AH->max_successful * 2 : 100;
+			TocEntry **new_array = (TocEntry **) pg_realloc(AH->successful_objects,
+															 new_max * sizeof(TocEntry *));
+			
+			/* pg_realloc will exit on failure, but be explicit about it */
+			if (!new_array)
+			{
+				pg_log_error("out of memory while tracking successful objects");
+				return;
+			}
+			
+			AH->max_successful = new_max;
+			AH->successful_objects = new_array;
 		}
 
 		/* Check if already in successful list */
@@ -5470,9 +5480,19 @@ record_object_failure(ArchiveHandle *AH, TocEntry *te, bool is_schema, const cha
 	/* Resize array if needed */
 	if (AH->n_failed >= AH->max_failed)
 	{
-		AH->max_failed = AH->max_failed ? AH->max_failed * 2 : 100;
-		AH->failed_objects = (TocEntry **) pg_realloc(AH->failed_objects,
-													   AH->max_failed * sizeof(TocEntry *));
+		int new_max = AH->max_failed ? AH->max_failed * 2 : 100;
+		TocEntry **new_array = (TocEntry **) pg_realloc(AH->failed_objects,
+														 new_max * sizeof(TocEntry *));
+		
+		/* pg_realloc will exit on failure, but be explicit about it */
+		if (!new_array)
+		{
+			pg_log_error("out of memory while tracking failed objects");
+			return;
+		}
+		
+		AH->max_failed = new_max;
+		AH->failed_objects = new_array;
 	}
 
 	/* Check if already in failed list */
@@ -5657,10 +5677,10 @@ write_object_lists_to_files(ArchiveHandle *AH)
 
 		/* Print instructions for retrying failed objects */
 		pg_log_info("");
-		pg_log_info("To retry only the failed objects, use:");
-		pg_log_info("  pg_restore -L %s [other options] <archive_file>", failed_filename);
+		pg_log_error_hint("To retry only the failed objects, use:");
+		pg_log_error_hint("  pg_restore -L %s [other options] <archive_file>", failed_filename);
 		pg_log_info("");
-		pg_log_info("You can edit %s to select specific objects to retry.", failed_filename);
+		pg_log_error_hint("You can edit %s to select specific objects to retry.", failed_filename);
 	}
 }
 
