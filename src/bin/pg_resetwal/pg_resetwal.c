@@ -76,6 +76,7 @@ static XLogSegNo minXlogSegNo = 0;
 static int	WalSegSz;
 static int	set_wal_segsize;
 static int	set_char_signedness = -1;
+static uint64 set_sysid = 0;
 
 static void CheckDataVersion(void);
 static bool read_controlfile(void);
@@ -105,6 +106,7 @@ main(int argc, char *argv[])
 		{"next-oid", required_argument, NULL, 'o'},
 		{"multixact-offset", required_argument, NULL, 'O'},
 		{"oldest-transaction-id", required_argument, NULL, 'u'},
+		{"system-identifier", required_argument, NULL, 's'},
 		{"next-transaction-id", required_argument, NULL, 'x'},
 		{"wal-segsize", required_argument, NULL, 1},
 		{"char-signedness", required_argument, NULL, 2},
@@ -140,7 +142,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt_long(argc, argv, "c:D:e:fl:m:no:O:u:x:", long_options, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "c:D:e:fl:m:no:O:s:u:x:", long_options, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -321,6 +323,29 @@ main(int argc, char *argv[])
 					break;
 				}
 
+			case 's':
+				/* Check for negative sign first */
+				if (optarg[0] == '-')
+				{
+					pg_log_error("system identifier must be greater than 0");
+					pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+					exit(1);
+				}
+				errno = 0;
+				set_sysid = strtou64(optarg, &endptr, 0);
+				if (endptr == optarg || *endptr != '\0' || errno != 0 || set_sysid == 0)
+				{
+					if (errno == ERANGE)
+						pg_log_error("system identifier value is out of range");
+					else if (set_sysid == 0)
+						pg_log_error("system identifier must be greater than 0");
+					else
+						pg_log_error("invalid argument for option %s", "-s");
+					pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+					exit(1);
+				}
+				break;
+
 			default:
 				/* getopt_long already emitted a complaint */
 				pg_log_error_hint("Try \"%s --help\" for more information.", progname);
@@ -477,6 +502,41 @@ main(int argc, char *argv[])
 
 	if (set_char_signedness != -1)
 		ControlFile.default_char_signedness = (set_char_signedness == 1);
+
+	if (set_sysid != 0)
+	{
+		/* Safety check: prompt for confirmation when changing system identifier unless force flag is used */
+		if (!force)
+		{
+			char response[10];
+			
+			/* Check if stdin is a TTY for interactive confirmation */
+			if (!isatty(fileno(stdin)))
+			{
+				pg_log_error("standard input is not a TTY and --force was not specified");
+				pg_log_error_hint("Cannot prompt for system identifier change confirmation. "
+								  "Use --force to proceed without confirmation in non-interactive mode.");
+				exit(1);
+			}
+			
+			printf(_("WARNING: Changing the system identifier will make this cluster incompatible with existing backups and standby servers.\n"));
+			printf(_("Current system identifier: " UINT64_FORMAT "\n"), ControlFile.system_identifier);
+			printf(_("New system identifier: " UINT64_FORMAT "\n"), set_sysid);
+			printf(_("Continue? (y/n) "));
+			fflush(stdout);
+			
+			if (fgets(response, sizeof(response), stdin) == NULL ||
+				(response[0] != 'y' && response[0] != 'Y'))
+			{
+				printf(_("System identifier change cancelled.\n"));
+				exit(1);
+			}
+		}
+		
+		printf(_("Changing system identifier from " UINT64_FORMAT " to " UINT64_FORMAT "\n"), 
+			   ControlFile.system_identifier, set_sysid);
+		ControlFile.system_identifier = set_sysid;
+	}
 
 	if (minXlogSegNo > newXlogSegNo)
 		newXlogSegNo = minXlogSegNo;
@@ -875,6 +935,12 @@ PrintNewControlValues(void)
 		printf(_("Bytes per WAL segment:                %u\n"),
 			   ControlFile.xlog_seg_size);
 	}
+
+	if (set_sysid != 0)
+	{
+		printf(_("System identifier:                    " UINT64_FORMAT "\n"),
+			   ControlFile.system_identifier);
+	}
 }
 
 
@@ -1212,6 +1278,7 @@ usage(void)
 	printf(_("  -O, --multixact-offset=OFFSET    set next multitransaction offset\n"));
 	printf(_("  -u, --oldest-transaction-id=XID  set oldest transaction ID\n"));
 	printf(_("  -x, --next-transaction-id=XID    set next transaction ID\n"));
+	printf(_("  -s, --system-identifier=SYSID    set system identifier (requires confirmation or --force)\n"));
 	printf(_("      --char-signedness=OPTION     set char signedness to \"signed\" or \"unsigned\"\n"));
 	printf(_("      --wal-segsize=SIZE           size of WAL segments, in megabytes\n"));
 

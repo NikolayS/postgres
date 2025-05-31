@@ -7,6 +7,7 @@ use warnings FATAL => 'all';
 use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
+use IPC::Run;
 
 program_help_ok('pg_resetwal');
 program_version_ok('pg_resetwal');
@@ -178,6 +179,184 @@ command_fails_like(
 	[ 'pg_resetwal', '--char-signedness', 'foo', $node->data_dir ],
 	qr/error: invalid argument for option --char-signedness/,
 	'fails with incorrect --char-signedness option');
+
+# -s / --system-identifier
+command_fails_like(
+	[ 'pg_resetwal', '-s' => 'foo', $node->data_dir ],
+	qr/error: invalid argument for option -s/,
+	'fails with incorrect -s option');
+command_fails_like(
+	[ 'pg_resetwal', '--system-identifier' => 'bar', $node->data_dir ],
+	qr/error: invalid argument for option -s/,
+	'fails with incorrect --system-identifier option');
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '0', $node->data_dir ],
+	qr/error: system identifier must be greater than 0/,
+	'fails with zero system identifier');
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '-123', $node->data_dir ],
+	qr/error: system identifier must be greater than 0/,
+	'fails with negative system identifier');
+
+# Test system identifier change with dry-run
+command_like(
+	[ 'pg_resetwal', '-s' => '1234567890123456789', '--dry-run', $node->data_dir ],
+	qr/System identifier:\s+1234567890123456789/,
+	'system identifier change shows in dry-run output');
+
+# Test actual system identifier change with force flag
+$node->stop;
+my $new_sysid = '9876543210987654321';
+command_ok(
+	[ 'pg_resetwal', '-f', '-s' => $new_sysid, $node->data_dir ],
+	'pg_resetwal -s with force flag succeeds');
+
+# Verify the change was applied by checking pg_control
+$node->start;
+my $controldata_output = $node->safe_psql('postgres', 
+	"SELECT system_identifier FROM pg_control_system()");
+is($controldata_output, $new_sysid, 'system identifier was changed correctly');
+
+# Test that the server works normally after system identifier change
+is($node->safe_psql("postgres", "SELECT 1;"),
+	1, 'server running and working after system identifier change');
+
+$node->stop;
+
+# Test that system identifier change requires force flag when control values are guessed
+# Note: Interactive prompt testing is challenging due to stdin handling limitations
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '1111111111111111111', $node->data_dir ],
+	qr/not proceeding because control file values were guessed/,
+	'system identifier change fails without force flag when control values are guessed');
+
+# Test non-TTY stdin handling (when stdin is not interactive)
+my $non_tty_test_node = PostgreSQL::Test::Cluster->new('non_tty_test');
+$non_tty_test_node->init;
+$non_tty_test_node->stop;
+
+# Test with stdin redirected from /dev/null (non-TTY)
+my ($stdin_null, $stdout_null, $stderr_null) = ('', '', '');
+my $null_harness = IPC::Run::start(
+	[ 'pg_resetwal', '-s', '3333333333333333333', $non_tty_test_node->data_dir ],
+	'<', '/dev/null', '>', \$stdout_null, '2>', \$stderr_null
+);
+$null_harness->finish();
+
+like($stderr_null, qr/standard input is not a TTY and --force was not specified/, 
+	'non-TTY stdin properly detected and rejected without --force');
+
+# Test that --force works with non-TTY stdin
+command_ok(
+	[ 'pg_resetwal', '-f', '-s', '4444444444444444444', $non_tty_test_node->data_dir ],
+	'system identifier change with --force works in non-TTY environment');
+
+# Verify the change was applied in non-TTY test
+$non_tty_test_node->start;
+my $non_tty_sysid = $non_tty_test_node->safe_psql('postgres', 
+	"SELECT system_identifier FROM pg_control_system()");
+is($non_tty_sysid, '4444444444444444444', 
+	'system identifier changed correctly with --force in non-TTY environment');
+$non_tty_test_node->stop;
+
+# Test interactive confirmation with 'n' response (cancellation)
+# We can test this by providing 'n' as input to stdin
+my $interactive_test_node = PostgreSQL::Test::Cluster->new('interactive_test');
+$interactive_test_node->init;
+$interactive_test_node->stop;
+
+# Create a test that simulates user saying 'n' to the confirmation prompt
+my ($stdin, $stdout, $stderr);
+my $harness = IPC::Run::start(
+	[ 'pg_resetwal', '-s', '7777777777777777777', $interactive_test_node->data_dir ],
+	'<', \$stdin, '>', \$stdout, '2>', \$stderr
+);
+
+# Send 'n' to decline the confirmation
+$stdin = "n\n";
+$harness->finish();
+
+like($stderr, qr/System identifier change cancelled/, 
+	'interactive confirmation properly cancels on n response');
+
+# Test interactive confirmation with 'y' response (acceptance)
+($stdin, $stdout, $stderr) = ('', '', '');
+$harness = IPC::Run::start(
+	[ 'pg_resetwal', '-s', '8888888888888888888', $interactive_test_node->data_dir ],
+	'<', \$stdin, '>', \$stdout, '2>', \$stderr
+);
+
+# Send 'y' to accept the confirmation
+$stdin = "y\n";
+$harness->finish();
+
+like($stdout, qr/Changing system identifier/, 
+	'interactive confirmation proceeds on y response');
+
+# Verify the change was applied
+$interactive_test_node->start;
+my $interactive_sysid = $interactive_test_node->safe_psql('postgres', 
+	"SELECT system_identifier FROM pg_control_system()");
+is($interactive_sysid, '8888888888888888888', 
+	'system identifier changed via interactive confirmation');
+$interactive_test_node->stop;
+
+# Test maximum valid 64-bit value
+my $max_sysid = '18446744073709551615';  # 2^64 - 1
+command_like(
+	[ 'pg_resetwal', '-s' => $max_sysid, '-f', '--dry-run', $node->data_dir ],
+	qr/System identifier:\s+18446744073709551615/,
+	'maximum 64-bit system identifier value accepted');
+
+# Test overflow detection
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '99999999999999999999999999999', $node->data_dir ],
+	qr/error: system identifier value is out of range/,
+	'overflow system identifier value rejected');
+
+# Test hexadecimal input (should fail - only decimal accepted)
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '0x123456789ABCDEF0', $node->data_dir ],
+	qr/error: invalid argument for option -s/,
+	'hexadecimal system identifier input rejected');
+
+# Test leading/trailing whitespace (should fail)
+command_fails_like(
+	[ 'pg_resetwal', '-s' => ' 123456789 ', $node->data_dir ],
+	qr/error: invalid argument for option -s/,
+	'system identifier with whitespace rejected');
+
+# Test empty string
+command_fails_like(
+	[ 'pg_resetwal', '-s' => '', $node->data_dir ],
+	qr/error: invalid argument for option -s/,
+	'empty system identifier rejected');
+
+# Test boundary values
+command_like(
+	[ 'pg_resetwal', '-s' => '1', '-f', '--dry-run', $node->data_dir ],
+	qr/System identifier:\s+1/,
+	'minimum valid system identifier (1) accepted');
+
+# Test very large but valid value
+command_like(
+	[ 'pg_resetwal', '-s' => '9223372036854775807', '-f', '--dry-run', $node->data_dir ],
+	qr/System identifier:\s+9223372036854775807/,
+	'large valid system identifier accepted');
+
+# Test another system identifier change to verify functionality
+my $another_sysid = '5555555555555555555';
+command_ok(
+	[ 'pg_resetwal', '-f', '-s' => $another_sysid, $node->data_dir ],
+	'second system identifier change succeeds');
+
+# Verify the second change
+$node->start;
+my $second_controldata = $node->safe_psql('postgres', 
+	"SELECT system_identifier FROM pg_control_system()");
+is($second_controldata, $another_sysid, 'second system identifier change verified');
+
+$node->stop;
 
 # run with control override options
 
