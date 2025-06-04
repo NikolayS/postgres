@@ -357,6 +357,29 @@ PostgreSQL documentation
    </varlistentry>
 
    <varlistentry>
+    <term><option>--system-identifier=<replaceable class="parameter">system_identifier</replaceable></option></term>
+    <listitem>
+     <para>
+      Manually set the database system identifier.
+     </para>
+
+     <para>
+      This option should only be used in recovery scenarios where you need
+      to make a restored cluster distinct from the original, or when cloning
+      a cluster for testing purposes. The value must be a positive 64-bit
+      integer and cannot be zero.
+     </para>
+
+     <warning>
+      <para>
+       Changing the system identifier will break compatibility with existing
+       backups and standby servers. Use this option with extreme caution.
+      </para>
+     </warning>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
     <term><option>--char-signedness=<replaceable class="parameter">option</replaceable></option></term>
     <listitem>
      <para>

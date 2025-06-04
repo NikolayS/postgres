@@ -179,6 +179,35 @@ command_fails_like(
 	qr/error: invalid argument for option --char-signedness/,
 	'fails with incorrect --char-signedness option');
 
+# --system-identifier
+command_fails_like(
+	[ 'pg_resetwal', '--system-identifier' => 'foo', $node->data_dir ],
+	qr/error: invalid argument for option --system-identifier/,
+	'fails with incorrect --system-identifier option');
+command_fails_like(
+	[ 'pg_resetwal', '--system-identifier' => '0', $node->data_dir ],
+	qr/system identifier must not be 0/,
+	'fails with zero system identifier');
+
+# Test actual system identifier change with force flag
+$node->stop;
+my $new_sysid = '9876543210987654321';
+command_ok(
+	[ 'pg_resetwal', '-f', '--system-identifier' => $new_sysid, $node->data_dir ],
+	'pg_resetwal --system-identifier with force flag succeeds');
+
+# Verify the change was applied by checking pg_control
+$node->start;
+my $controldata_output = $node->safe_psql('postgres', 
+	"SELECT system_identifier FROM pg_control_system()");
+is($controldata_output, $new_sysid, 'system identifier was changed correctly');
+
+# Test that the server works normally after system identifier change
+is($node->safe_psql("postgres", "SELECT 1;"),
+	1, 'server running and working after system identifier change');
+
+$node->stop;
+
 # run with control override options
 
 my $out = (run_command([ 'pg_resetwal', '--dry-run', $node->data_dir ]))[0];
