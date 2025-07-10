@@ -154,6 +154,14 @@ NOTIFY <replaceable class="parameter">channel</replaceable> [ , <replaceable cla
   <title>Notes</title>
 
   <para>
+   <emphasis>Warning:</emphasis> <command>NOTIFY</command> uses a global lock during transaction commit that serializes all commits containing <command>NOTIFY</command> statements across the entire <productname>PostgreSQL</productname> cluster. This lock (<literal>AccessExclusiveLock</literal>) ensures notification ordering but affects all databases in the cluster, not just the one issuing <command>NOTIFY</command>. Under high concurrency, this can cause severe performance degradation with hundreds of processes queuing for commit.
+  </para>
+
+  <para>
+   <emphasis>Performance Warning:</emphasis> Duplicate notification checking has O(N²) complexity. Transactions generating more than a few hundred distinct notifications may experience severe performance degradation. For example, 10,000 notifications in a single transaction can take several minutes just for duplicate checking. Consider using fewer distinct channel names or splitting notifications across multiple transactions if generating large volumes.
+  </para>
+
+  <para>
    There is a queue that holds notifications that have been sent but not
    yet processed by all listening sessions.  If this queue becomes full,
    transactions calling <command>NOTIFY</command> will fail at commit.
@@ -176,6 +184,42 @@ NOTIFY <replaceable class="parameter">channel</replaceable> [ , <replaceable cla
   </para>
 
   <refsect2>
+   <title>Performance considerations for high-concurrency systems</title>
+
+   <para>
+    For applications with high notification rates or many concurrent connections:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      Each <command>NOTIFY</command> acquires a global lock during commit, limiting total cluster commit throughput
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Multiple databases on the same cluster share this bottleneck
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Consider <link linkend="logicaldecoding">logical decoding</link> for high-volume scenarios
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Monitor commit wait times for <literal>AccessExclusiveLock</literal> waits during <command>COMMIT</command> operations
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Enable <xref linkend="guc-log-lock-waits"/> to identify when transactions are waiting for notification locks. Look for messages like <quote>process X still waiting for AccessExclusiveLock on object 0 of class 1262 of database 0</quote>
+     </para>
+    </listitem>
+   </itemizedlist>
+  </refsect2>
+
+  <refsect2>
    <title>pg_notify</title>
 
    <indexterm>
@@ -189,6 +233,10 @@ NOTIFY <replaceable class="parameter">channel</replaceable> [ , <replaceable cla
     first argument and the payload as the second. The function is much easier
     to use than the <command>NOTIFY</command> command if you need to work with
     non-constant channel names and payloads.
+   </para>
+
+   <para>
+    <emphasis>Note:</emphasis> <function>pg_notify()</function> is subject to the same performance limitations as the <command>NOTIFY</command> command. See the performance warnings above for important considerations about global locking and O(N²) duplicate checking performance.
    </para>
   </refsect2>
  </refsect1>
