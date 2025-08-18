@@ -181,6 +181,7 @@ slashUsage(unsigned short int pager)
 	HELP0("  \\? [commands]          show help on backslash commands\n");
 	HELP0("  \\? options             show help on psql command-line options\n");
 	HELP0("  \\? variables           show help on special variables\n");
+	HELP0("  \\??                    show help on extra backslash commands\n");
 	HELP0("  \\h [NAME]              help on syntax of SQL commands, * for all commands\n");
 	HELP0("\n");
 
@@ -340,6 +341,55 @@ slashUsage(unsigned short int pager)
 	HELP0("  \\sendpipeline          send an extended query to an ongoing pipeline\n");
 	HELP0("  \\startpipeline         enter pipeline mode\n");
 	HELP0("  \\syncpipeline          add a synchronisation point to an ongoing pipeline\n");
+
+	/* Now we can count the lines. */
+	nlcount = 0;
+	for (const char *ptr = buf.data; *ptr; ptr++)
+	{
+		if (*ptr == '\n')
+			nlcount++;
+	}
+
+	/* And dump the output, with appropriate pagination. */
+	output = PageOutput(nlcount, pager ? &(pset.popt.topt) : NULL);
+
+	fputs(buf.data, output);
+
+	ClosePager(output);
+
+	termPQExpBuffer(&buf);
+}
+
+/*
+ * slashUsageExtra
+ *
+ * print out help for the extra backslash commands (accessible via \??)
+ */
+void
+slashUsageExtra(unsigned short int pager)
+{
+	PQExpBufferData buf;
+	int			nlcount;
+	FILE	   *output;
+
+	/*
+	 * To avoid counting the output lines manually, build the output in "buf"
+	 * and then count them.
+	 */
+	initPQExpBuffer(&buf);
+
+	HELP0("Extra commands (for detailed help use \\? commands)\n");
+	HELP0("\n");
+
+	HELP0("Informational\n");
+	HELP0("  (options: S = show system objects, + = additional detail)\n");
+	HELP0("  \\dii[S+] [PATTERN]     list invalid indexes\n");
+	HELP0("\n");
+
+	HELP0("Future extra commands will be added here as they are implemented.\n");
+	HELP0("These commands are not shown in the regular \\? help to keep\n");
+	HELP0("the main help concise and focused on commonly used commands.\n");
+	HELP0("\n");
 
 	/* Now we can count the lines. */
 	nlcount = 0;

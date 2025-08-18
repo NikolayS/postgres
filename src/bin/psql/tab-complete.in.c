@@ -1902,7 +1902,7 @@ psql_completion(const char *text, int start, int end)
 		"\\x",
 		"\\warn", "\\watch", "\\write",
 		"\\z",
-		"\\!", "\\?",
+		"\\!", "\\?", "\\??",
 		NULL
 	};
 
@@ -5287,6 +5287,8 @@ match_previous_words(int pattern_id,
 	else if (TailMatchesCS("\\dF*"))
 		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_ts_configurations);
 
+	else if (TailMatchesCS("\\dii*"))
+		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes);
 	else if (TailMatchesCS("\\di*"))
 		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes);
 	else if (TailMatchesCS("\\dL*"))

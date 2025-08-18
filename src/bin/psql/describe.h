@@ -70,6 +70,9 @@ extern bool listAllDbs(const char *pattern, bool verbose);
 /* \dt, \di, \ds, \dS, etc. */
 extern bool listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSystem);
 
+/* \dii */
+extern bool listInvalidIndexes(const char *pattern, bool verbose, bool showSystem);
+
 /* \dP */
 extern bool listPartitionedTables(const char *reltypes, const char *pattern, bool verbose);
 

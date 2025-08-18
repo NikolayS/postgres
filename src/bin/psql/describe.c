@@ -4243,6 +4243,106 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
 }
 
 /*
+ * listInvalidIndexes()
+ *
+ * handler for \dii (list invalid indexes)
+ *
+ * Lists indexes that are marked as invalid (indisvalid = false)
+ */
+bool
+listInvalidIndexes(const char *pattern, bool verbose, bool showSystem)
+{
+	PQExpBufferData buf;
+	PGresult   *res;
+	printQueryOpt myopt = pset.popt;
+	bool		translate_columns[] = {false, false, false, false, false, false, false, false};
+
+	initPQExpBuffer(&buf);
+
+	printfPQExpBuffer(&buf,
+					  "SELECT n.nspname as \"%s\",\n"
+					  "  c.relname as \"%s\",\n"
+					  "  c2.relname as \"%s\",\n"
+					  "  pg_catalog.pg_get_userbyid(c.relowner) as \"%s\"",
+					  gettext_noop("Schema"),
+					  gettext_noop("Name"),
+					  gettext_noop("Table"),
+					  gettext_noop("Owner"));
+
+	if (verbose)
+	{
+		appendPQExpBuffer(&buf,
+						  ",\n  pg_catalog.pg_get_indexdef(c.oid, 0, true) as \"%s\""
+						  ",\n  pg_catalog.pg_size_pretty(pg_catalog.pg_relation_size(c.oid)) as \"%s\""
+						  ",\n  pg_catalog.obj_description(c.oid, 'pg_class') as \"%s\"",
+						  gettext_noop("Definition"),
+						  gettext_noop("Size"),
+						  gettext_noop("Description"));
+	}
+
+	appendPQExpBufferStr(&buf,
+						 "\nFROM pg_catalog.pg_class c"
+						 "\n     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace"
+						 "\n     LEFT JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid"
+						 "\n     LEFT JOIN pg_catalog.pg_class c2 ON i.indrelid = c2.oid");
+
+	appendPQExpBufferStr(&buf,
+						 "\nWHERE c.relkind IN ("
+						 CppAsString2(RELKIND_INDEX) ","
+						 CppAsString2(RELKIND_PARTITIONED_INDEX)
+						 ")\n"
+						 "      AND i.indisvalid = false\n");
+
+	if (!showSystem)
+		appendPQExpBufferStr(&buf,
+							 "      AND n.nspname <> 'pg_catalog'\n"
+							 "      AND n.nspname !~ '^pg_toast'\n"
+							 "      AND n.nspname <> 'information_schema'\n");
+
+	if (!validateSQLNamePattern(&buf, pattern, true, false,
+								"n.nspname", "c.relname", NULL,
+								"pg_catalog.pg_table_is_visible(c.oid)",
+								NULL, 3))
+	{
+		termPQExpBuffer(&buf);
+		return false;
+	}
+
+	appendPQExpBufferStr(&buf, "ORDER BY 1,2;");
+
+	res = PSQLexec(buf.data);
+	termPQExpBuffer(&buf);
+	if (!res)
+		return false;
+
+	/*
+	 * Most functions in this file are content to print an empty table when
+	 * there are no matching objects.  We intentionally deviate from that
+	 * here, but only in !quiet mode, for consistency with listTables behavior.
+	 */
+	if (PQntuples(res) == 0 && !pset.quiet)
+	{
+		if (pattern)
+			pg_log_error("Did not find any invalid indexes named \"%s\".", pattern);
+		else
+			pg_log_error("Did not find any invalid indexes.");
+	}
+	else
+	{
+		myopt.nullPrint = NULL;
+		myopt.title = _("List of invalid indexes");
+		myopt.translate_header = true;
+		myopt.translate_columns = translate_columns;
+		myopt.n_translate_columns = lengthof(translate_columns);
+
+		printQuery(res, &myopt, pset.queryFout, false, pset.logfile);
+	}
+
+	PQclear(res);
+	return true;
+}
+
+/*
  * \dP
  * Takes an optional regexp to select particular relations
  *

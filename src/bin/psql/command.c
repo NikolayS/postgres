@@ -154,6 +154,7 @@ static backslashResult exec_command_z(PsqlScanState scan_state, bool active_bran
 									  const char *cmd);
 static backslashResult exec_command_shell_escape(PsqlScanState scan_state, bool active_branch);
 static backslashResult exec_command_slash_command_help(PsqlScanState scan_state, bool active_branch);
+static backslashResult exec_command_slash_command_extra_help(PsqlScanState scan_state, bool active_branch);
 static char *read_connect_arg(PsqlScanState scan_state);
 static PQExpBuffer gather_boolean_expression(PsqlScanState scan_state);
 static bool is_true_boolean_expression(PsqlScanState scan_state, const char *name);
@@ -456,6 +457,8 @@ exec_command(const char *cmd,
 		status = exec_command_shell_escape(scan_state, active_branch);
 	else if (strcmp(cmd, "?") == 0)
 		status = exec_command_slash_command_help(scan_state, active_branch);
+	else if (strcmp(cmd, "??") == 0)
+		status = exec_command_slash_command_extra_help(scan_state, active_branch);
 	else
 		status = PSQL_CMD_UNKNOWN;
 
@@ -1164,6 +1167,16 @@ exec_command_d(PsqlScanState scan_state, bool active_branch, const char *cmd)
 			case 'v':
 			case 'm':
 			case 'i':
+				if (cmd[1] == 'i' && cmd[2] == 'i' && (cmd[3] == '\0' || 
+					(cmd[3] == '+' && cmd[4] == '\0') ||
+					(cmd[3] == 'S' && cmd[4] == '\0') ||
+					(cmd[3] == 'S' && cmd[4] == '+' && cmd[5] == '\0') ||
+					(cmd[3] == '+' && cmd[4] == 'S' && cmd[5] == '\0')))
+					/* \dii, \dii+, \diiS, \diiS+, \dii+S - list invalid indexes */
+					success = listInvalidIndexes(pattern, show_verbose, show_system);
+				else
+					success = listTables(&cmd[1], pattern, show_verbose, show_system);
+				break;
 			case 's':
 			case 'E':
 				success = listTables(&cmd[1], pattern, show_verbose, show_system);
@@ -3523,6 +3536,20 @@ exec_command_slash_command_help(PsqlScanState scan_state, bool active_branch)
 
 		free(opt0);
 	}
+	else
+		ignore_slash_options(scan_state);
+
+	return PSQL_CMD_SKIP_LINE;
+}
+
+/*
+ * \?? -- print help about extra backslash commands
+ */
+static backslashResult
+exec_command_slash_command_extra_help(PsqlScanState scan_state, bool active_branch)
+{
+	if (active_branch)
+		slashUsageExtra(pset.popt.topt.pager);
 	else
 		ignore_slash_options(scan_state);
 
