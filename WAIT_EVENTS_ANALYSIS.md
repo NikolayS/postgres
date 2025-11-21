@@ -4,9 +4,9 @@
 - **Analyst:** @NikolayS + Claude Code Sonnet 4.5
 - **Purpose:** Identify code areas lacking wait event instrumentation that may be incorrectly visualized as "CPU" time in ASH and monitoring tools
 
-**Repository:** https://github.com/NikolayS/postgres
-**Commit Hash:** `b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44`
-**Branch:** `claude/cpu-asterisk-wait-events-01CyiYYMMcFMovuqPqLNcp8T`
+- **Repository:** https://github.com/NikolayS/postgres
+- **Commit Hash:** `b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44`
+- **Branch:** `claude/cpu-asterisk-wait-events-01CyiYYMMcFMovuqPqLNcp8T`
 
 > **Note:** All code references in this document link to the specific commit hash to avoid code drift. Click on file paths and line numbers to view the exact code on GitHub.
 
