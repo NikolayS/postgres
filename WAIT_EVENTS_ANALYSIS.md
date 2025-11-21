@@ -4,6 +4,12 @@
 **Analyst:** PostgreSQL Hacker Veteran
 **Purpose:** Identify code areas lacking wait event instrumentation that may be incorrectly visualized as "CPU" time in ASH and monitoring tools
 
+**Repository:** https://github.com/NikolayS/postgres
+**Commit Hash:** `b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44`
+**Branch:** `claude/cpu-asterisk-wait-events-01CyiYYMMcFMovuqPqLNcp8T`
+
+> **Note:** All code references in this document link to the specific commit hash to avoid code drift. Click on file paths and line numbers to view the exact code on GitHub.
+
 ---
 
 ## Executive Summary
@@ -31,27 +37,27 @@ This analysis identified **68+ specific locations** across the PostgreSQL codeba
 
 ### 1.1 Low-Level File System Operations (CRITICAL)
 
-**File:** `src/backend/storage/file/fd.c`
+**File:** [`src/backend/storage/file/fd.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c)
 
 These are fundamental I/O primitives called throughout the codebase. Missing instrumentation here affects all code using these functions.
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 449 | `pg_fsync_no_writethrough()` | `fsync(fd)` | Universal fsync - called from many locations |
-| 466 | `pg_fsync_writethrough()` | `fcntl(fd, F_FULLFSYNC, 0)` | macOS fsync - called from many locations |
-| 488 | `pg_fdatasync()` | `fdatasync(fd)` | Data-only sync - called from many locations |
-| 410 | `pg_fsync()` | `fstat(fd, &st)` | File metadata check before sync |
-| 509 | `pg_file_exists()` | `stat(name, &st)` | File existence check |
-| 834 | `durable_rename()` | `rename(oldfile, newfile)` | Atomic file rename |
-| 874 | `durable_unlink()` | `unlink(fname)` | File deletion |
-| 1955 | File cleanup | `unlink(path)` | Cleanup during file operations |
-| 2047 | File cleanup | `unlink(vfdP->fileName)` | VFD cleanup |
-| 3440 | `RemovePgTempFilesInDir()` | `unlink(rm_path)` | Temp file cleanup loop |
-| 3502 | `RemovePgTempRelationFilesInDbspace()` | `unlink(rm_path)` | Relation file cleanup loop |
-| 3626 | `walkdir()` | `lstat("pg_wal", &st)` | WAL directory check |
-| 3980 | `MakePGDirectory()` | `mkdir(directoryName, mode)` | Directory creation |
-| 2925 | `AllocateDir()` | `opendir()` | Directory open - can block on NFS |
-| 3003 | `ReadDirExtended()` | `readdir()` | Directory read - can block on NFS |
+| [449](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L449) | `pg_fsync_no_writethrough()` | `fsync(fd)` | Universal fsync - called from many locations |
+| [466](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L466) | `pg_fsync_writethrough()` | `fcntl(fd, F_FULLFSYNC, 0)` | macOS fsync - called from many locations |
+| [488](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L488) | `pg_fdatasync()` | `fdatasync(fd)` | Data-only sync - called from many locations |
+| [410](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L410) | `pg_fsync()` | `fstat(fd, &st)` | File metadata check before sync |
+| [509](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L509) | `pg_file_exists()` | `stat(name, &st)` | File existence check |
+| [834](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L834) | `durable_rename()` | `rename(oldfile, newfile)` | Atomic file rename |
+| [874](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L874) | `durable_unlink()` | `unlink(fname)` | File deletion |
+| [1955](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L1955) | File cleanup | `unlink(path)` | Cleanup during file operations |
+| [2047](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L2047) | File cleanup | `unlink(vfdP->fileName)` | VFD cleanup |
+| [3440](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3440) | `RemovePgTempFilesInDir()` | `unlink(rm_path)` | Temp file cleanup loop |
+| [3502](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3502) | `RemovePgTempRelationFilesInDbspace()` | `unlink(rm_path)` | Relation file cleanup loop |
+| [3626](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3626) | `walkdir()` | `lstat("pg_wal", &st)` | WAL directory check |
+| [3980](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3980) | `MakePGDirectory()` | `mkdir(directoryName, mode)` | Directory creation |
+| [2925](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L2925) | `AllocateDir()` | `opendir()` | Directory open - can block on NFS |
+| [3003](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3003) | `ReadDirExtended()` | `readdir()` | Directory read - can block on NFS |
 
 **Proposed Wait Events:**
 ```
@@ -73,13 +79,13 @@ DIR_READ                 "Waiting to read a directory entry"
 
 ### 1.2 Storage Manager File Operations (HIGH)
 
-**File:** `src/backend/storage/smgr/md.c`
+**File:** [`src/backend/storage/smgr/md.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/smgr/md.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 395 | `mdunlinkfork()` | `unlink(path.str)` | Relation file deletion |
-| 454 | `mdunlinkfork()` | `unlink(segpath.str)` | Additional segment deletion (loop) |
-| 1941 | `mdunlinkfiletag()` | `unlink(path)` | File tag-based deletion |
+| [395](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/smgr/md.c#L395) | `mdunlinkfork()` | `unlink(path.str)` | Relation file deletion |
+| [454](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/smgr/md.c#L454) | `mdunlinkfork()` | `unlink(segpath.str)` | Additional segment deletion (loop) |
+| [1941](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/smgr/md.c#L1941) | `mdunlinkfiletag()` | `unlink(path)` | File tag-based deletion |
 
 **Priority:** HIGH - Affects table/index file management
 
@@ -87,14 +93,14 @@ DIR_READ                 "Waiting to read a directory entry"
 
 ### 1.3 Recovery Signal File Operations (HIGH)
 
-**File:** `src/backend/access/transam/xlogrecovery.c`
+**File:** [`src/backend/access/transam/xlogrecovery.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 1072 | `StartupInitAutoStandby()` | `pg_fsync(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
-| 1073 | `StartupInitAutoStandby()` | `close(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
-| 1085 | `StartupInitAutoStandby()` | `pg_fsync(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
-| 1086 | `StartupInitAutoStandby()` | `close(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
+| [1072](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1072) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
+| [1073](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1073) | `StartupInitAutoStandby()` | `close(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
+| [1085](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1085) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
+| [1086](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1086) | `StartupInitAutoStandby()` | `close(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
 
 **Proposed Wait Events:**
 ```
@@ -109,12 +115,12 @@ STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
 
 ### 1.4 Dynamic Shared Memory Operations (MEDIUM)
 
-**File:** `src/backend/storage/ipc/dsm_impl.c`
+**File:** [`src/backend/storage/ipc/dsm_impl.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/ipc/dsm_impl.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 278 | DSM operations | `fstat(fd, &st)` | Shared memory file metadata |
-| 849 | DSM cleanup | `fstat(fd, &st)` | Shared memory cleanup |
+| [278](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/ipc/dsm_impl.c#L278) | DSM operations | `fstat(fd, &st)` | Shared memory file metadata |
+| [849](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/ipc/dsm_impl.c#L849) | DSM cleanup | `fstat(fd, &st)` | Shared memory cleanup |
 
 **Priority:** MEDIUM - Used in parallel query execution
 
@@ -124,20 +130,20 @@ STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
 
 ### 2.1 LDAP Authentication (CRITICAL)
 
-**File:** `src/backend/libpq/auth.c`
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
 **Function:** `check_ldapauth()`
 
 **Issue:** LDAP authentication can block for SECONDS waiting for directory services. No wait event instrumentation exists for any LDAP operation.
 
 | Line | Operation | Blocking Potential |
 |------|-----------|-------------------|
-| 2222 | `ldap_init()` | Network connection to LDAP server |
-| 2320 | `ldap_initialize()` | Network connection (OpenLDAP) |
-| 2339 | `ldap_init()` | Network connection fallback |
-| 2350 | `ldap_set_option()` | May perform network operations |
-| 2551 | `ldap_search_s()` | **SYNCHRONOUS SEARCH - WORST OFFENDER** |
-| 2602 | `ldap_get_option()` | May perform network operations |
-| 2660 | `ldap_get_option()` | May perform network operations |
+| [2222](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2222) | `ldap_init()` | Network connection to LDAP server |
+| [2320](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2320) | `ldap_initialize()` | Network connection (OpenLDAP) |
+| [2339](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2339) | `ldap_init()` | Network connection fallback |
+| [2350](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2350) | `ldap_set_option()` | May perform network operations |
+| [2551](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2551) | `ldap_search_s()` | **SYNCHRONOUS SEARCH - WORST OFFENDER** |
+| [2602](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2602) | `ldap_get_option()` | May perform network operations |
+| [2660](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2660) | `ldap_get_option()` | May perform network operations |
 
 **Impact:** Every LDAP authentication blocks the backend process without visibility. Under authentication load, this causes:
 - Connection storms appear as "CPU" load
@@ -159,21 +165,21 @@ AUTH_LDAP_OPTION         "Waiting for LDAP option operation"
 
 ### 2.2 Ident Authentication (CRITICAL)
 
-**File:** `src/backend/libpq/auth.c`
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
 **Function:** `ident_inet()`
 
-**XXX Comment at lines 1659-1660:** Code explicitly notes this needs improvement!
+**XXX Comment at [lines 1659-1660](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1659-L1660):** Code explicitly notes this needs improvement!
 
 | Line | Operation | Blocking Potential |
 |------|-----------|-------------------|
-| 1686-1689 | `pg_getnameinfo_all()` | Reverse DNS lookup - can timeout |
-| 1704 | `pg_getaddrinfo_all()` | Forward DNS lookup for ident server |
-| 1720 | `pg_getaddrinfo_all()` | Forward DNS lookup (local address) |
-| 1728-1729 | `socket()` | Socket creation |
-| 1744 | `bind()` | Socket binding |
-| 1755-1756 | `connect()` | TCP connection to ident server |
-| 1776 | `send()` | Send ident request |
-| 1793 | `recv()` | Receive ident response |
+| [1686-1689](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1686-L1689) | `pg_getnameinfo_all()` | Reverse DNS lookup - can timeout |
+| [1704](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1704) | `pg_getaddrinfo_all()` | Forward DNS lookup for ident server |
+| [1720](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1720) | `pg_getaddrinfo_all()` | Forward DNS lookup (local address) |
+| [1728-1729](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1728-L1729) | `socket()` | Socket creation |
+| [1744](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1744) | `bind()` | Socket binding |
+| [1755-1756](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1755-L1756) | `connect()` | TCP connection to ident server |
+| [1776](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1776) | `send()` | Send ident request |
+| [1793](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L1793) | `recv()` | Receive ident response |
 
 **Impact:** Ident authentication performs:
 1. Multiple DNS lookups (each can take seconds)
@@ -194,18 +200,18 @@ AUTH_IDENT_IO            "Waiting for ident server response"
 
 ### 2.3 RADIUS Authentication (HIGH)
 
-**File:** `src/backend/libpq/auth.c`
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
 **Function:** `check_radius()`
 
-**XXX Comment at lines 3094-3096:** Code explicitly recommends using WaitLatchOrSocket!
+**XXX Comment at [lines 3094-3096](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3094-L3096):** Code explicitly recommends using WaitLatchOrSocket!
 
 | Line | Operation | Blocking Potential |
 |------|-----------|-------------------|
-| 2971 | `pg_getaddrinfo_all()` | DNS lookup for RADIUS server |
-| 3066 | `bind()` | Socket binding |
-| 3075-3076 | `sendto()` | UDP send to RADIUS server |
-| 3124 | `select()` | Polling for RADIUS response (manual timeout) |
-| 3157 | `recvfrom()` | UDP receive from RADIUS server |
+| [2971](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2971) | `pg_getaddrinfo_all()` | DNS lookup for RADIUS server |
+| [3066](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3066) | `bind()` | Socket binding |
+| [3075-3076](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3075-L3076) | `sendto()` | UDP send to RADIUS server |
+| [3124](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3124) | `select()` | Polling for RADIUS response (manual timeout) |
+| [3157](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3157) | `recvfrom()` | UDP receive from RADIUS server |
 
 **Impact:** Uses custom select() loop instead of WaitLatchOrSocket, making interrupt handling harder
 
@@ -221,14 +227,14 @@ AUTH_RADIUS_RESPONSE     "Waiting for RADIUS authentication response"
 
 ### 2.4 Generic DNS Lookups in Authentication (HIGH)
 
-**File:** `src/backend/libpq/auth.c`
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
 **Function:** `check_user_auth()`
 
 | Line | Operation | Context |
 |------|-----------|---------|
-| 432-435 | `pg_getnameinfo_all()` | Reverse DNS for client IP logging |
-| 478 | `pg_getnameinfo_all()` | Reverse DNS for pg_ident mapping |
-| 2081 | `pg_getnameinfo_all()` | Reverse DNS for SSPI authentication |
+| [432-435](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L432-L435) | `pg_getnameinfo_all()` | Reverse DNS for client IP logging |
+| [478](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L478) | `pg_getnameinfo_all()` | Reverse DNS for pg_ident mapping |
+| [2081](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2081) | `pg_getnameinfo_all()` | Reverse DNS for SSPI authentication |
 
 **Priority:** HIGH - DNS lookups can hang indefinitely
 
@@ -240,12 +246,12 @@ AUTH_RADIUS_RESPONSE     "Waiting for RADIUS authentication response"
 
 ### 3.1 Gzip Compression (CRITICAL)
 
-**File:** `src/backend/backup/basebackup_gzip.c`
+**File:** [`src/backend/backup/basebackup_gzip.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_gzip.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 176-215 | `bbsink_gzip_archive_contents()` | Loop with `deflate(zs, Z_NO_FLUSH)` | Compresses each data block |
-| 234-265 | `bbsink_gzip_end_archive()` | Loop with `deflate(zs, Z_FINISH)` | Final compression flush |
+| [176-215](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_gzip.c#L176-L215) | `bbsink_gzip_archive_contents()` | Loop with `deflate(zs, Z_NO_FLUSH)` | Compresses each data block |
+| [234-265](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_gzip.c#L234-L265) | `bbsink_gzip_end_archive()` | Loop with `deflate(zs, Z_FINISH)` | Final compression flush |
 
 **Code Pattern:**
 ```c
@@ -262,13 +268,13 @@ while (zs->avail_in > 0)
 
 ### 3.2 LZ4 Compression (CRITICAL)
 
-**File:** `src/backend/backup/basebackup_lz4.c`
+**File:** [`src/backend/backup/basebackup_lz4.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_lz4.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 145 | `bbsink_lz4_begin_archive()` | `LZ4F_compressBegin()` | Initialization |
-| 203 | `bbsink_lz4_archive_contents()` | `LZ4F_compressUpdate()` | Compress each block |
-| 245 | `bbsink_lz4_end_archive()` | `LZ4F_compressEnd()` | Finalization |
+| [145](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_lz4.c#L145) | `bbsink_lz4_begin_archive()` | `LZ4F_compressBegin()` | Initialization |
+| [203](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_lz4.c#L203) | `bbsink_lz4_archive_contents()` | `LZ4F_compressUpdate()` | Compress each block |
+| [245](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_lz4.c#L245) | `bbsink_lz4_end_archive()` | `LZ4F_compressEnd()` | Finalization |
 
 **Priority:** CRITICAL - Every base backup with LZ4 compression
 
@@ -276,12 +282,12 @@ while (zs->avail_in > 0)
 
 ### 3.3 Zstandard Compression (CRITICAL)
 
-**File:** `src/backend/backup/basebackup_zstd.c`
+**File:** [`src/backend/backup/basebackup_zstd.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_zstd.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 198-224 | `bbsink_zstd_archive_contents()` | Loop with `ZSTD_compressStream2()` | Compress each block |
-| 240-260 | `bbsink_zstd_end_archive()` | Loop with `ZSTD_compressStream2(Z_END)` | Final flush |
+| [198-224](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_zstd.c#L198-L224) | `bbsink_zstd_archive_contents()` | Loop with `ZSTD_compressStream2()` | Compress each block |
+| [240-260](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/backup/basebackup_zstd.c#L240-L260) | `bbsink_zstd_end_archive()` | Loop with `ZSTD_compressStream2(Z_END)` | Final flush |
 
 **Priority:** CRITICAL - Every base backup with Zstandard compression
 
@@ -311,18 +317,18 @@ DECOMPRESS_ZSTD              "Decompressing data with Zstandard"
 
 ### 4.1 SCRAM Authentication (HIGH)
 
-**File:** `src/backend/libpq/auth-scram.c`
+**File:** [`src/backend/libpq/auth-scram.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c)
 
 SCRAM-SHA-256 uses PBKDF2 with 4096+ iterations, making it CPU-intensive by design. During authentication storms, this load is invisible.
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 1150-1195 | `scram_verify_client_proof()` | Multiple HMAC operations | Every SCRAM authentication |
-| 1153 | | `pg_hmac_create()` | HMAC context creation |
-| 1162-1174 | | `pg_hmac_init/update/final()` loops | Client proof verification |
-| 1187 | | `scram_H()` | SHA-256 hash |
-| 1414-1450 | `scram_build_server_final_message()` | HMAC for server signature | Every SCRAM authentication |
-| 697-710 | `mock_scram_secret()` | SHA-256 for timing attack prevention | Failed authentication attempts |
+| [1150-1195](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L1150-L1195) | `scram_verify_client_proof()` | Multiple HMAC operations | Every SCRAM authentication |
+| [1153](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L1153) | | `pg_hmac_create()` | HMAC context creation |
+| [1162-1174](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L1162-L1174) | | `pg_hmac_init/update/final()` loops | Client proof verification |
+| [1187](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L1187) | | `scram_H()` | SHA-256 hash |
+| [1414-1450](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L1414-L1450) | `scram_build_server_final_message()` | HMAC for server signature | Every SCRAM authentication |
+| [697-710](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c#L697-L710) | `mock_scram_secret()` | SHA-256 for timing attack prevention | Failed authentication attempts |
 
 **Impact:** SCRAM authentication with high iteration counts (4096+) can take 10-50ms per login on moderate hardware. During connection storms, this appears as CPU load.
 
@@ -339,15 +345,15 @@ AUTH_SCRAM_HMAC          "Computing HMAC for SCRAM authentication"
 
 ### 4.2 SQL Cryptographic Functions (MEDIUM)
 
-**File:** `src/backend/utils/adt/cryptohashfuncs.c`
+**File:** [`src/backend/utils/adt/cryptohashfuncs.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/adt/cryptohashfuncs.c)
 
 SQL-callable hash functions can process large bytea values (MB+) without interruption.
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 44-53 | `md5_text()` | `pg_md5_hash()` | User SQL queries |
-| 59-74 | `md5_bytea()` | `pg_md5_hash()` | User SQL queries |
-| 79+ | `cryptohash_internal()` | SHA-224/256/384/512 | User SQL queries |
+| [44-53](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/adt/cryptohashfuncs.c#L44-L53) | `md5_text()` | `pg_md5_hash()` | User SQL queries |
+| [59-74](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/adt/cryptohashfuncs.c#L59-L74) | `md5_bytea()` | `pg_md5_hash()` | User SQL queries |
+| [79+](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/adt/cryptohashfuncs.c#L79) | `cryptohash_internal()` | SHA-224/256/384/512 | User SQL queries |
 
 **Code Pattern:**
 ```c
@@ -368,12 +374,12 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ### 4.3 CRC Computation (MEDIUM)
 
-**File:** `src/backend/utils/hash/pg_crc.c`
+**File:** [`src/backend/utils/hash/pg_crc.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/hash/pg_crc.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| 107 | `crc32_bytea()` | CRC32 calculation loop | SQL function on large bytea |
-| 120 | `crc32c_bytea()` | CRC32C calculation loop | SQL function on large bytea |
+| [107](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/hash/pg_crc.c#L107) | `crc32_bytea()` | CRC32 calculation loop | SQL function on large bytea |
+| [120](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/hash/pg_crc.c#L120) | `crc32c_bytea()` | CRC32C calculation loop | SQL function on large bytea |
 
 **Priority:** MEDIUM - Less CPU-intensive than SHA-256 but can process large data
 
@@ -383,10 +389,10 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ### 5.1 Hash Join Building (CRITICAL)
 
-**File:** `src/backend/executor/nodeHash.c`
+**File:** [`src/backend/executor/nodeHash.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c)
 
 #### Serial Hash Build
-**Function:** `MultiExecPrivateHash()` (lines 160-196)
+**Function:** `MultiExecPrivateHash()` ([lines 160-196](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c#L160-L196))
 
 ```c
 for (;;)
@@ -402,7 +408,7 @@ for (;;)
 **Impact:** Cannot cancel query during hash table population. For million-row tables, this can take seconds.
 
 #### Parallel Hash Build
-**Function:** `MultiExecParallelHash()` (lines 283-301)
+**Function:** `MultiExecParallelHash()` ([lines 283-301](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c#L283-L301))
 
 Similar issue but in parallel workers - cannot interrupt individual worker's insert loop.
 
@@ -412,9 +418,9 @@ Similar issue but in parallel workers - cannot interrupt individual worker's ins
 
 ### 5.2 Hash Aggregate Building (CRITICAL)
 
-**File:** `src/backend/executor/nodeAgg.c`
+**File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
 
-**Function:** `agg_fill_hash_table()` (lines 2635-2655)
+**Function:** `agg_fill_hash_table()` ([lines 2635-2655](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c#L2635-L2655))
 
 ```c
 for (;;)
@@ -435,9 +441,9 @@ for (;;)
 
 ### 5.3 Ordered Aggregate Processing (HIGH)
 
-**File:** `src/backend/executor/nodeAgg.c`
+**File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
 
-**Function:** `process_ordered_aggregate_single()` (lines 877-926)
+**Function:** `process_ordered_aggregate_single()` ([lines 877-926](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c#L877-L926))
 
 Processes DISTINCT/ORDER BY in aggregates without interrupt checks.
 
@@ -447,15 +453,15 @@ Processes DISTINCT/ORDER BY in aggregates without interrupt checks.
 
 ### 5.4 Hash Join Batch Loading (HIGH)
 
-**File:** `src/backend/executor/nodeHashjoin.c`
+**File:** [`src/backend/executor/nodeHashjoin.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c)
 
 #### Serial Batch Reload
-**Function:** `ExecHashJoinNewBatch()` (lines 1232-1242)
+**Function:** `ExecHashJoinNewBatch()` ([lines 1232-1242](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c#L1232-L1242))
 
 Reloads batched data from disk without interruption checks.
 
 #### Parallel Batch Load
-**Function:** `ExecParallelHashJoinNewBatch()` (lines 1329-1338)
+**Function:** `ExecParallelHashJoinNewBatch()` ([lines 1329-1338](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c#L1329-L1338))
 
 Loads batches from shared tuple store without interruption checks.
 
