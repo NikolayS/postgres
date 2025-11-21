@@ -1,8 +1,8 @@
 # PostgreSQL Wait Events Coverage Gap Analysis
 
-**Date:** 2025-11-21
-**Analyst:** PostgreSQL Hacker Veteran
-**Purpose:** Identify code areas lacking wait event instrumentation that may be incorrectly visualized as "CPU" time in ASH and monitoring tools
+- **Date:** 2025-11-21
+- **Analyst:** @NikolayS + Claude Code Sonnet 4.5
+- **Purpose:** Identify code areas lacking wait event instrumentation that may be incorrectly visualized as "CPU" time in ASH and monitoring tools
 
 **Repository:** https://github.com/NikolayS/postgres
 **Commit Hash:** `b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44`
