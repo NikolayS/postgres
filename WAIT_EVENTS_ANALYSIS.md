@@ -14,22 +14,74 @@
 
 ## Executive Summary
 
-This analysis identified **68+ specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network operations, authentication services, or performing CPU-intensive work that should be distinguished.
+This analysis identified **68+ specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually:
+1. **Waiting** on I/O, network, or external services (need wait events)
+2. **Performing CPU work** that should be distinguished for monitoring (compression, crypto - wait events helpful)
+3. **Running long CPU loops** that cannot be cancelled (need interrupt checks)
 
 ### Key Findings by Category:
 
-| Category | Critical Issues | High Priority | Medium Priority | Total Locations |
-|----------|----------------|---------------|-----------------|-----------------|
-| I/O Operations | 8 | 12 | 15 | 35 |
-| Authentication | 15 | 3 | 2 | 20 |
-| Compression | 6 | 0 | 0 | 6 |
-| Cryptography | 5 | 0 | 0 | 5 |
-| Executor | 4 | 2 | 0 | 6 |
-| Maintenance | 2 | 3 | 4 | 9 |
-| Replication | 2 | 4 | 4 | 10 |
-| Synchronization | 1 | 0 | 0 | 1 |
+| Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type |
+|----------|----------------|---------------|-----------------|-----------------|------|
+| I/O Operations | 8 | 12 | 15 | 35 | Wait Events |
+| Authentication | 15 | 3 | 2 | 20 | Wait Events |
+| Compression | 6 | 0 | 0 | 6 | Wait Events (CPU work) |
+| Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU work) |
+| Executor | 4 | 2 | 0 | 6 | Interrupt Checks |
+| Maintenance | 2 | 3 | 4 | 9 | Mixed |
+| Replication | 2 | 4 | 4 | 10 | Wait Events |
+| Synchronization | 1 | 0 | 0 | 1 | Wait Events |
 
 **Total: 43 Critical, 24 High Priority, 25 Medium Priority = 92 individual issues**
+
+**Type Legend:**
+- **Wait Events**: Operations blocked waiting on external resources
+- **Wait Events (CPU work)**: CPU operations that benefit from labeling for monitoring
+- **Interrupt Checks**: CPU operations that need cancellation support
+
+---
+
+## Important Distinction: Wait Events vs. Interrupt Checks
+
+This analysis identifies two distinct types of instrumentation gaps:
+
+### 1. **Missing Wait Events** (True Blocking Operations)
+Operations where the process is **actually waiting** on external resources:
+- **I/O operations**: Waiting for disk (fsync, read, write, stat)
+- **Network operations**: Waiting for remote servers (LDAP, RADIUS, DNS)
+- **IPC/Locks**: Waiting for other processes or synchronization
+
+**Why they need wait events:** These operations are BLOCKED waiting for something external. The backend is idle, not consuming CPU. Monitoring tools should show what they're waiting for, not "CPU".
+
+**Examples:**
+- `ldap_search_s()` - waiting for LDAP server response
+- `fsync()` - waiting for disk controller to flush data
+- `connect()` - waiting for TCP handshake to complete
+
+### 2. **CPU-Intensive Operations Without Interrupt Checks**
+Operations where the process is **actively computing** but needs to be cancellable:
+- **Hash table building**: Inserting millions of tuples
+- **Sorting**: Merging runs during external sort
+- **Tuple processing**: Long loops over tuple sets
+
+**Why they DON'T need wait events:** These are legitimate CPU work - the process IS computing, not waiting. They appear correctly as "CPU" in monitoring.
+
+**Why they DO need CHECK_FOR_INTERRUPTS():** Long-running loops should periodically check for query cancellation (Ctrl+C) or statement timeout.
+
+**Examples:**
+- Hash join build loop inserting 10M rows
+- Aggregate hash table population
+- Heap page pruning traversing long HOT chains
+
+### 3. **CPU-Intensive Operations That SHOULD Have Wait Events** (Gray Area)
+Some CPU-intensive operations benefit from wait events even though they're not "waiting":
+- **Compression/decompression**: Distinguishes "compressing" from "computing"
+- **Cryptography**: Distinguishes "hashing password" from "running query"
+- **Base backup operations**: Provides visibility into backup stages
+
+**Why they warrant wait events:** Even though they're CPU work, labeling them helps operators understand WHAT kind of work is happening. During a base backup, seeing "COMPRESS_GZIP" is more useful than generic "CPU".
+
+**This document covers all three types,** with categories clearly marked.
 
 ---
 
@@ -72,6 +124,28 @@ FILE_MKDIR               "Waiting to create a directory"
 DIR_OPEN                 "Waiting to open a directory"
 DIR_READ                 "Waiting to read a directory entry"
 ```
+
+**Important Context - fd.c Has Two Instrumentation Layers:**
+
+The `fd.c` file contains both high-level and low-level I/O functions:
+
+1. **High-level `File*()` wrapper APIs** (lines 2000+): FileRead, FileWrite, FilePrefetch, FileSync, etc.
+   - ✅ **ALREADY INSTRUMENTED** - These pass `wait_event_info` parameters and call `pgstat_report_wait_start()`
+   - Used by most PostgreSQL code for relation file I/O
+
+2. **Low-level primitives** (lines 400-4000): `pg_fsync*()`, `stat()`, `unlink()`, `mkdir()`, etc.
+   - ❌ **NOT INSTRUMENTED** - Direct system call wrappers without wait events
+   - Called by:
+     - WAL operations (though WAL has its own wait events like WAL_SYNC)
+     - Storage manager operations via md.c
+     - Recovery and checkpoint code paths
+     - File cleanup and maintenance operations
+
+**The gap matters because:**
+- Some code paths bypass the high-level File*() APIs and call low-level primitives directly
+- File metadata operations (`stat`, `fstat`, `lstat`) never go through instrumented wrappers
+- File deletion (`unlink`) and directory operations (`mkdir`, `opendir`, `readdir`) are uninstrumented
+- These operations can block significantly on network filesystems (NFS, Ceph, etc.)
 
 **Priority:** CRITICAL - These are low-level primitives affecting all I/O operations
 
@@ -242,7 +316,11 @@ AUTH_RADIUS_RESPONSE     "Waiting for RADIUS authentication response"
 
 ## Category 3: Compression Operations Missing Wait Events (CRITICAL)
 
-**Context:** Base backup compression is CPU-intensive and can take SECONDS per file on large databases. Without wait events, backup operations appear as pure CPU load.
+**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O.**
+
+**Context:** Base backup compression is CPU-intensive work (not waiting). However, wait events are still valuable here to distinguish "compressing during backup" from other CPU activity. Without wait events, backup operations appear as generic "CPU" load, making it hard to identify that a backup is in progress.
+
+**Why wait events make sense here:** Even though compression is legitimate CPU work, labeling it provides operational visibility. When monitoring shows `BASEBACKUP_COMPRESS_GZIP`, operators immediately know a backup is running and compressing data, rather than seeing generic CPU usage.
 
 ### 3.1 Gzip Compression (CRITICAL)
 
@@ -315,11 +393,15 @@ DECOMPRESS_ZSTD              "Decompressing data with Zstandard"
 
 ## Category 4: Cryptographic Operations Missing Wait Events (MEDIUM-HIGH)
 
+**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O.**
+
+Similar to compression, cryptographic operations are CPU work, not waiting. However, wait events provide operational value by distinguishing "hashing passwords" from "running queries" during authentication storms.
+
 ### 4.1 SCRAM Authentication (HIGH)
 
 **File:** [`src/backend/libpq/auth-scram.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth-scram.c)
 
-SCRAM-SHA-256 uses PBKDF2 with 4096+ iterations, making it CPU-intensive by design. During authentication storms, this load is invisible.
+SCRAM-SHA-256 uses PBKDF2 with 4096+ iterations, making it CPU-intensive by design. During authentication storms, this CPU load is invisible - it appears as generic "CPU" rather than "authenticating users".
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
@@ -385,9 +467,18 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ---
 
-## Category 5: Executor Operations Missing Wait Events (HIGH)
+## Category 5: Executor Operations Missing Interrupt Checks (HIGH)
 
-### 5.1 Hash Join Building (CRITICAL)
+**⚠️ NOTE: These are CPU-bound operations, NOT waiting operations.**
+
+The issues in this category are about **cancellability**, not wait events. Hash building and aggregation are legitimate CPU work - they should appear as "CPU" in monitoring tools. The problem is that long-running loops lack `CHECK_FOR_INTERRUPTS()`, making queries uncancellable.
+
+**What's needed:** Periodic interrupt checks (e.g., every 1000-10000 tuples)
+**What's NOT needed:** Wait events (these aren't waiting for anything)
+
+---
+
+### 5.1 Hash Join Building (CRITICAL - Needs Interrupt Checks)
 
 **File:** [`src/backend/executor/nodeHash.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c)
 
@@ -405,18 +496,20 @@ for (;;)
 }
 ```
 
-**Impact:** Cannot cancel query during hash table population. For million-row tables, this can take seconds.
+**Issue:** Cannot cancel query during hash table population. For million-row tables, this can take seconds without any opportunity to interrupt.
+
+**Solution:** Add `CHECK_FOR_INTERRUPTS()` every N tuples (1000-10000 range)
 
 #### Parallel Hash Build
 **Function:** `MultiExecParallelHash()` ([lines 283-301](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c#L283-L301))
 
 Similar issue but in parallel workers - cannot interrupt individual worker's insert loop.
 
-**Priority:** CRITICAL - Hash joins are extremely common
+**Priority:** CRITICAL - Hash joins are extremely common and this affects query cancellation
 
 ---
 
-### 5.2 Hash Aggregate Building (CRITICAL)
+### 5.2 Hash Aggregate Building (CRITICAL - Needs Interrupt Checks)
 
 **File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
 
@@ -433,13 +526,15 @@ for (;;)
 }
 ```
 
-**Impact:** GROUP BY queries with large input cannot be cancelled during hash table population.
+**Issue:** GROUP BY queries with large input cannot be cancelled during hash table population.
 
-**Priority:** CRITICAL - Very common query pattern
+**Solution:** Add `CHECK_FOR_INTERRUPTS()` every N tuples
+
+**Priority:** CRITICAL - Very common query pattern (every GROUP BY with hash aggregate)
 
 ---
 
-### 5.3 Ordered Aggregate Processing (HIGH)
+### 5.3 Ordered Aggregate Processing (HIGH - Needs Interrupt Checks)
 
 **File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
 
@@ -451,7 +546,7 @@ Processes DISTINCT/ORDER BY in aggregates without interrupt checks.
 
 ---
 
-### 5.4 Hash Join Batch Loading (HIGH)
+### 5.4 Hash Join Batch Loading (MEDIUM - Might Need Wait Events)
 
 **File:** [`src/backend/executor/nodeHashjoin.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c)
 
@@ -460,26 +555,31 @@ Processes DISTINCT/ORDER BY in aggregates without interrupt checks.
 
 Reloads batched data from disk without interruption checks.
 
+**Note:** This operation actually involves I/O (reading from temp files), so it might warrant a wait event to distinguish "loading batch from disk" from pure CPU work.
+
 #### Parallel Batch Load
 **Function:** `ExecParallelHashJoinNewBatch()` ([lines 1329-1338](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c#L1329-L1338))
 
 Loads batches from shared tuple store without interruption checks.
 
-**Priority:** HIGH - Occurs when hash tables spill to disk
+**Priority:** MEDIUM - Only occurs when hash tables spill to disk
 
 ---
 
-**Proposed Wait Events:**
-```
-# Extend existing executor wait events in WaitEventIPC
-HASH_BUILD               "Building hash table for hash join or aggregate"
-HASH_BATCH_RELOAD        "Reloading hash join batch from disk"
-AGG_ORDERED_PROCESS      "Processing ordered aggregate"
+**Recommended Solution:**
+```c
+// Add to hash building loops:
+if (++tupleCount % 10000 == 0)
+    CHECK_FOR_INTERRUPTS();
 ```
 
-**Alternative:** Add CHECK_FOR_INTERRUPTS() every N tuples (1000-10000) instead of wait events
+**Optional Wait Event for Batch Loading:**
+```
+# Only for operations that actually read from disk:
+HASH_BATCH_RELOAD        "Reloading hash join batch from temp files"
+```
 
-**Priority:** CRITICAL for hash operations - these are extremely common
+**Priority Summary:** CRITICAL for cancellability - these loops need interrupt checks, not wait events
 
 ---
 
