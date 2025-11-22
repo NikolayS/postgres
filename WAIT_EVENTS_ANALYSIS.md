@@ -16,8 +16,6 @@
 
 This analysis identified **78 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
 
-**Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been moved to a separate document: [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md)
-
 ### Key Findings by Category:
 
 | Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
@@ -33,43 +31,8 @@ This analysis identified **78 specific locations** across the PostgreSQL codebas
 **Total: 36 Critical, 19 High Priority, 23 Medium Priority = 78 individual issues**
 
 **Type Legend:**
-- **Wait Events**: Operations blocked waiting on external resources
+- **Wait Events**: Operations blocked waiting on external resources (I/O, network, locks)
 - **Wait Events (CPU)**: CPU operations that benefit from labeling for monitoring visibility (OPTIONAL)
-- **Mixed**: Some need wait events, others need interrupt checks
-
----
-
-## Important Distinction: Wait Events vs. Interrupt Checks
-
-This analysis focuses on **missing wait events** for operations that block or perform distinguishable work.
-
-### 1. **Missing Wait Events** (True Blocking Operations) - PRIMARY FOCUS
-Operations where the process is **actually waiting** on external resources:
-- **I/O operations**: Waiting for disk (fsync, read, write, stat)
-- **Network operations**: Waiting for remote servers (LDAP, RADIUS, DNS)
-- **IPC/Locks**: Waiting for other processes or synchronization
-
-**Why they need wait events:** These operations are BLOCKED waiting for something external. The backend is idle, not consuming CPU. Monitoring tools should show what they're waiting for, not "CPU".
-
-**Examples:**
-- `ldap_search_s()` - waiting for LDAP server response
-- `fsync()` - waiting for disk controller to flush data
-- `connect()` - waiting for TCP handshake to complete
-
-### 2. **CPU-Intensive Operations That SHOULD Have Wait Events** (OPTIONAL)
-Some CPU-intensive operations benefit from wait events even though they're not "waiting":
-- **Compression/decompression**: Distinguishes "compressing" from "computing"
-- **Cryptography**: Distinguishes "hashing password" from "running query"
-- **Base backup operations**: Provides visibility into backup stages
-
-**Why they warrant wait events:** Even though they're CPU work, labeling them helps operators understand WHAT kind of work is happening. During a base backup, seeing "COMPRESS_GZIP" is more useful than generic "CPU".
-
-**Note:** These are marked as **OPTIONAL** in this analysis, as they provide observability benefits rather than fixing incorrect "CPU" attribution.
-
-### 3. **CPU-Intensive Operations Without Interrupt Checks** (OUT OF SCOPE)
-Operations where the process is **actively computing** but needs to be cancellable have been moved to a separate document: [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md)
-
-**Why they're separate:** These are legitimate CPU work - they appear correctly as "CPU" in monitoring. The issue is cancellability (needing `CHECK_FOR_INTERRUPTS()`), not wait event visibility.
 
 ---
 
@@ -275,7 +238,7 @@ AUTH_IDENT_IO            "Waiting for ident server response"
 | [3124](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3124) | `select()` | Polling for RADIUS response (manual timeout) |
 | [3157](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L3157) | `recvfrom()` | UDP receive from RADIUS server |
 
-**Impact:** Uses custom select() loop instead of WaitLatchOrSocket, making interrupt handling harder
+**Impact:** Uses custom select() loop instead of WaitLatchOrSocket for timeout handling
 
 **Proposed Wait Events:**
 ```
@@ -421,7 +384,7 @@ AUTH_SCRAM_HMAC          "Computing HMAC for SCRAM authentication"
 
 **File:** [`src/backend/utils/adt/cryptohashfuncs.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/adt/cryptohashfuncs.c)
 
-SQL-callable hash functions can process large bytea values (MB+) without interruption.
+SQL-callable hash functions can process large bytea values (MB+).
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
@@ -474,7 +437,7 @@ Main loop processing all changes in large transactions:
 foreach(...)
 {
     ReorderBufferChange *change = lfirst(iter);
-    // Process change - only CHECK_FOR_INTERRUPTS(), no wait event
+    // Process change - no wait event
     switch (change->action)
     {
         // ... handle INSERT/UPDATE/DELETE ...
@@ -482,7 +445,7 @@ foreach(...)
 }
 ```
 
-**Impact:** Large transactions (millions of changes) process without visibility. Only has CHECK_FOR_INTERRUPTS(), not wait events.
+**Impact:** Large transactions (millions of changes) process without visibility.
 
 **Priority:** CRITICAL - Can take MINUTES for large transactions
 
@@ -565,7 +528,7 @@ Initial buffer pool scan:
 // Line 3390+: Scan entire buffer pool
 for (buf_id = 0; buf_id < NBuffers; buf_id++)
 {
-    // Only ProcessProcSignalBarrier(), no CHECK_FOR_INTERRUPTS()!
+    // Process buffer - no wait event
 }
 ```
 
@@ -690,8 +653,6 @@ This analysis identified **78 specific code locations** across PostgreSQL where 
 - Compressing data (gzip, LZ4, Zstandard) - OPTIONAL for observability
 - Computing cryptographic hashes (SCRAM, HMAC, SHA-256) - OPTIONAL for observability
 - Processing large replication transactions
-
-**Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been documented separately in [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md).
 
 ---
 
