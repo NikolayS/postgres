@@ -14,20 +14,20 @@
 
 ## Executive Summary
 
-This analysis identified **54 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+This analysis identified **56 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
 
-**Of these, 39 are required fixes for true blocking operations, and 15 are optional for observability improvements.**
+**Of these, 41 are required fixes for true blocking operations, and 15 are optional for observability improvements.**
 
 ### Key Findings by Category:
 
 | Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
 |----------|----------------|---------------|-----------------|-----------------|------|--------|
-| I/O Operations | 0 | 5 | 2 | 7 | Wait Events | Required |
+| I/O Operations | 0 | 7 | 2 | 9 | Wait Events | Required |
 | Authentication | 22 | 10 | 0 | 32 | Wait Events | Required |
 | Compression | 0 | 0 | 0 | 7 | Wait Events (CPU) | **OPTIONAL** |
 | Cryptography | 0 | 0 | 0 | 8 | Wait Events (CPU) | **OPTIONAL** |
 
-**Total: 22 Critical, 15 High Priority, 2 Medium Priority = 39 required issues + 15 optional = 54 total locations**
+**Total: 22 Critical, 17 High Priority, 2 Medium Priority = 41 required issues + 15 optional = 56 total locations**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources (I/O, network, locks)
@@ -81,6 +81,40 @@ STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
 | [849](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/ipc/dsm_impl.c#L849) | DSM cleanup | `fstat(fd, &st)` | Shared memory cleanup |
 
 **Priority:** MEDIUM - Used in parallel query execution
+
+---
+
+### 1.4 COPY FROM/TO PROGRAM (HIGH)
+
+**Files:**
+- [`src/backend/commands/copyfromparse.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/commands/copyfromparse.c)
+- [`src/backend/commands/copyto.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/commands/copyto.c)
+
+**Issue:** COPY FROM/TO PROGRAM executes external commands via pipes and communicates using stdio `fread()`/`fwrite()`. These operations can block waiting for the external program to produce or consume data, but have NO wait event instrumentation.
+
+| File | Line | Operation | Impact |
+|------|------|-----------|--------|
+| copyfromparse.c | [252](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/commands/copyfromparse.c#L252) | `fread()` from pipe | Reading from slow external program appears as "CPU" |
+| copyto.c | [452-453](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/commands/copyto.c#L452-L453) | `fwrite()` to pipe | Writing to slow external program appears as "CPU" |
+
+**Examples:**
+```sql
+COPY data FROM PROGRAM 'slow_decompression_script.sh';  -- Blocks on fread()
+COPY data TO PROGRAM 'gzip > /slow/nfs/file.gz';        -- Blocks on fwrite()
+```
+
+**Impact:**
+- Slow external programs cause backends to appear busy with "CPU" work
+- No visibility into whether the delay is PostgreSQL processing or waiting on the external command
+- file_fdw with PROGRAM mode has the same issue (uses same COPY infrastructure)
+
+**Proposed Wait Events:**
+```
+COPY_FROM_PROGRAM_READ   "Waiting to read data from external program"
+COPY_TO_PROGRAM_WRITE    "Waiting to write data to external program"
+```
+
+**Priority:** HIGH - Can cause significant blocking when using external data processing tools
 
 ---
 
@@ -487,20 +521,24 @@ CRYPTO_HMAC                 "Computing HMAC"
 # Recovery operations
 RECOVERY_SIGNAL_FILE_SYNC   "Waiting to sync recovery signal file"
 STANDBY_SIGNAL_FILE_SYNC    "Waiting to sync standby signal file"
+
+# COPY PROGRAM operations
+COPY_FROM_PROGRAM_READ      "Waiting to read data from external program"
+COPY_TO_PROGRAM_WRITE       "Waiting to write data to external program"
 ```
 
 ---
 
 ## Conclusion
 
-This analysis identified **54 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **56 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
 - **Waiting for external authentication services** (LDAP, PAM, GSSAPI/Kerberos, DNS, RADIUS, ident) - 32 locations, REQUIRED
-- **Performing I/O operations** (fsync, stat, unlink on recovery/storage files) - 7 locations, REQUIRED
+- **Performing I/O operations** (fsync, stat, unlink, COPY PROGRAM pipe I/O) - 9 locations, REQUIRED
 - **Compressing data** (gzip, LZ4, Zstandard) - 7 locations, OPTIONAL for observability
 - **Computing cryptographic hashes** (SCRAM, HMAC, SHA-256, CRC) - 8 locations, OPTIONAL for observability
 
-Of the 54 locations, **39 are required fixes** for true blocking operations, and **15 are optional** for improved CPU workload observability.
+Of the 56 locations, **41 are required fixes** for true blocking operations, and **15 are optional** for improved CPU workload observability.
 
 ### Authentication is the Biggest Gap
 
@@ -518,7 +556,7 @@ These authentication gaps are CRITICAL because they block every login and can ca
 
 ## Appendix: Files Requiring Changes
 
-### REQUIRED Wait Events (39 locations)
+### REQUIRED Wait Events (41 locations)
 
 **Critical Priority - Authentication (22 locations):**
 - src/backend/libpq/auth.c
@@ -526,9 +564,11 @@ These authentication gaps are CRITICAL because they block every login and can ca
   - Ident operations: 8 locations (lines 1686-1689, 1704, 1720, 1728-1729, 1744, 1755-1756, 1776, 1793)
   - PAM operations: 2 locations (lines 2115, 2128)
 
-**High Priority - I/O and Authentication (15 locations):**
+**High Priority - I/O and Authentication (17 locations):**
 - src/backend/access/transam/xlogrecovery.c: 2 locations (recovery signal file syncs, lines 1072, 1085)
 - src/backend/storage/smgr/md.c: 3 locations (file unlink operations, lines 395, 454, 1941)
+- src/backend/commands/copyfromparse.c: 1 location (COPY FROM PROGRAM fread, line 252)
+- src/backend/commands/copyto.c: 1 location (COPY TO PROGRAM fwrite, lines 452-453)
 - src/backend/libpq/auth.c:
   - RADIUS operations: 5 locations (lines 2971, 3066, 3075-3076, 3124, 3157)
   - DNS lookups: 3 locations (lines 432-435, 478, 2081)
