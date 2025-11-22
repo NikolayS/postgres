@@ -14,20 +14,20 @@
 
 ## Executive Summary
 
-This analysis identified **45 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+This analysis identified **54 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
 
-**Of these, 30 are required fixes for true blocking operations, and 15 are optional for observability improvements.**
+**Of these, 39 are required fixes for true blocking operations, and 15 are optional for observability improvements.**
 
 ### Key Findings by Category:
 
 | Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
 |----------|----------------|---------------|-----------------|-----------------|------|--------|
 | I/O Operations | 0 | 5 | 2 | 7 | Wait Events | Required |
-| Authentication | 15 | 8 | 0 | 23 | Wait Events | Required |
+| Authentication | 22 | 10 | 0 | 32 | Wait Events | Required |
 | Compression | 0 | 0 | 0 | 7 | Wait Events (CPU) | **OPTIONAL** |
 | Cryptography | 0 | 0 | 0 | 8 | Wait Events (CPU) | **OPTIONAL** |
 
-**Total: 15 Critical, 13 High Priority, 2 Medium Priority = 30 required issues + 15 optional = 45 total locations**
+**Total: 22 Critical, 15 High Priority, 2 Medium Priority = 39 required issues + 15 optional = 54 total locations**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources (I/O, network, locks)
@@ -89,18 +89,23 @@ STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
 ### 2.1 LDAP Authentication (CRITICAL)
 
 **File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
-**Function:** `check_ldapauth()`
+**Functions:** `InitializeLDAPConnection()`, `CheckLDAPAuth()`
 
 **Issue:** LDAP authentication can block for SECONDS waiting for directory services. No wait event instrumentation exists for any LDAP operation.
 
 | Line | Operation | Blocking Potential |
 |------|-----------|-------------------|
+| [2220](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2220) | `ldap_sslinit()` (Windows) | SSL initialization and connection to LDAP server |
 | [2222](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2222) | `ldap_init()` | Network connection to LDAP server |
+| [2268](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2268) | `ldap_domain2hostlist()` | **DNS SRV RECORD LOOKUP - Can timeout** |
 | [2320](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2320) | `ldap_initialize()` | Network connection (OpenLDAP) |
 | [2339](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2339) | `ldap_init()` | Network connection fallback |
 | [2350](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2350) | `ldap_set_option()` | May perform network operations |
+| [2363](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2363)/[2365](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2365) | `ldap_start_tls_s()` | **TLS HANDSHAKE - Synchronous network operation** |
+| [2526](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2526) | `ldap_simple_bind_s()` | **SYNCHRONOUS BIND for search - Can block** |
 | [2551](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2551) | `ldap_search_s()` | **SYNCHRONOUS SEARCH - WORST OFFENDER** |
 | [2602](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2602) | `ldap_get_option()` | May perform network operations |
+| [2626](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2626) | `ldap_simple_bind_s()` | **SYNCHRONOUS USER AUTH BIND - Critical path** |
 | [2660](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2660) | `ldap_get_option()` | May perform network operations |
 
 **Impact:** Every LDAP authentication blocks the backend process without visibility. Under authentication load, this causes:
@@ -195,6 +200,82 @@ AUTH_RADIUS_RESPONSE     "Waiting for RADIUS authentication response"
 | [2081](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2081) | `pg_getnameinfo_all()` | Reverse DNS for SSPI authentication |
 
 **Priority:** HIGH - DNS lookups can hang indefinitely
+
+---
+
+### 2.5 PAM Authentication (CRITICAL)
+
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
+**Function:** `CheckPAMAuth()`
+
+**Issue:** PAM (Pluggable Authentication Modules) can invoke ANY external authentication mechanism - LDAP, Active Directory, Kerberos, RADIUS, custom scripts, or network services. These operations can block for seconds without any wait event visibility.
+
+| Line | Operation | Blocking Potential |
+|------|-----------|-------------------|
+| [2115](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2115) | `pam_authenticate()` | **Calls external PAM modules - can do ANYTHING** (LDAP, AD, network, files) |
+| [2128](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L2128) | `pam_acct_mgmt()` | Account management - can also invoke external services |
+
+**Impact:** PAM modules are black boxes that can:
+- Contact Active Directory servers
+- Perform LDAP queries
+- Make network requests
+- Execute external scripts
+- All without any visibility in PostgreSQL wait events
+
+**Proposed Wait Events:**
+```
+AUTH_PAM_AUTHENTICATE    "Waiting for PAM authentication"
+AUTH_PAM_ACCOUNT         "Waiting for PAM account management"
+```
+
+**Priority:** CRITICAL - Every PAM login when configured
+
+---
+
+### 2.6 GSSAPI/Kerberos Authentication (HIGH)
+
+**File:** [`src/backend/libpq/auth.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c)
+**Function:** `pg_GSS_recvauth()`
+
+**Issue:** GSSAPI authentication (commonly used for Kerberos) may contact Key Distribution Centers (KDCs) over the network.
+
+| Line | Operation | Blocking Potential |
+|------|-----------|-------------------|
+| [996](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/libpq/auth.c#L996) | `gss_accept_sec_context()` | May contact Kerberos KDC, perform network operations |
+
+**Impact:** Kerberos ticket validation can involve network round-trips to authentication servers
+
+**Proposed Wait Events:**
+```
+AUTH_GSS_ACCEPT_CTX      "Waiting for GSSAPI security context acceptance"
+```
+
+**Priority:** HIGH - Used in enterprise environments with Kerberos
+
+---
+
+### 2.7 Connection Logging DNS Lookup (HIGH)
+
+**File:** [`src/backend/tcop/backend_startup.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/tcop/backend_startup.c)
+**Function:** `BackendInitialize()`
+
+**Issue:** When `log_hostname=on` (not default), PostgreSQL performs a reverse DNS lookup on **EVERY new connection** to resolve the client IP to a hostname for logging.
+
+| Line | Operation | Impact |
+|------|-----------|--------|
+| [206-209](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/tcop/backend_startup.c#L206-L209) | `pg_getnameinfo_all()` | Reverse DNS lookup - can timeout or hang |
+
+**Impact:**
+- Affects EVERY connection when `log_hostname=on`
+- DNS timeouts cause all new connections to appear as "CPU"
+- No visibility that the delay is DNS-related
+
+**Proposed Wait Events:**
+```
+CONNECTION_LOG_HOSTNAME  "Waiting for reverse DNS lookup during connection"
+```
+
+**Priority:** HIGH - When enabled, affects every single connection
 
 ---
 
@@ -369,12 +450,17 @@ AUTH_LDAP_INIT              "Waiting to connect to LDAP server"
 AUTH_LDAP_BIND              "Waiting for LDAP bind operation"
 AUTH_LDAP_SEARCH            "Waiting for LDAP search operation"
 AUTH_LDAP_OPTION            "Waiting for LDAP option operation"
+AUTH_LDAP_TLS               "Waiting for LDAP TLS handshake"
 AUTH_DNS_LOOKUP             "Waiting for DNS resolution during authentication"
 AUTH_IDENT_CONNECT          "Waiting to connect to ident server"
 AUTH_IDENT_IO               "Waiting for ident server response"
 AUTH_RADIUS_CONNECT         "Waiting to send RADIUS authentication request"
 AUTH_RADIUS_RESPONSE        "Waiting for RADIUS authentication response"
+AUTH_PAM_AUTHENTICATE       "Waiting for PAM authentication"
+AUTH_PAM_ACCOUNT            "Waiting for PAM account management"
+AUTH_GSS_ACCEPT_CTX         "Waiting for GSSAPI security context acceptance"
 AUTH_SCRAM_VERIFY           "Verifying SCRAM-SHA-256 authentication"
+CONNECTION_LOG_HOSTNAME     "Waiting for reverse DNS lookup during connection"
 
 #
 # WaitEventCompression - Data compression/decompression
@@ -407,35 +493,50 @@ STANDBY_SIGNAL_FILE_SYNC    "Waiting to sync standby signal file"
 
 ## Conclusion
 
-This analysis identified **45 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **54 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
-- **Waiting for external services** (LDAP, DNS, RADIUS, ident) - 23 locations, REQUIRED
+- **Waiting for external authentication services** (LDAP, PAM, GSSAPI/Kerberos, DNS, RADIUS, ident) - 32 locations, REQUIRED
 - **Performing I/O operations** (fsync, stat, unlink on recovery/storage files) - 7 locations, REQUIRED
 - **Compressing data** (gzip, LZ4, Zstandard) - 7 locations, OPTIONAL for observability
 - **Computing cryptographic hashes** (SCRAM, HMAC, SHA-256, CRC) - 8 locations, OPTIONAL for observability
 
-Of the 45 locations, **30 are required fixes** for true blocking operations, and **15 are optional** for improved CPU workload observability.
+Of the 54 locations, **39 are required fixes** for true blocking operations, and **15 are optional** for improved CPU workload observability.
+
+### Authentication is the Biggest Gap
+
+The most critical findings are in **authentication** (32 locations):
+- **LDAP**: 12 blocking network operations including DNS SRV lookups, TLS handshakes, binds, and searches
+- **PAM**: 2 operations that can invoke ANY external service (LDAP, AD, network, scripts)
+- **Ident**: 8 operations including DNS lookups and TCP connections
+- **RADIUS**: 5 operations for UDP-based authentication
+- **GSSAPI/Kerberos**: 1 operation that may contact KDC servers
+- **DNS lookups**: 3 in auth.c + 1 in backend_startup.c for connection logging
+
+These authentication gaps are CRITICAL because they block every login and can cause connection storms to appear as "CPU" load when the real issue is slow/failed authentication infrastructure.
 
 ---
 
 ## Appendix: Files Requiring Changes
 
-### REQUIRED Wait Events (30 locations)
+### REQUIRED Wait Events (39 locations)
 
-**Critical Priority - Authentication (15 locations):**
+**Critical Priority - Authentication (22 locations):**
 - src/backend/libpq/auth.c
-  - LDAP operations: 7 locations (lines 2222, 2320, 2339, 2350, 2551, 2602, 2660)
+  - LDAP operations: 12 locations (lines 2220, 2222, 2268, 2320, 2339, 2350, 2363/2365, 2526, 2551, 2602, 2626, 2660)
   - Ident operations: 8 locations (lines 1686-1689, 1704, 1720, 1728-1729, 1744, 1755-1756, 1776, 1793)
+  - PAM operations: 2 locations (lines 2115, 2128)
 
-**High Priority - I/O and Authentication (13 locations):**
-- src/backend/access/transam/xlogrecovery.c: 2 locations (recovery signal file syncs)
-- src/backend/storage/smgr/md.c: 3 locations (file unlink operations)
+**High Priority - I/O and Authentication (15 locations):**
+- src/backend/access/transam/xlogrecovery.c: 2 locations (recovery signal file syncs, lines 1072, 1085)
+- src/backend/storage/smgr/md.c: 3 locations (file unlink operations, lines 395, 454, 1941)
 - src/backend/libpq/auth.c:
   - RADIUS operations: 5 locations (lines 2971, 3066, 3075-3076, 3124, 3157)
   - DNS lookups: 3 locations (lines 432-435, 478, 2081)
+  - GSSAPI operations: 1 location (line 996)
+- src/backend/tcop/backend_startup.c: 1 location (connection logging DNS, lines 206-209)
 
 **Medium Priority - I/O (2 locations):**
-- src/backend/storage/ipc/dsm_impl.c: 2 locations (fstat operations)
+- src/backend/storage/ipc/dsm_impl.c: 2 locations (fstat operations, lines 278, 849)
 
 ### OPTIONAL Wait Events for Observability (15 locations)
 
