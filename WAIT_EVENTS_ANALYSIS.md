@@ -14,13 +14,13 @@
 
 ## Executive Summary
 
-This analysis identified **78 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+This analysis identified **50 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
 
 ### Key Findings by Category:
 
 | Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
 |----------|----------------|---------------|-----------------|-----------------|------|--------|
-| I/O Operations | 8 | 12 | 15 | 35 | Wait Events | Required |
+| I/O Operations | 0 | 5 | 2 | 7 | Wait Events | Required |
 | Authentication | 15 | 3 | 2 | 20 | Wait Events | Required |
 | Compression | 6 | 0 | 0 | 6 | Wait Events (CPU) | **OPTIONAL** |
 | Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU) | **OPTIONAL** |
@@ -28,7 +28,7 @@ This analysis identified **78 specific locations** across the PostgreSQL codebas
 | Buffer Mgmt | 0 | 0 | 1 | 1 | Wait Events | Required |
 | Synchronization | 0 | 0 | 1 | 1 | Wait Events | Required |
 
-**Total: 36 Critical, 19 High Priority, 23 Medium Priority = 78 individual issues**
+**Total: 28 Critical, 12 High Priority, 10 Medium Priority = 50 individual issues**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources (I/O, network, locks)
@@ -38,67 +38,23 @@ This analysis identified **78 specific locations** across the PostgreSQL codebas
 
 ## Category 1: I/O Operations Missing Wait Events
 
-### 1.1 Low-Level File System Operations (CRITICAL)
+### 1.1 Recovery Signal File Operations (HIGH)
 
-**File:** [`src/backend/storage/file/fd.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c)
-
-These are fundamental I/O primitives called throughout the codebase. Missing instrumentation here affects all code using these functions.
+**File:** [`src/backend/access/transam/xlogrecovery.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c)
 
 | Line | Function | Operation | Impact |
 |------|----------|-----------|--------|
-| [449](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L449) | `pg_fsync_no_writethrough()` | `fsync(fd)` | Universal fsync - called from many locations |
-| [466](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L466) | `pg_fsync_writethrough()` | `fcntl(fd, F_FULLFSYNC, 0)` | macOS fsync - called from many locations |
-| [488](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L488) | `pg_fdatasync()` | `fdatasync(fd)` | Data-only sync - called from many locations |
-| [410](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L410) | `pg_fsync()` | `fstat(fd, &st)` | File metadata check before sync |
-| [509](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L509) | `pg_file_exists()` | `stat(name, &st)` | File existence check |
-| [834](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L834) | `durable_rename()` | `rename(oldfile, newfile)` | Atomic file rename |
-| [874](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L874) | `durable_unlink()` | `unlink(fname)` | File deletion |
-| [1955](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L1955) | File cleanup | `unlink(path)` | Cleanup during file operations |
-| [2047](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L2047) | File cleanup | `unlink(vfdP->fileName)` | VFD cleanup |
-| [3440](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3440) | `RemovePgTempFilesInDir()` | `unlink(rm_path)` | Temp file cleanup loop |
-| [3502](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3502) | `RemovePgTempRelationFilesInDbspace()` | `unlink(rm_path)` | Relation file cleanup loop |
-| [3626](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3626) | `walkdir()` | `lstat("pg_wal", &st)` | WAL directory check |
-| [3980](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3980) | `MakePGDirectory()` | `mkdir(directoryName, mode)` | Directory creation |
-| [2925](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L2925) | `AllocateDir()` | `opendir()` | Directory open - can block on NFS |
-| [3003](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/file/fd.c#L3003) | `ReadDirExtended()` | `readdir()` | Directory read - can block on NFS |
+| [1072](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1072) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
+| [1085](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1085) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
 
 **Proposed Wait Events:**
 ```
 # In WaitEventIO category:
-FSYNC_NO_WRITETHROUGH    "Waiting to sync a file to disk (no writethrough)"
-FSYNC_WRITETHROUGH       "Waiting to sync a file to disk (with writethrough)"
-FDATASYNC                "Waiting to sync file data to disk"
-FILE_STAT                "Waiting for file metadata (stat/fstat/lstat)"
-FILE_RENAME              "Waiting to rename a file"
-FILE_UNLINK              "Waiting to delete a file"
-FILE_MKDIR               "Waiting to create a directory"
-DIR_OPEN                 "Waiting to open a directory"
-DIR_READ                 "Waiting to read a directory entry"
+RECOVERY_SIGNAL_FILE_SYNC    "Waiting to sync recovery signal file"
+STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
 ```
 
-**Important Context - fd.c Has Two Instrumentation Layers:**
-
-The `fd.c` file contains both high-level and low-level I/O functions:
-
-1. **High-level `File*()` wrapper APIs** (lines 2000+): FileRead, FileWrite, FilePrefetch, FileSync, etc.
-   - ✅ **ALREADY INSTRUMENTED** - These pass `wait_event_info` parameters and call `pgstat_report_wait_start()`
-   - Used by most PostgreSQL code for relation file I/O
-
-2. **Low-level primitives** (lines 400-4000): `pg_fsync*()`, `stat()`, `unlink()`, `mkdir()`, etc.
-   - ❌ **NOT INSTRUMENTED** - Direct system call wrappers without wait events
-   - Called by:
-     - WAL operations (though WAL has its own wait events like WAL_SYNC)
-     - Storage manager operations via md.c
-     - Recovery and checkpoint code paths
-     - File cleanup and maintenance operations
-
-**The gap matters because:**
-- Some code paths bypass the high-level File*() APIs and call low-level primitives directly
-- File metadata operations (`stat`, `fstat`, `lstat`) never go through instrumented wrappers
-- File deletion (`unlink`) and directory operations (`mkdir`, `opendir`, `readdir`) are uninstrumented
-- These operations can block significantly on network filesystems (NFS, Ceph, etc.)
-
-**Priority:** CRITICAL - These are low-level primitives affecting all I/O operations
+**Priority:** HIGH - Critical startup path for standby servers
 
 ---
 
@@ -116,29 +72,7 @@ The `fd.c` file contains both high-level and low-level I/O functions:
 
 ---
 
-### 1.3 Recovery Signal File Operations (HIGH)
-
-**File:** [`src/backend/access/transam/xlogrecovery.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c)
-
-| Line | Function | Operation | Impact |
-|------|----------|-----------|--------|
-| [1072](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1072) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
-| [1073](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1073) | `StartupInitAutoStandby()` | `close(fd)` for STANDBY_SIGNAL_FILE | Critical startup path |
-| [1085](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1085) | `StartupInitAutoStandby()` | `pg_fsync(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
-| [1086](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/access/transam/xlogrecovery.c#L1086) | `StartupInitAutoStandby()` | `close(fd)` for RECOVERY_SIGNAL_FILE | Critical startup path |
-
-**Proposed Wait Events:**
-```
-# In WaitEventIO category:
-RECOVERY_SIGNAL_FILE_SYNC    "Waiting to sync recovery signal file"
-STANDBY_SIGNAL_FILE_SYNC     "Waiting to sync standby signal file"
-```
-
-**Priority:** HIGH - Critical startup path for standby servers
-
----
-
-### 1.4 Dynamic Shared Memory Operations (MEDIUM)
+### 1.3 Dynamic Shared Memory Operations (MEDIUM)
 
 **File:** [`src/backend/storage/ipc/dsm_impl.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/storage/ipc/dsm_impl.c)
 
@@ -613,16 +547,7 @@ CRYPTO_HMAC                 "Computing HMAC"
 ### Extensions to Existing WaitEventIO:
 
 ```
-# File system operations
-FSYNC_NO_WRITETHROUGH       "Waiting to sync a file to disk (no writethrough)"
-FSYNC_WRITETHROUGH          "Waiting to sync a file to disk (with writethrough)"
-FDATASYNC                   "Waiting to sync file data to disk"
-FILE_STAT                   "Waiting for file metadata (stat/fstat/lstat)"
-FILE_RENAME                 "Waiting to rename a file"
-FILE_UNLINK                 "Waiting to delete a file"
-FILE_MKDIR                  "Waiting to create a directory"
-DIR_OPEN                    "Waiting to open a directory"
-DIR_READ                    "Waiting to read a directory entry"
+# Recovery operations
 RECOVERY_SIGNAL_FILE_SYNC   "Waiting to sync recovery signal file"
 STANDBY_SIGNAL_FILE_SYNC    "Waiting to sync standby signal file"
 ```
@@ -646,7 +571,7 @@ LWLOCK_DEQUEUE_WAIT         "Waiting for LWLock dequeue completion"
 
 ## Conclusion
 
-This analysis identified **78 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **50 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
 - Waiting for external services (LDAP, DNS, RADIUS, ident)
 - Performing I/O operations (fsync, stat, unlink, directory operations)
@@ -658,28 +583,30 @@ This analysis identified **78 specific code locations** across PostgreSQL where 
 
 ## Appendix: Files Requiring Changes
 
-### Critical Priority Files (29 locations) - Required Wait Events
-- src/backend/storage/file/fd.c (15 locations)
-- src/backend/libpq/auth.c (15 locations)
+### Critical Priority Files (15 locations) - Required Wait Events
+- src/backend/libpq/auth.c (15 locations - LDAP, Ident, RADIUS, DNS)
 
 ### Critical Priority Files (6 locations) - OPTIONAL Wait Events
 - src/backend/backup/basebackup_gzip.c (2 locations)
-- src/backend/backup/basebackup_lz4.c (3 locations)
+- src/backend/backup/basebackup_lz4.c (1 location)
 - src/backend/backup/basebackup_zstd.c (2 locations)
 
-### High Priority Files (12 locations)
+### High Priority Files (17 locations)
+- src/backend/libpq/auth.c (3 locations - DNS lookups)
 - src/backend/libpq/auth-scram.c (5 locations) - OPTIONAL
-- src/backend/access/transam/xlogrecovery.c (4 locations)
+- src/backend/access/transam/xlogrecovery.c (2 locations)
 - src/backend/replication/logical/reorderbuffer.c (4 locations)
 - src/backend/storage/smgr/md.c (3 locations)
 - src/backend/replication/logical/worker.c (2 locations)
 
-### Medium Priority Files (6 locations)
-- src/backend/utils/adt/cryptohashfuncs.c (3 locations)
-- src/backend/utils/hash/pg_crc.c (2 locations)
+### Medium Priority Files (12 locations)
+- src/backend/utils/adt/cryptohashfuncs.c (3 locations) - OPTIONAL
+- src/backend/utils/hash/pg_crc.c (2 locations) - OPTIONAL
 - src/backend/storage/buffer/bufmgr.c (1 location)
 - src/backend/storage/lmgr/lwlock.c (1 location)
 - src/backend/storage/ipc/dsm_impl.c (2 locations)
+- src/backend/replication/logical/reorderbuffer.c (1 location)
+- src/backend/libpq/auth.c (2 locations - RADIUS)
 
 ---
 
