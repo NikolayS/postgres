@@ -14,38 +14,37 @@
 
 ## Executive Summary
 
-This analysis identified **68+ specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually:
-1. **Waiting** on I/O, network, or external services (need wait events)
-2. **Performing CPU work** that should be distinguished for monitoring (compression, crypto - wait events helpful)
-3. **Running long CPU loops** that cannot be cancelled (need interrupt checks)
+This analysis identified **86 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+
+**Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been moved to a separate document: [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md)
 
 ### Key Findings by Category:
 
-| Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type |
-|----------|----------------|---------------|-----------------|-----------------|------|
-| I/O Operations | 8 | 12 | 15 | 35 | Wait Events |
-| Authentication | 15 | 3 | 2 | 20 | Wait Events |
-| Compression | 6 | 0 | 0 | 6 | Wait Events (CPU work) |
-| Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU work) |
-| Executor | 4 | 2 | 0 | 6 | Interrupt Checks |
-| Maintenance | 2 | 3 | 4 | 9 | Mixed |
-| Replication | 2 | 4 | 4 | 10 | Wait Events |
-| Synchronization | 1 | 0 | 0 | 1 | Wait Events |
+| Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
+|----------|----------------|---------------|-----------------|-----------------|------|--------|
+| I/O Operations | 8 | 12 | 15 | 35 | Wait Events | Required |
+| Authentication | 15 | 3 | 2 | 20 | Wait Events | Required |
+| Compression | 6 | 0 | 0 | 6 | Wait Events (CPU) | **OPTIONAL** |
+| Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU) | **OPTIONAL** |
+| Maintenance | 2 | 3 | 4 | 9 | Mixed | Required |
+| Replication | 2 | 4 | 4 | 10 | Wait Events | Required |
+| Buffer Mgmt | 0 | 0 | 1 | 1 | Wait Events | Required |
+| Synchronization | 0 | 0 | 1 | 1 | Wait Events | Required |
 
-**Total: 43 Critical, 24 High Priority, 25 Medium Priority = 92 individual issues**
+**Total: 38 Critical, 22 High Priority, 26 Medium Priority = 86 individual issues**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources
-- **Wait Events (CPU work)**: CPU operations that benefit from labeling for monitoring
-- **Interrupt Checks**: CPU operations that need cancellation support
+- **Wait Events (CPU)**: CPU operations that benefit from labeling for monitoring visibility (OPTIONAL)
+- **Mixed**: Some need wait events, others need interrupt checks
 
 ---
 
 ## Important Distinction: Wait Events vs. Interrupt Checks
 
-This analysis identifies two distinct types of instrumentation gaps:
+This analysis focuses on **missing wait events** for operations that block or perform distinguishable work.
 
-### 1. **Missing Wait Events** (True Blocking Operations)
+### 1. **Missing Wait Events** (True Blocking Operations) - PRIMARY FOCUS
 Operations where the process is **actually waiting** on external resources:
 - **I/O operations**: Waiting for disk (fsync, read, write, stat)
 - **Network operations**: Waiting for remote servers (LDAP, RADIUS, DNS)
@@ -58,22 +57,7 @@ Operations where the process is **actually waiting** on external resources:
 - `fsync()` - waiting for disk controller to flush data
 - `connect()` - waiting for TCP handshake to complete
 
-### 2. **CPU-Intensive Operations Without Interrupt Checks**
-Operations where the process is **actively computing** but needs to be cancellable:
-- **Hash table building**: Inserting millions of tuples
-- **Sorting**: Merging runs during external sort
-- **Tuple processing**: Long loops over tuple sets
-
-**Why they DON'T need wait events:** These are legitimate CPU work - the process IS computing, not waiting. They appear correctly as "CPU" in monitoring.
-
-**Why they DO need CHECK_FOR_INTERRUPTS():** Long-running loops should periodically check for query cancellation (Ctrl+C) or statement timeout.
-
-**Examples:**
-- Hash join build loop inserting 10M rows
-- Aggregate hash table population
-- Heap page pruning traversing long HOT chains
-
-### 3. **CPU-Intensive Operations That SHOULD Have Wait Events** (Gray Area)
+### 2. **CPU-Intensive Operations That SHOULD Have Wait Events** (OPTIONAL)
 Some CPU-intensive operations benefit from wait events even though they're not "waiting":
 - **Compression/decompression**: Distinguishes "compressing" from "computing"
 - **Cryptography**: Distinguishes "hashing password" from "running query"
@@ -81,7 +65,12 @@ Some CPU-intensive operations benefit from wait events even though they're not "
 
 **Why they warrant wait events:** Even though they're CPU work, labeling them helps operators understand WHAT kind of work is happening. During a base backup, seeing "COMPRESS_GZIP" is more useful than generic "CPU".
 
-**This document covers all three types,** with categories clearly marked.
+**Note:** These are marked as **OPTIONAL** in this analysis, as they provide observability benefits rather than fixing incorrect "CPU" attribution.
+
+### 3. **CPU-Intensive Operations Without Interrupt Checks** (OUT OF SCOPE)
+Operations where the process is **actively computing** but needs to be cancellable have been moved to a separate document: [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md)
+
+**Why they're separate:** These are legitimate CPU work - they appear correctly as "CPU" in monitoring. The issue is cancellability (needing `CHECK_FOR_INTERRUPTS()`), not wait event visibility.
 
 ---
 
@@ -314,13 +303,15 @@ AUTH_RADIUS_RESPONSE     "Waiting for RADIUS authentication response"
 
 ---
 
-## Category 3: Compression Operations Missing Wait Events (CRITICAL)
+## Category 3: Compression Operations Missing Wait Events (OPTIONAL)
 
-**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O.**
+**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O. Wait events here are OPTIONAL for observability.**
 
-**Context:** Base backup compression is CPU-intensive work (not waiting). However, wait events are still valuable here to distinguish "compressing during backup" from other CPU activity. Without wait events, backup operations appear as generic "CPU" load, making it hard to identify that a backup is in progress.
+**Context:** Base backup compression is CPU-intensive work (not waiting). However, wait events provide operational value by distinguishing "compressing during backup" from other CPU activity. Without wait events, backup operations appear as generic "CPU" load, making it hard to identify that a backup is in progress.
 
 **Why wait events make sense here:** Even though compression is legitimate CPU work, labeling it provides operational visibility. When monitoring shows `BASEBACKUP_COMPRESS_GZIP`, operators immediately know a backup is running and compressing data, rather than seeing generic CPU usage.
+
+**Status:** OPTIONAL - These improve observability but are not required to fix incorrect "CPU" attribution.
 
 ### 3.1 Gzip Compression (CRITICAL)
 
@@ -391,11 +382,13 @@ DECOMPRESS_ZSTD              "Decompressing data with Zstandard"
 
 ---
 
-## Category 4: Cryptographic Operations Missing Wait Events (MEDIUM-HIGH)
+## Category 4: Cryptographic Operations Missing Wait Events (OPTIONAL)
 
-**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O.**
+**⚠️ NOTE: These are CPU-bound operations, NOT blocking I/O. Wait events here are OPTIONAL for observability.**
 
 Similar to compression, cryptographic operations are CPU work, not waiting. However, wait events provide operational value by distinguishing "hashing passwords" from "running queries" during authentication storms.
+
+**Status:** OPTIONAL - These improve observability but are not required to fix incorrect "CPU" attribution.
 
 ### 4.1 SCRAM Authentication (HIGH)
 
@@ -467,125 +460,9 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ---
 
-## Category 5: Executor Operations Missing Interrupt Checks (HIGH)
+## Category 5: Maintenance Operations Missing Wait Events (MEDIUM-HIGH)
 
-**⚠️ NOTE: These are CPU-bound operations, NOT waiting operations.**
-
-The issues in this category are about **cancellability**, not wait events. Hash building and aggregation are legitimate CPU work - they should appear as "CPU" in monitoring tools. The problem is that long-running loops lack `CHECK_FOR_INTERRUPTS()`, making queries uncancellable.
-
-**What's needed:** Periodic interrupt checks (e.g., every 1000-10000 tuples)
-**What's NOT needed:** Wait events (these aren't waiting for anything)
-
----
-
-### 5.1 Hash Join Building (CRITICAL - Needs Interrupt Checks)
-
-**File:** [`src/backend/executor/nodeHash.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c)
-
-#### Serial Hash Build
-**Function:** `MultiExecPrivateHash()` ([lines 160-196](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c#L160-L196))
-
-```c
-for (;;)
-{
-    slot = ExecProcNode(outerNode);
-    if (TupIsNull(slot))
-        break;
-    // Insert into hash table - NO CHECK_FOR_INTERRUPTS()!
-    ExecHashTableInsert(hashtable, slot, hashvalue);
-}
-```
-
-**Issue:** Cannot cancel query during hash table population. For million-row tables, this can take seconds without any opportunity to interrupt.
-
-**Solution:** Add `CHECK_FOR_INTERRUPTS()` every N tuples (1000-10000 range)
-
-#### Parallel Hash Build
-**Function:** `MultiExecParallelHash()` ([lines 283-301](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHash.c#L283-L301))
-
-Similar issue but in parallel workers - cannot interrupt individual worker's insert loop.
-
-**Priority:** CRITICAL - Hash joins are extremely common and this affects query cancellation
-
----
-
-### 5.2 Hash Aggregate Building (CRITICAL - Needs Interrupt Checks)
-
-**File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
-
-**Function:** `agg_fill_hash_table()` ([lines 2635-2655](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c#L2635-L2655))
-
-```c
-for (;;)
-{
-    slot = ExecProcNode(outerPlanState);
-    if (TupIsNull(slot))
-        break;
-    // Process and hash - NO CHECK_FOR_INTERRUPTS()!
-    lookup_hash_entries(aggstate);
-}
-```
-
-**Issue:** GROUP BY queries with large input cannot be cancelled during hash table population.
-
-**Solution:** Add `CHECK_FOR_INTERRUPTS()` every N tuples
-
-**Priority:** CRITICAL - Very common query pattern (every GROUP BY with hash aggregate)
-
----
-
-### 5.3 Ordered Aggregate Processing (HIGH - Needs Interrupt Checks)
-
-**File:** [`src/backend/executor/nodeAgg.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c)
-
-**Function:** `process_ordered_aggregate_single()` ([lines 877-926](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeAgg.c#L877-L926))
-
-Processes DISTINCT/ORDER BY in aggregates without interrupt checks.
-
-**Priority:** HIGH - Common with DISTINCT aggregates
-
----
-
-### 5.4 Hash Join Batch Loading (MEDIUM - Might Need Wait Events)
-
-**File:** [`src/backend/executor/nodeHashjoin.c`](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c)
-
-#### Serial Batch Reload
-**Function:** `ExecHashJoinNewBatch()` ([lines 1232-1242](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c#L1232-L1242))
-
-Reloads batched data from disk without interruption checks.
-
-**Note:** This operation actually involves I/O (reading from temp files), so it might warrant a wait event to distinguish "loading batch from disk" from pure CPU work.
-
-#### Parallel Batch Load
-**Function:** `ExecParallelHashJoinNewBatch()` ([lines 1329-1338](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/executor/nodeHashjoin.c#L1329-L1338))
-
-Loads batches from shared tuple store without interruption checks.
-
-**Priority:** MEDIUM - Only occurs when hash tables spill to disk
-
----
-
-**Recommended Solution:**
-```c
-// Add to hash building loops:
-if (++tupleCount % 10000 == 0)
-    CHECK_FOR_INTERRUPTS();
-```
-
-**Optional Wait Event for Batch Loading:**
-```
-# Only for operations that actually read from disk:
-HASH_BATCH_RELOAD        "Reloading hash join batch from temp files"
-```
-
-**Priority Summary:** CRITICAL for cancellability - these loops need interrupt checks, not wait events
-
----
-
-## Category 6: Maintenance Operations Missing Wait Events (MEDIUM-HIGH)
-
-### 6.1 Heap Page Pruning (HIGH)
+### 5.1 Heap Page Pruning (HIGH)
 
 **File:** `src/backend/access/heap/pruneheap.c`
 
@@ -611,7 +488,7 @@ for (;;)
 
 ---
 
-### 6.2 Heap Tuple Deforming (MEDIUM-HIGH)
+### 5.2 Heap Tuple Deforming (MEDIUM-HIGH)
 
 **File:** `src/backend/access/common/heaptuple.c`
 
@@ -634,7 +511,7 @@ for (att_num = 0; att_num < tuple_desc->natts; att_num++)
 
 ---
 
-### 6.3 Statistics Computation (MEDIUM)
+### 5.3 Statistics Computation (MEDIUM)
 
 **File:** `src/backend/commands/analyze.c`
 
@@ -659,7 +536,7 @@ for (i = 0; i < num_values; i++)
 
 ---
 
-### 6.4 Sort Operations (MEDIUM-HIGH)
+### 5.4 Sort Operations (MEDIUM-HIGH)
 
 **File:** `src/backend/utils/sort/tuplesort.c`
 
@@ -684,7 +561,7 @@ for (i = 0; i < memtupcount; i++)
 
 ---
 
-### 6.5 Pattern Matching (MEDIUM)
+### 5.5 Pattern Matching (MEDIUM)
 
 **File:** `src/backend/utils/adt/like_match.c`
 
@@ -722,9 +599,9 @@ PATTERN_MATCH                "Performing pattern matching"
 
 ---
 
-## Category 7: Logical Replication Missing Wait Events (HIGH)
+## Category 6: Logical Replication Missing Wait Events (HIGH)
 
-### 7.1 Transaction Replay (CRITICAL)
+### 6.1 Transaction Replay (CRITICAL)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -751,7 +628,7 @@ foreach(...)
 
 ---
 
-### 7.2 Transaction Serialization (HIGH)
+### 6.2 Transaction Serialization (HIGH)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -773,7 +650,7 @@ foreach(...)
 
 ---
 
-### 7.3 Apply Worker Message Replay (HIGH)
+### 6.3 Apply Worker Message Replay (HIGH)
 
 **File:** `src/backend/replication/logical/worker.c`
 
@@ -793,7 +670,7 @@ while (...)
 
 ---
 
-### 7.4 Subtransaction Processing (MEDIUM)
+### 6.4 Subtransaction Processing (MEDIUM)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -814,9 +691,9 @@ LOGICAL_SUBXACT_PROCESS      "Processing subtransaction changes"
 
 ---
 
-## Category 8: Buffer Management Missing Wait Events (MEDIUM)
+## Category 7: Buffer Management Missing Wait Events (MEDIUM)
 
-### 8.1 Checkpoint Buffer Scanning (MEDIUM)
+### 7.1 Checkpoint Buffer Scanning (MEDIUM)
 
 **File:** `src/backend/storage/buffer/bufmgr.c`
 
@@ -846,9 +723,9 @@ CHECKPOINT_BUFFER_SCAN       "Scanning buffer pool during checkpoint"
 
 ---
 
-## Category 9: Synchronization Primitives (MEDIUM)
+## Category 8: Synchronization Primitives (MEDIUM)
 
-### 9.1 LWLock Semaphore Wait (MEDIUM)
+### 8.1 LWLock Semaphore Wait (MEDIUM)
 
 **File:** `src/backend/storage/lmgr/lwlock.c`
 
@@ -930,11 +807,6 @@ STANDBY_SIGNAL_FILE_SYNC    "Waiting to sync standby signal file"
 ### Extensions to Existing WaitEventIPC:
 
 ```
-# Executor operations
-HASH_BUILD                  "Building hash table for hash join or aggregate"
-HASH_BATCH_RELOAD           "Reloading hash join batch from disk"
-AGG_ORDERED_PROCESS         "Processing ordered aggregate"
-
 # Logical replication
 LOGICAL_DECODE_APPLY        "Applying decoded changes from logical replication"
 LOGICAL_SERIALIZE_WRITE     "Writing transaction changes to spill file"
@@ -955,25 +827,27 @@ LWLOCK_DEQUEUE_WAIT         "Waiting for LWLock dequeue completion"
 These affect every instance of operation and can cause multi-second blocks:
 
 1. **LDAP operations** (auth.c) - Every LDAP authentication
-2. **Compression operations** (basebackup_*.c) - Every compressed backup
+2. **Compression operations** (basebackup_*.c) - Every compressed backup (OPTIONAL)
 3. **DNS lookups in authentication** (auth.c) - Every ident/RADIUS auth
-4. **Hash join/aggregate building** (nodeHash.c, nodeAgg.c) - Extremely common queries
-5. **Low-level fsync primitives** (fd.c) - Universal I/O operations
+4. **Low-level fsync primitives** (fd.c) - Universal I/O operations
 
 **Estimated Impact:** 30-50% of "CPU*" reports in typical production systems
+
+**Note:** Compression operations are marked as OPTIONAL - they improve observability but don't fix incorrect "CPU" attribution.
 
 ---
 
 ### P1: HIGH - Common Operations
 These affect specific but common workloads:
 
-1. **SCRAM authentication** (auth-scram.c) - Every SCRAM login
+1. **SCRAM authentication** (auth-scram.c) - Every SCRAM login (OPTIONAL - CPU work)
 2. **Logical replication processing** (reorderbuffer.c) - Large transactions
 3. **Recovery signal file operations** (xlogrecovery.c) - Standby startup
-4. **Hash join batch loading** (nodeHashjoin.c) - Large joins
-5. **Heap page pruning** (pruneheap.c) - VACUUM and SELECT on hot tables
+4. **Heap page pruning** (pruneheap.c) - VACUUM and SELECT on hot tables
 
 **Estimated Impact:** 15-25% of "CPU*" reports in replication-heavy systems
+
+**Note:** SCRAM authentication is marked as OPTIONAL - it's CPU-intensive work that benefits from labeling for observability.
 
 ---
 
@@ -1021,19 +895,7 @@ These affect specific operations or edge cases:
 
 ---
 
-### Phase 3: Executor Operations (3-4 weeks)
-1. Add CHECK_FOR_INTERRUPTS() every 1000-10000 tuples in:
-   - MultiExecPrivateHash() and MultiExecParallelHash()
-   - agg_fill_hash_table()
-   - ExecHashJoinNewBatch()
-
-2. Consider adding HASH_BUILD wait event category
-
-**Deliverable:** Long-running queries interruptible, visible in monitoring
-
----
-
-### Phase 4: Maintenance Operations (2-3 weeks)
+### Phase 3: Maintenance Operations (2-3 weeks)
 1. Add CHECK_FOR_INTERRUPTS() to heap_prune_chain()
 2. Add CHECK_FOR_INTERRUPTS() to heap_deform_tuple() (every 50-100 attributes)
 3. Add vacuum_delay_point() to post-sort analysis loops
@@ -1043,7 +905,7 @@ These affect specific operations or edge cases:
 
 ---
 
-### Phase 5: Logical Replication (2-3 weeks)
+### Phase 4: Logical Replication (2-3 weeks)
 1. Add LOGICAL_DECODE_APPLY wait events to ReorderBufferProcessTXN()
 2. Add LOGICAL_SERIALIZE_* wait events to serialization operations
 3. Add wait events to apply_spooled_messages()
@@ -1069,13 +931,9 @@ For each new wait event:
 2. **Compression Tests:**
    - Large base backup with each compression method
    - Verify COMPRESS_* wait events appear during backup
+   - Note: These are OPTIONAL wait events for observability
 
-3. **Executor Tests:**
-   - Large hash join → observe HASH_BUILD
-   - GROUP BY with many groups → observe HASH_BUILD
-   - Query cancellation during hash build → verify interruption
-
-4. **I/O Tests:**
+3. **I/O Tests:**
    - Slow fsync (e.g., sync mount option) → observe FSYNC_*
    - NFS directory operations → observe DIR_OPEN/DIR_READ
 
@@ -1150,14 +1008,15 @@ pg_stat_activity showing 100 backends:
 
 ## Conclusion
 
-This analysis identified **92 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **86 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
 - Waiting for external services (LDAP, DNS, RADIUS, ident)
 - Performing I/O operations (fsync, stat, unlink, directory operations)
-- Compressing data (gzip, LZ4, Zstandard)
-- Computing cryptographic hashes (SCRAM, HMAC, SHA-256)
-- Building executor data structures (hash tables, aggregates)
+- Compressing data (gzip, LZ4, Zstandard) - OPTIONAL for observability
+- Computing cryptographic hashes (SCRAM, HMAC, SHA-256) - OPTIONAL for observability
 - Processing large replication transactions
+
+**Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been documented separately in [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md).
 
 **Recommended Action:** Implement changes in phases, starting with Phase 1-2 (authentication, I/O, compression) for immediate high-impact improvements. This will eliminate the majority of "CPU*" false positives and provide accurate visibility into what PostgreSQL is actually doing.
 
@@ -1169,20 +1028,19 @@ This analysis identified **92 specific code locations** across PostgreSQL where 
 
 ## Appendix: Files Requiring Changes
 
-### Critical Priority Files (35 locations)
+### Critical Priority Files (29 locations) - Required Wait Events
 - src/backend/storage/file/fd.c (15 locations)
 - src/backend/libpq/auth.c (15 locations)
+
+### Critical Priority Files (6 locations) - OPTIONAL Wait Events
 - src/backend/backup/basebackup_gzip.c (2 locations)
 - src/backend/backup/basebackup_lz4.c (3 locations)
 - src/backend/backup/basebackup_zstd.c (2 locations)
-- src/backend/executor/nodeHash.c (2 locations)
-- src/backend/executor/nodeAgg.c (2 locations)
 
-### High Priority Files (24 locations)
-- src/backend/libpq/auth-scram.c (5 locations)
+### High Priority Files (17 locations)
+- src/backend/libpq/auth-scram.c (5 locations) - OPTIONAL
 - src/backend/access/transam/xlogrecovery.c (4 locations)
 - src/backend/replication/logical/reorderbuffer.c (4 locations)
-- src/backend/executor/nodeHashjoin.c (2 locations)
 - src/backend/access/heap/pruneheap.c (2 locations)
 - src/backend/storage/smgr/md.c (3 locations)
 - src/backend/replication/logical/worker.c (2 locations)
@@ -1201,9 +1059,11 @@ This analysis identified **92 specific code locations** across PostgreSQL where 
 
 ---
 
-**Total Lines of Code to Modify:** ~2,000-3,000 lines across 30+ files
-**New Wait Events to Add:** ~40-50 new wait event definitions
-**Testing Required:** ~50-100 new test cases
+**Total Lines of Code to Modify:** ~1,800-2,500 lines across 25+ files
+**New Wait Events to Add:** ~35-45 new wait event definitions (includes ~10 optional)
+**Testing Required:** ~40-80 new test cases
+
+**Note:** Executor operation improvements requiring `CHECK_FOR_INTERRUPTS()` are documented separately in [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md).
 
 ---
 
