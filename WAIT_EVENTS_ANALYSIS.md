@@ -14,7 +14,7 @@
 
 ## Executive Summary
 
-This analysis identified **86 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+This analysis identified **78 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
 
 **Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been moved to a separate document: [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md)
 
@@ -26,12 +26,11 @@ This analysis identified **86 specific locations** across the PostgreSQL codebas
 | Authentication | 15 | 3 | 2 | 20 | Wait Events | Required |
 | Compression | 6 | 0 | 0 | 6 | Wait Events (CPU) | **OPTIONAL** |
 | Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU) | **OPTIONAL** |
-| Maintenance | 2 | 3 | 4 | 9 | Mixed | Required |
 | Replication | 2 | 4 | 4 | 10 | Wait Events | Required |
 | Buffer Mgmt | 0 | 0 | 1 | 1 | Wait Events | Required |
 | Synchronization | 0 | 0 | 1 | 1 | Wait Events | Required |
 
-**Total: 38 Critical, 22 High Priority, 26 Medium Priority = 86 individual issues**
+**Total: 36 Critical, 19 High Priority, 23 Medium Priority = 78 individual issues**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources
@@ -460,148 +459,9 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ---
 
-## Category 5: Maintenance Operations Missing Wait Events (MEDIUM-HIGH)
+## Category 5: Logical Replication Missing Wait Events (HIGH)
 
-### 5.1 Heap Page Pruning (HIGH)
-
-**File:** `src/backend/access/heap/pruneheap.c`
-
-**Function:** `heap_prune_chain()` (lines 1020-1137)
-
-Traverses HOT chains without CHECK_FOR_INTERRUPTS():
-
-```c
-// Line 1020-1137: Chain traversal loop
-for (;;)
-{
-    // Process chain items - NO CHECK_FOR_INTERRUPTS()!
-    // ... complex pruning logic ...
-    offnum = prstate->next_item;
-    if (!OffsetNumberIsValid(offnum))
-        break;
-}
-```
-
-**Impact:** Pages with long HOT chains (common in frequently updated tables) process without interruption.
-
-**Priority:** HIGH - Vacuum and SELECT both call this
-
----
-
-### 5.2 Heap Tuple Deforming (MEDIUM-HIGH)
-
-**File:** `src/backend/access/common/heaptuple.c`
-
-**Function:** `heap_deform_tuple()` (lines 1372-1429)
-
-Processes all attributes without interruption:
-
-```c
-// Line 1372-1429: Attribute loop
-for (att_num = 0; att_num < tuple_desc->natts; att_num++)
-{
-    // Deform attribute - NO CHECK_FOR_INTERRUPTS()!
-    // Can process 0-1664 attributes without yielding
-}
-```
-
-**Impact:** Wide tables (many columns) or tables with varlena types requiring detoasting.
-
-**Priority:** MEDIUM-HIGH - Very frequently called
-
----
-
-### 5.3 Statistics Computation (MEDIUM)
-
-**File:** `src/backend/commands/analyze.c`
-
-**Function:** `compute_scalar_stats()` (lines 2539+)
-
-Has vacuum_delay_point() during initial scan but lacks interruption in post-sort processing:
-
-```c
-// Line 2513: qsort is interruptible ✓
-qsort_interruptible(...);
-
-// Line 2539-2551: Duplicate scanning - NO vacuum_delay_point()!
-for (i = 0; i < num_values; i++)
-{
-    // Scan for duplicates and compute correlation
-}
-
-// Line 2571+: MCV/histogram building - NO vacuum_delay_point()!
-```
-
-**Priority:** MEDIUM - ANALYZE operations
-
----
-
-### 5.4 Sort Operations (MEDIUM-HIGH)
-
-**File:** `src/backend/utils/sort/tuplesort.c`
-
-#### Tape Merge Operations
-**Function:** `mergeruns()` (lines 2096-2300)
-
-Multi-pass merge lacks explicit CHECK_FOR_INTERRUPTS() in control loop.
-
-#### Tuple Dumping
-**Function:** `dumptuples()` (lines 2365-2370)
-
-Writes sorted tuples to tape without interruption:
-
-```c
-for (i = 0; i < memtupcount; i++)
-{
-    WRITETUP(state, tape, &memtuples[i]);  // NO CHECK
-}
-```
-
-**Priority:** MEDIUM-HIGH - Large sorts
-
----
-
-### 5.5 Pattern Matching (MEDIUM)
-
-**File:** `src/backend/utils/adt/like_match.c`
-
-**Function:** `MatchText()` (lines 97-213)
-
-Pattern matching with % wildcards lacks interruption checks:
-
-```c
-// Line 97-213: Pattern loop with recursion
-for (;;)
-{
-    // Pattern matching - NO CHECK_FOR_INTERRUPTS()!
-    // Recursive calls for % wildcards
-}
-```
-
-**Impact:** Large text values (MB-scale) with complex patterns like '%foo%bar%baz%'
-
-**Priority:** MEDIUM - User SQL queries with LIKE
-
----
-
-**Proposed Wait Events:**
-```
-# In WaitEventMaintenance or WaitEventCPU
-HEAP_PRUNE                   "Pruning dead tuples from heap page"
-HEAP_DEFORM                  "Deforming heap tuple attributes"
-ANALYZE_COMPUTE_STATS        "Computing statistics during ANALYZE"
-SORT_MERGE                   "Merging sorted runs"
-SORT_DUMP                    "Writing sorted data to disk"
-PATTERN_MATCH                "Performing pattern matching"
-```
-
-**Alternative:** Add CHECK_FOR_INTERRUPTS() calls instead of wait events
-
----
-
-## Category 6: Logical Replication Missing Wait Events (HIGH)
-
-### 6.1 Transaction Replay (CRITICAL)
+### 5.1 Transaction Replay (CRITICAL)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -628,7 +488,7 @@ foreach(...)
 
 ---
 
-### 6.2 Transaction Serialization (HIGH)
+### 5.2 Transaction Serialization (HIGH)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -650,7 +510,7 @@ foreach(...)
 
 ---
 
-### 6.3 Apply Worker Message Replay (HIGH)
+### 5.3 Apply Worker Message Replay (HIGH)
 
 **File:** `src/backend/replication/logical/worker.c`
 
@@ -670,7 +530,7 @@ while (...)
 
 ---
 
-### 6.4 Subtransaction Processing (MEDIUM)
+### 5.4 Subtransaction Processing (MEDIUM)
 
 **File:** `src/backend/replication/logical/reorderbuffer.c`
 
@@ -691,9 +551,9 @@ LOGICAL_SUBXACT_PROCESS      "Processing subtransaction changes"
 
 ---
 
-## Category 7: Buffer Management Missing Wait Events (MEDIUM)
+## Category 6: Buffer Management Missing Wait Events (MEDIUM)
 
-### 7.1 Checkpoint Buffer Scanning (MEDIUM)
+### 6.1 Checkpoint Buffer Scanning (MEDIUM)
 
 **File:** `src/backend/storage/buffer/bufmgr.c`
 
@@ -723,9 +583,9 @@ CHECKPOINT_BUFFER_SCAN       "Scanning buffer pool during checkpoint"
 
 ---
 
-## Category 8: Synchronization Primitives (MEDIUM)
+## Category 7: Synchronization Primitives (MEDIUM)
 
-### 8.1 LWLock Semaphore Wait (MEDIUM)
+### 7.1 LWLock Semaphore Wait (MEDIUM)
 
 **File:** `src/backend/storage/lmgr/lwlock.c`
 
@@ -821,194 +681,9 @@ LWLOCK_DEQUEUE_WAIT         "Waiting for LWLock dequeue completion"
 
 ---
 
-## Implementation Priority Matrix
-
-### P0: CRITICAL - Immediate Impact
-These affect every instance of operation and can cause multi-second blocks:
-
-1. **LDAP operations** (auth.c) - Every LDAP authentication
-2. **Compression operations** (basebackup_*.c) - Every compressed backup (OPTIONAL)
-3. **DNS lookups in authentication** (auth.c) - Every ident/RADIUS auth
-4. **Low-level fsync primitives** (fd.c) - Universal I/O operations
-
-**Estimated Impact:** 30-50% of "CPU*" reports in typical production systems
-
-**Note:** Compression operations are marked as OPTIONAL - they improve observability but don't fix incorrect "CPU" attribution.
-
----
-
-### P1: HIGH - Common Operations
-These affect specific but common workloads:
-
-1. **SCRAM authentication** (auth-scram.c) - Every SCRAM login (OPTIONAL - CPU work)
-2. **Logical replication processing** (reorderbuffer.c) - Large transactions
-3. **Recovery signal file operations** (xlogrecovery.c) - Standby startup
-4. **Heap page pruning** (pruneheap.c) - VACUUM and SELECT on hot tables
-
-**Estimated Impact:** 15-25% of "CPU*" reports in replication-heavy systems
-
-**Note:** SCRAM authentication is marked as OPTIONAL - it's CPU-intensive work that benefits from labeling for observability.
-
----
-
-### P2: MEDIUM - Specific Scenarios
-These affect specific operations or edge cases:
-
-1. **Statistics computation** (analyze.c) - ANALYZE operations
-2. **Sort operations** (tuplesort.c) - Large sorts
-3. **Checkpoint buffer scanning** (bufmgr.c) - Checkpoint operations
-4. **CRC/hash SQL functions** (cryptohashfuncs.c, pg_crc.c) - User queries
-5. **Pattern matching** (like_match.c) - Complex LIKE queries
-6. **Heap tuple deforming** (heaptuple.c) - Wide tables
-7. **LWLock dequeue wait** (lwlock.c) - Edge case
-
-**Estimated Impact:** 5-10% of "CPU*" reports in specific workloads
-
----
-
-## Implementation Recommendations
-
-### Phase 1: Low-Hanging Fruit (1-2 weeks)
-1. Implement wait events for low-level fd.c operations (fsync, stat, unlink, etc.)
-   - Single location, affects all callers
-   - ~200 lines of code changes
-
-2. Add wait events to compression operations (basebackup_*.c)
-   - Three files, clear boundaries
-   - ~50 lines of code changes
-
-3. Wrap LDAP operations in auth.c
-   - Single file, clear operation boundaries
-   - ~100 lines of code changes
-
-**Deliverable:** ~30% reduction in "CPU*" false positives
-
----
-
-### Phase 2: Authentication & Network (2-3 weeks)
-1. Implement AUTH_DNS_LOOKUP for all pg_getnameinfo_all/pg_getaddrinfo_all calls
-2. Add AUTH_IDENT_* wait events and refactor to use WaitLatchOrSocket
-3. Add AUTH_RADIUS_* wait events and refactor to use WaitLatchOrSocket
-4. Implement AUTH_SCRAM_* wait events
-
-**Deliverable:** All authentication operations visible in monitoring
-
----
-
-### Phase 3: Maintenance Operations (2-3 weeks)
-1. Add CHECK_FOR_INTERRUPTS() to heap_prune_chain()
-2. Add CHECK_FOR_INTERRUPTS() to heap_deform_tuple() (every 50-100 attributes)
-3. Add vacuum_delay_point() to post-sort analysis loops
-4. Add wait events to tuplesort operations
-
-**Deliverable:** VACUUM, ANALYZE, and large sorts more observable
-
----
-
-### Phase 4: Logical Replication (2-3 weeks)
-1. Add LOGICAL_DECODE_APPLY wait events to ReorderBufferProcessTXN()
-2. Add LOGICAL_SERIALIZE_* wait events to serialization operations
-3. Add wait events to apply_spooled_messages()
-
-**Deliverable:** Logical replication operations fully visible
-
----
-
-## Testing Strategy
-
-### Unit Tests
-For each new wait event:
-1. Verify pgstat_report_wait_start() is called before operation
-2. Verify pgstat_report_wait_end() is called after operation (including error paths)
-3. Verify wait event appears in pg_stat_activity.wait_event
-
-### Integration Tests
-1. **Authentication Tests:**
-   - Slow LDAP server simulation → observe AUTH_LDAP_SEARCH
-   - DNS timeout simulation → observe AUTH_DNS_LOOKUP
-   - Ident server delay → observe AUTH_IDENT_IO
-
-2. **Compression Tests:**
-   - Large base backup with each compression method
-   - Verify COMPRESS_* wait events appear during backup
-   - Note: These are OPTIONAL wait events for observability
-
-3. **I/O Tests:**
-   - Slow fsync (e.g., sync mount option) → observe FSYNC_*
-   - NFS directory operations → observe DIR_OPEN/DIR_READ
-
-### Performance Tests
-1. Measure overhead of new wait event calls (should be <1% in all cases)
-2. Verify no performance regression in tight loops (executor operations)
-
----
-
-## Monitoring Impact
-
-### Before This Analysis
-```
-pg_stat_activity showing 100 backends:
-- 70 backends: wait_event = NULL (shown as "CPU" or "CPU*")
-- 20 backends: wait_event = 'DataFileRead'
-- 10 backends: wait_event = 'WALWrite'
-```
-
-**Problem:** Those 70 "CPU" backends could be:
-- Waiting for LDAP (seconds)
-- Compressing backup data (seconds)
-- Building hash tables (seconds)
-- Waiting for ident server (seconds)
-- Computing SCRAM auth (milliseconds)
-- All appear as green "CPU" in monitoring tools
-
-### After Implementation
-```
-pg_stat_activity showing 100 backends:
-- 20 backends: wait_event = NULL (actual CPU work)
-- 15 backends: wait_event = 'AUTH_LDAP_SEARCH'
-- 10 backends: wait_event = 'COMPRESS_GZIP'
-- 10 backends: wait_event = 'HASH_BUILD'
-- 10 backends: wait_event = 'DataFileRead'
-- 5 backends: wait_event = 'AUTH_DNS_LOOKUP'
-- 20 backends: wait_event = 'WALWrite'
-- 10 backends: other wait events
-```
-
-**Benefit:** Clear visibility into what processes are actually doing!
-
----
-
-## Cost-Benefit Analysis
-
-### Development Cost
-- **Total Estimated Effort:** 12-15 weeks for full implementation
-- **Phase 1-2 (High ROI):** 3-5 weeks for 60% of benefits
-
-### Benefits
-1. **Operational Visibility:**
-   - Identify slow LDAP/DNS servers instantly
-   - Distinguish backup compression time from network I/O
-   - See when queries are in hash building vs. other phases
-
-2. **Performance Troubleshooting:**
-   - "Why is authentication slow?" → see AUTH_LDAP_SEARCH taking 5 seconds
-   - "Why is backup slow?" → see COMPRESS_ZSTD vs. network I/O time
-   - "Why can't I cancel this query?" → see HASH_BUILD without interruption
-
-3. **Capacity Planning:**
-   - Measure actual time spent in authentication vs. query execution
-   - Identify compression CPU cost vs. network savings
-   - Quantify executor time in hash operations
-
-4. **Customer Satisfaction:**
-   - PostgresAI and other tools can show accurate wait event breakdowns
-   - "CPU*" notation becomes rare, indicating actual unknown waits
-
----
-
 ## Conclusion
 
-This analysis identified **86 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **78 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
 - Waiting for external services (LDAP, DNS, RADIUS, ident)
 - Performing I/O operations (fsync, stat, unlink, directory operations)
@@ -1017,12 +692,6 @@ This analysis identified **86 specific code locations** across PostgreSQL where 
 - Processing large replication transactions
 
 **Note:** CPU-intensive operations requiring interrupt checks (not wait events) have been documented separately in [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md).
-
-**Recommended Action:** Implement changes in phases, starting with Phase 1-2 (authentication, I/O, compression) for immediate high-impact improvements. This will eliminate the majority of "CPU*" false positives and provide accurate visibility into what PostgreSQL is actually doing.
-
-**Key Quote from PostgresAI:** "We show 'CPU*' with * remark saying that it's either CPU (no wait, pure CPU load) or some unknown, undeveloped wait event."
-
-**After this work:** The * can be removed for 70-80% of current "CPU*" cases, showing accurate wait event categories instead.
 
 ---
 
@@ -1037,33 +706,19 @@ This analysis identified **86 specific code locations** across PostgreSQL where 
 - src/backend/backup/basebackup_lz4.c (3 locations)
 - src/backend/backup/basebackup_zstd.c (2 locations)
 
-### High Priority Files (17 locations)
+### High Priority Files (12 locations)
 - src/backend/libpq/auth-scram.c (5 locations) - OPTIONAL
 - src/backend/access/transam/xlogrecovery.c (4 locations)
 - src/backend/replication/logical/reorderbuffer.c (4 locations)
-- src/backend/access/heap/pruneheap.c (2 locations)
 - src/backend/storage/smgr/md.c (3 locations)
 - src/backend/replication/logical/worker.c (2 locations)
 
-### Medium Priority Files (25 locations)
-- src/backend/commands/analyze.c (3 locations)
-- src/backend/utils/sort/tuplesort.c (4 locations)
+### Medium Priority Files (6 locations)
 - src/backend/utils/adt/cryptohashfuncs.c (3 locations)
 - src/backend/utils/hash/pg_crc.c (2 locations)
-- src/backend/utils/adt/like_match.c (2 locations)
-- src/backend/access/common/heaptuple.c (1 location)
-- src/backend/storage/buffer/bufmgr.c (2 locations)
+- src/backend/storage/buffer/bufmgr.c (1 location)
 - src/backend/storage/lmgr/lwlock.c (1 location)
 - src/backend/storage/ipc/dsm_impl.c (2 locations)
-- Various index access methods (5 locations)
-
----
-
-**Total Lines of Code to Modify:** ~1,800-2,500 lines across 25+ files
-**New Wait Events to Add:** ~35-45 new wait event definitions (includes ~10 optional)
-**Testing Required:** ~40-80 new test cases
-
-**Note:** Executor operation improvements requiring `CHECK_FOR_INTERRUPTS()` are documented separately in [QUERY_CANCELLATION_ISSUES.md](QUERY_CANCELLATION_ISSUES.md).
 
 ---
 
