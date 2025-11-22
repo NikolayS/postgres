@@ -14,21 +14,20 @@
 
 ## Executive Summary
 
-This analysis identified **50 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+This analysis identified **45 specific locations** across the PostgreSQL codebase where operations may block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to display activity as "CPU" (shown as green or "CPU*") when processes are actually waiting on I/O, network, or external services.
+
+**Of these, 30 are required fixes for true blocking operations, and 15 are optional for observability improvements.**
 
 ### Key Findings by Category:
 
 | Category | Critical Issues | High Priority | Medium Priority | Total Locations | Type | Status |
 |----------|----------------|---------------|-----------------|-----------------|------|--------|
 | I/O Operations | 0 | 5 | 2 | 7 | Wait Events | Required |
-| Authentication | 15 | 3 | 2 | 20 | Wait Events | Required |
-| Compression | 6 | 0 | 0 | 6 | Wait Events (CPU) | **OPTIONAL** |
-| Cryptography | 5 | 0 | 0 | 5 | Wait Events (CPU) | **OPTIONAL** |
-| Replication | 2 | 4 | 4 | 10 | Wait Events | Required |
-| Buffer Mgmt | 0 | 0 | 1 | 1 | Wait Events | Required |
-| Synchronization | 0 | 0 | 1 | 1 | Wait Events | Required |
+| Authentication | 15 | 8 | 0 | 23 | Wait Events | Required |
+| Compression | 0 | 0 | 0 | 7 | Wait Events (CPU) | **OPTIONAL** |
+| Cryptography | 0 | 0 | 0 | 8 | Wait Events (CPU) | **OPTIONAL** |
 
-**Total: 28 Critical, 12 High Priority, 10 Medium Priority = 50 individual issues**
+**Total: 15 Critical, 13 High Priority, 2 Medium Priority = 30 required issues + 15 optional = 45 total locations**
 
 **Type Legend:**
 - **Wait Events**: Operations blocked waiting on external resources (I/O, network, locks)
@@ -356,154 +355,6 @@ CRYPTO_HASH_SHA512       "Computing SHA-512 hash"
 
 ---
 
-## Category 5: Logical Replication Missing Wait Events (HIGH)
-
-### 5.1 Transaction Replay (CRITICAL)
-
-**File:** `src/backend/replication/logical/reorderbuffer.c`
-
-**Function:** `ReorderBufferProcessTXN()` (lines 2248+)
-
-Main loop processing all changes in large transactions:
-
-```c
-// Main loop iterating through transaction changes
-foreach(...)
-{
-    ReorderBufferChange *change = lfirst(iter);
-    // Process change - no wait event
-    switch (change->action)
-    {
-        // ... handle INSERT/UPDATE/DELETE ...
-    }
-}
-```
-
-**Impact:** Large transactions (millions of changes) process without visibility.
-
-**Priority:** CRITICAL - Can take MINUTES for large transactions
-
----
-
-### 5.2 Transaction Serialization (HIGH)
-
-**File:** `src/backend/replication/logical/reorderbuffer.c`
-
-**Function:** `ReorderBufferSerializeTXN()` (lines 3855+)
-
-Spills large transactions to disk:
-
-```c
-// Write changes to disk sequentially
-foreach(...)
-{
-    ReorderBufferSerializeTXN_Change(...);  // NO WAIT EVENT for disk I/O!
-}
-```
-
-**Impact:** GB-scale transactions spill to disk without I/O wait event visibility.
-
-**Priority:** HIGH - Common with bulk operations
-
----
-
-### 5.3 Apply Worker Message Replay (HIGH)
-
-**File:** `src/backend/replication/logical/worker.c`
-
-**Function:** `apply_spooled_messages()` (lines 2084+)
-
-Replays streamed transaction messages from disk:
-
-```c
-while (...)
-{
-    // Read from disk - NO WAIT EVENT!
-    // Apply message - NO WAIT EVENT!
-}
-```
-
-**Priority:** HIGH - Logical replication workers
-
----
-
-### 5.4 Subtransaction Processing (MEDIUM)
-
-**File:** `src/backend/replication/logical/reorderbuffer.c`
-
-Multiple subtransaction loops (lines 1286, 1353, 1523) lack wait events.
-
-**Priority:** MEDIUM - Less common than top-level transaction operations
-
----
-
-**Proposed Wait Events:**
-```
-# In WaitEventIPC or new WaitEventLogicalReplication
-LOGICAL_DECODE_APPLY         "Applying decoded changes from logical replication"
-LOGICAL_SERIALIZE_WRITE      "Writing transaction changes to spill file"
-LOGICAL_DESERIALIZE_READ     "Reading transaction changes from spill file"
-LOGICAL_SUBXACT_PROCESS      "Processing subtransaction changes"
-```
-
----
-
-## Category 6: Buffer Management Missing Wait Events (MEDIUM)
-
-### 6.1 Checkpoint Buffer Scanning (MEDIUM)
-
-**File:** `src/backend/storage/buffer/bufmgr.c`
-
-**Function:** `BufferSync()` (lines 3390+)
-
-Initial buffer pool scan:
-
-```c
-// Line 3390+: Scan entire buffer pool
-for (buf_id = 0; buf_id < NBuffers; buf_id++)
-{
-    // Process buffer - no wait event
-}
-```
-
-**Impact:** On systems with large shared_buffers (GBs), scanning millions of buffers.
-
-**Priority:** MEDIUM - Checkpoints only
-
----
-
-**Proposed Wait Events:**
-```
-# In WaitEventIO or WaitEventIPC
-CHECKPOINT_BUFFER_SCAN       "Scanning buffer pool during checkpoint"
-```
-
----
-
-## Category 7: Synchronization Primitives (MEDIUM)
-
-### 7.1 LWLock Semaphore Wait (MEDIUM)
-
-**File:** `src/backend/storage/lmgr/lwlock.c`
-
-**Function:** `LWLockDequeueSelf()` (lines 1146-1152)
-
-```c
-for (;;)
-{
-    PGSemaphoreLock(MyProc->sem);  // NO WAIT EVENT!
-    if (MyProc->lwWaiting == LW_WS_NOT_WAITING)
-        break;
-    extraWaits++;
-}
-```
-
-**Impact:** Edge case during lock release, but can loop if wakeup is delayed.
-
-**Priority:** MEDIUM - Rare but unpredictable
-
----
-
 ## Summary of Proposed New Wait Events
 
 ### New Categories to Add:
@@ -552,61 +403,51 @@ RECOVERY_SIGNAL_FILE_SYNC   "Waiting to sync recovery signal file"
 STANDBY_SIGNAL_FILE_SYNC    "Waiting to sync standby signal file"
 ```
 
-### Extensions to Existing WaitEventIPC:
-
-```
-# Logical replication
-LOGICAL_DECODE_APPLY        "Applying decoded changes from logical replication"
-LOGICAL_SERIALIZE_WRITE     "Writing transaction changes to spill file"
-LOGICAL_DESERIALIZE_READ    "Reading transaction changes from spill file"
-
-# Buffer management
-CHECKPOINT_BUFFER_SCAN      "Scanning buffer pool during checkpoint"
-
-# Lock operations
-LWLOCK_DEQUEUE_WAIT         "Waiting for LWLock dequeue completion"
-```
-
 ---
 
 ## Conclusion
 
-This analysis identified **50 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
+This analysis identified **45 specific code locations** across PostgreSQL where operations block or consume significant time without proper wait event instrumentation. These gaps cause monitoring tools to show activity as "CPU" when backends are actually:
 
-- Waiting for external services (LDAP, DNS, RADIUS, ident)
-- Performing I/O operations (fsync, stat, unlink, directory operations)
-- Compressing data (gzip, LZ4, Zstandard) - OPTIONAL for observability
-- Computing cryptographic hashes (SCRAM, HMAC, SHA-256) - OPTIONAL for observability
-- Processing large replication transactions
+- **Waiting for external services** (LDAP, DNS, RADIUS, ident) - 23 locations, REQUIRED
+- **Performing I/O operations** (fsync, stat, unlink on recovery/storage files) - 7 locations, REQUIRED
+- **Compressing data** (gzip, LZ4, Zstandard) - 7 locations, OPTIONAL for observability
+- **Computing cryptographic hashes** (SCRAM, HMAC, SHA-256, CRC) - 8 locations, OPTIONAL for observability
+
+Of the 45 locations, **30 are required fixes** for true blocking operations, and **15 are optional** for improved CPU workload observability.
 
 ---
 
 ## Appendix: Files Requiring Changes
 
-### Critical Priority Files (15 locations) - Required Wait Events
-- src/backend/libpq/auth.c (15 locations - LDAP, Ident, RADIUS, DNS)
+### REQUIRED Wait Events (30 locations)
 
-### Critical Priority Files (6 locations) - OPTIONAL Wait Events
-- src/backend/backup/basebackup_gzip.c (2 locations)
-- src/backend/backup/basebackup_lz4.c (1 location)
-- src/backend/backup/basebackup_zstd.c (2 locations)
+**Critical Priority - Authentication (15 locations):**
+- src/backend/libpq/auth.c
+  - LDAP operations: 7 locations (lines 2222, 2320, 2339, 2350, 2551, 2602, 2660)
+  - Ident operations: 8 locations (lines 1686-1689, 1704, 1720, 1728-1729, 1744, 1755-1756, 1776, 1793)
 
-### High Priority Files (17 locations)
-- src/backend/libpq/auth.c (3 locations - DNS lookups)
-- src/backend/libpq/auth-scram.c (5 locations) - OPTIONAL
-- src/backend/access/transam/xlogrecovery.c (2 locations)
-- src/backend/replication/logical/reorderbuffer.c (4 locations)
-- src/backend/storage/smgr/md.c (3 locations)
-- src/backend/replication/logical/worker.c (2 locations)
+**High Priority - I/O and Authentication (13 locations):**
+- src/backend/access/transam/xlogrecovery.c: 2 locations (recovery signal file syncs)
+- src/backend/storage/smgr/md.c: 3 locations (file unlink operations)
+- src/backend/libpq/auth.c:
+  - RADIUS operations: 5 locations (lines 2971, 3066, 3075-3076, 3124, 3157)
+  - DNS lookups: 3 locations (lines 432-435, 478, 2081)
 
-### Medium Priority Files (12 locations)
-- src/backend/utils/adt/cryptohashfuncs.c (3 locations) - OPTIONAL
-- src/backend/utils/hash/pg_crc.c (2 locations) - OPTIONAL
-- src/backend/storage/buffer/bufmgr.c (1 location)
-- src/backend/storage/lmgr/lwlock.c (1 location)
-- src/backend/storage/ipc/dsm_impl.c (2 locations)
-- src/backend/replication/logical/reorderbuffer.c (1 location)
-- src/backend/libpq/auth.c (2 locations - RADIUS)
+**Medium Priority - I/O (2 locations):**
+- src/backend/storage/ipc/dsm_impl.c: 2 locations (fstat operations)
+
+### OPTIONAL Wait Events for Observability (15 locations)
+
+**Compression - CPU Work (7 locations):**
+- src/backend/backup/basebackup_gzip.c: 2 locations
+- src/backend/backup/basebackup_lz4.c: 3 locations
+- src/backend/backup/basebackup_zstd.c: 2 locations
+
+**Cryptography - CPU Work (8 locations):**
+- src/backend/libpq/auth-scram.c: 3 locations (SCRAM authentication functions)
+- src/backend/utils/adt/cryptohashfuncs.c: 3 locations (SQL hash functions)
+- src/backend/utils/hash/pg_crc.c: 2 locations (CRC computation)
 
 ---
 
