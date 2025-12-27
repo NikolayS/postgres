@@ -259,6 +259,18 @@
 
      <row>
       <entry role="catalog_table_entry"><para role="column_definition">
+       <structfield>rows_filtered</structfield> <type>bigint</type>
+      </para>
+      <para>
+       Total number of rows removed by filter conditions across all plan nodes.
+       This includes rows filtered by scan quals, join quals, and recheck
+       conditions (e.g., in bitmap index scans). This field is zero when
+       <varname>pg_stat_statements.track_rows_filtered</varname> is disabled.
+      </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
        <structfield>shared_blks_hit</structfield> <type>bigint</type>
       </para>
       <para>
@@ -978,6 +990,29 @@ calls | 2
       especially when statements with identical query structure are executed
       by many concurrent connections which compete to update a small number of
       <structname>pg_stat_statements</structname> entries.
+      The default value is <literal>off</literal>.
+      Only superusers can change this setting.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term>
+     <varname>pg_stat_statements.track_rows_filtered</varname> (<type>boolean</type>)
+     <indexterm>
+      <primary><varname>pg_stat_statements.track_rows_filtered</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+
+    <listitem>
+     <para>
+      <varname>pg_stat_statements.track_rows_filtered</varname> controls whether
+      rows removed by filter conditions are tracked by the module.
+      When enabled, the module collects <structfield>rows_filtered</structfield>
+      statistics from all plan nodes, which can help identify queries that
+      would benefit from better indexing.  This uses <literal>INSTRUMENT_ROWS</literal>
+      instrumentation which only increments tuple counters and has negligible
+      overhead (no timing system calls).
       The default value is <literal>off</literal>.
       Only superusers can change this setting.
      </para>
