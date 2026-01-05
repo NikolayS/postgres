@@ -15,14 +15,22 @@
  */
 #include "postgres.h"
 
+#include <ctype.h>
+
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/parsenodes.h"
+#include "nodes/value.h"
 #include "parser/parser.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/jsonb.h"
+
+/* Forward declarations for JSON output */
+static void node_to_json(StringInfo str, const void *obj);
+static void escape_json_string(StringInfo str, const char *s);
 
 PG_MODULE_MAGIC_EXT(
 	.name = "pg_query_json",
@@ -205,4 +213,237 @@ pg_parse_stmt_count(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 
 	PG_RETURN_INT32(count);
+}
+
+/*
+ * Helper function to escape a string for JSON output
+ */
+static void
+escape_json_string(StringInfo str, const char *s)
+{
+	const char *p;
+
+	appendStringInfoChar(str, '"');
+	for (p = s; *p; p++)
+	{
+		switch (*p)
+		{
+			case '"':
+				appendStringInfoString(str, "\\\"");
+				break;
+			case '\\':
+				appendStringInfoString(str, "\\\\");
+				break;
+			case '\b':
+				appendStringInfoString(str, "\\b");
+				break;
+			case '\f':
+				appendStringInfoString(str, "\\f");
+				break;
+			case '\n':
+				appendStringInfoString(str, "\\n");
+				break;
+			case '\r':
+				appendStringInfoString(str, "\\r");
+				break;
+			case '\t':
+				appendStringInfoString(str, "\\t");
+				break;
+			default:
+				if ((unsigned char) *p < 32)
+					appendStringInfo(str, "\\u%04x", (unsigned int) *p);
+				else
+					appendStringInfoChar(str, *p);
+				break;
+		}
+	}
+	appendStringInfoChar(str, '"');
+}
+
+/*
+ * Output a List as a JSON array
+ */
+static void
+list_to_json(StringInfo str, const List *list)
+{
+	const ListCell *lc;
+	bool		first = true;
+
+	appendStringInfoChar(str, '[');
+	foreach(lc, list)
+	{
+		if (!first)
+			appendStringInfoChar(str, ',');
+		first = false;
+		node_to_json(str, lfirst(lc));
+	}
+	appendStringInfoChar(str, ']');
+}
+
+/*
+ * Output an IntList as a JSON array
+ */
+static void
+intlist_to_json(StringInfo str, const List *list)
+{
+	const ListCell *lc;
+	bool		first = true;
+
+	appendStringInfoChar(str, '[');
+	foreach(lc, list)
+	{
+		if (!first)
+			appendStringInfoChar(str, ',');
+		first = false;
+		appendStringInfo(str, "%d", lfirst_int(lc));
+	}
+	appendStringInfoChar(str, ']');
+}
+
+/*
+ * Output an OidList as a JSON array
+ */
+static void
+oidlist_to_json(StringInfo str, const List *list)
+{
+	const ListCell *lc;
+	bool		first = true;
+
+	appendStringInfoChar(str, '[');
+	foreach(lc, list)
+	{
+		if (!first)
+			appendStringInfoChar(str, ',');
+		first = false;
+		appendStringInfo(str, "%u", lfirst_oid(lc));
+	}
+	appendStringInfoChar(str, ']');
+}
+
+/*
+ * Main recursive function to convert a Node to JSON.
+ * This handles all the common node types found in parse trees.
+ */
+static void
+node_to_json(StringInfo str, const void *obj)
+{
+	if (obj == NULL)
+	{
+		appendStringInfoString(str, "null");
+		return;
+	}
+
+	switch (nodeTag(obj))
+	{
+		case T_List:
+			list_to_json(str, (const List *) obj);
+			break;
+
+		case T_IntList:
+			intlist_to_json(str, (const List *) obj);
+			break;
+
+		case T_OidList:
+			oidlist_to_json(str, (const List *) obj);
+			break;
+
+		case T_Integer:
+			appendStringInfo(str, "%d", intVal(obj));
+			break;
+
+		case T_Float:
+			{
+				Float *f = (Float *) obj;
+				appendStringInfoString(str, f->fval);
+			}
+			break;
+
+		case T_Boolean:
+			appendStringInfoString(str, boolVal(obj) ? "true" : "false");
+			break;
+
+		case T_String:
+			escape_json_string(str, strVal(obj));
+			break;
+
+		case T_BitString:
+			{
+				BitString *bs = (BitString *) obj;
+				escape_json_string(str, bs->bsval);
+			}
+			break;
+
+		default:
+			{
+				/*
+				 * For all other node types, output the node tag number and
+				 * use nodeToString for the details (converted to JSON string)
+				 */
+				char	   *nodestr = nodeToStringWithLocations(obj);
+
+				appendStringInfoString(str, "{\"node_tag\":");
+				appendStringInfo(str, "%d", (int) nodeTag(obj));
+				appendStringInfoString(str, ",\"raw\":");
+				escape_json_string(str, nodestr);
+				appendStringInfoChar(str, '}');
+				pfree(nodestr);
+			}
+			break;
+	}
+}
+
+/*
+ * pg_parse_json - Parse SQL and return JSON representation of parse tree
+ *
+ * This provides a more accessible format than the internal nodeToString format.
+ */
+PG_FUNCTION_INFO_V1(pg_parse_json);
+
+Datum
+pg_parse_json(PG_FUNCTION_ARGS)
+{
+	text	   *sql_text = PG_GETARG_TEXT_PP(0);
+	char	   *sql;
+	List	   *raw_parsetree_list;
+	StringInfoData str;
+	char	   *result;
+	MemoryContext oldcontext;
+	MemoryContext parse_context;
+
+	sql = text_to_cstring(sql_text);
+
+	/*
+	 * Create a temporary memory context for parsing to ensure proper cleanup.
+	 */
+	parse_context = AllocSetContextCreate(CurrentMemoryContext,
+										  "pg_parse_json context",
+										  ALLOCSET_DEFAULT_SIZES);
+	oldcontext = MemoryContextSwitchTo(parse_context);
+
+	PG_TRY();
+	{
+		/* Parse the SQL statement */
+		raw_parsetree_list = raw_parser(sql, RAW_PARSE_DEFAULT);
+
+		/* Convert to JSON */
+		initStringInfo(&str);
+		appendStringInfoString(&str, "{\"version\":");
+		appendStringInfo(&str, "%d", PG_VERSION_NUM);
+		appendStringInfoString(&str, ",\"stmts\":");
+		node_to_json(&str, raw_parsetree_list);
+		appendStringInfoChar(&str, '}');
+
+		result = str.data;
+	}
+	PG_FINALLY();
+	{
+		MemoryContextSwitchTo(oldcontext);
+	}
+	PG_END_TRY();
+
+	/* Copy result to caller's memory context */
+	result = MemoryContextStrdup(oldcontext, result);
+	MemoryContextDelete(parse_context);
+
+	PG_RETURN_TEXT_P(cstring_to_text(result));
 }

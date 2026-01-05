@@ -57,3 +57,17 @@ LANGUAGE C STRICT PARALLEL SAFE;
 
 COMMENT ON FUNCTION pg_parse_stmt_count(text) IS
 'Count the number of SQL statements in the input string';
+
+--
+-- pg_parse_json(sql text) returns text
+--
+-- Parse a SQL statement and return its parse tree in JSON format.
+-- The JSON includes the PostgreSQL version and an array of statements.
+--
+CREATE FUNCTION pg_parse_json(sql text)
+RETURNS text
+AS 'MODULE_PATHNAME', 'pg_parse_json'
+LANGUAGE C STRICT PARALLEL SAFE;
+
+COMMENT ON FUNCTION pg_parse_json(text) IS
+'Parse SQL and return the parse tree in JSON format';
