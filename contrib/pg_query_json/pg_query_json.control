@@ -1,0 +1,5 @@
+# pg_query_json extension
+comment = 'Parse SQL statements and return parse tree'
+default_version = '1.0'
+module_pathname = '$libdir/pg_query_json'
+relocatable = true
