@@ -454,37 +454,44 @@ CopySendEndOfRow(CopyToState cstate)
 	switch (cstate->copy_dest)
 	{
 		case COPY_FILE:
-			if (fwrite(fe_msgbuf->data, fe_msgbuf->len, 1,
-					   cstate->copy_file) != 1 ||
-				ferror(cstate->copy_file))
 			{
-				if (cstate->is_program)
-				{
-					if (errno == EPIPE)
-					{
-						/*
-						 * The pipe will be closed automatically on error at
-						 * the end of transaction, but we might get a better
-						 * error message from the subprocess' exit code than
-						 * just "Broken Pipe"
-						 */
-						ClosePipeToProgram(cstate);
+				size_t		nwritten;
 
-						/*
-						 * If ClosePipeToProgram() didn't throw an error, the
-						 * program terminated normally, but closed the pipe
-						 * first. Restore errno, and throw an error.
-						 */
-						errno = EPIPE;
+				pgstat_report_wait_start(WAIT_EVENT_COPY_DATA_WRITE);
+				nwritten = fwrite(fe_msgbuf->data, fe_msgbuf->len, 1,
+								  cstate->copy_file);
+				pgstat_report_wait_end();
+
+				if (nwritten != 1 || ferror(cstate->copy_file))
+				{
+					if (cstate->is_program)
+					{
+						if (errno == EPIPE)
+						{
+							/*
+							 * The pipe will be closed automatically on error at
+							 * the end of transaction, but we might get a better
+							 * error message from the subprocess' exit code than
+							 * just "Broken Pipe"
+							 */
+							ClosePipeToProgram(cstate);
+
+							/*
+							 * If ClosePipeToProgram() didn't throw an error, the
+							 * program terminated normally, but closed the pipe
+							 * first. Restore errno, and throw an error.
+							 */
+							errno = EPIPE;
+						}
+						ereport(ERROR,
+								(errcode_for_file_access(),
+								 errmsg("could not write to COPY program: %m")));
 					}
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not write to COPY program: %m")));
+					else
+						ereport(ERROR,
+								(errcode_for_file_access(),
+								 errmsg("could not write to COPY file: %m")));
 				}
-				else
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not write to COPY file: %m")));
 			}
 			break;
 		case COPY_FRONTEND:
