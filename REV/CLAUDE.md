@@ -72,18 +72,20 @@ All agents are defined in `.claude/agents/` and can be invoked with `@agent-name
 
 ---
 
-## The Patch Lifecycle
+## The Patch Lifecycle (AI Era)
+
+In the AI era, **come to pgsql-hackers with a patch**, not just an idea. Drafting code is now fast—a working prototype speaks louder than abstract discussion.
 
 ```
-IDEATION ──► DEVELOPMENT ──► SUBMISSION ──► REVIEW CYCLE ──► COMMIT
-    │              │              │              │
-    ▼              ▼              ▼              ▼
- Discuss on    @pg-build      @pg-patch-create  @pg-feedback
- pgsql-hackers @pg-test       @pg-hackers-letter @pg-patch-version
- first!        @pg-style      @pg-commitfest
-               @pg-docs
-               @pg-review
-               @pg-readiness
+DEVELOP ──► SUBMIT WITH PATCH ──► REVIEW CYCLE ──► COMMIT
+    │              │                    │
+    ▼              ▼                    ▼
+ @pg-build     @pg-patch-create     @pg-feedback
+ @pg-test      @pg-hackers-letter   @pg-patch-version
+ @pg-style     @pg-commitfest
+ @pg-docs
+ @pg-review
+ @pg-readiness
 ```
 
 **Key Facts:**
@@ -110,7 +112,7 @@ These CANNOT be automated—humans must:
 
 | Pitfall | Instead |
 |---------|---------|
-| Code first, discuss later | Discuss approach on pgsql-hackers BEFORE major work |
+| Discuss without code | Come to pgsql-hackers with a working patch—code talks |
 | Giant patch touching 50 files | Split into reviewable, logical chunks |
 | Ignoring feedback | Address every point, explain disagreements |
 | Debug code left in | Remove all printf, #if 0, DEBUG elog |
