@@ -4,70 +4,71 @@ A comprehensive set of subagents for AI-assisted Postgres patch development. The
 
 ## Available Agents
 
-All agents are defined in `.claude/agents/` and can be invoked with `@agent-name`.
+Agents are defined in `.claude/agents/` and invoked via natural language:
+> "Use the **pg-review** subagent to check my patch"
 
 ### Development & Build
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-build** | Build Postgres from source with debug/coverage/performance configurations |
-| **@pg-test** | Run regression tests, TAP tests, and add new test coverage |
-| **@pg-benchmark** | Performance testing with pgbench, before/after comparisons |
-| **@pg-debug** | Debug issues using GDB, core dumps, and logging |
+| **pg-build** | Build Postgres from source with debug/coverage/performance configurations |
+| **pg-test** | Run regression tests, TAP tests, and add new test coverage |
+| **pg-benchmark** | Performance testing with pgbench, before/after comparisons |
+| **pg-debug** | Debug issues using GDB, core dumps, and logging |
 
 ### Code Quality
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-style** | Code style, pgindent, and Postgres conventions |
-| **@pg-review** | AI-assisted code review checklist (use PROACTIVELY before submission) |
-| **@pg-coverage** | Test coverage analysis and gap identification |
-| **@pg-docs** | Documentation in DocBook SGML format |
+| **pg-style** | Code style, pgindent, and Postgres conventions |
+| **pg-review** | AI-assisted code review checklist (use PROACTIVELY before submission) |
+| **pg-coverage** | Test coverage analysis and gap identification |
+| **pg-docs** | Documentation in DocBook SGML format |
 
 ### Patch Management
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-patch-create** | Create clean patches with git format-patch |
-| **@pg-patch-version** | Manage versions, rebasing, and updates during review cycle |
-| **@pg-patch-apply** | Apply and test patches from others (for reviewing) |
+| **pg-patch-create** | Create clean patches with git format-patch |
+| **pg-patch-version** | Manage versions, rebasing, and updates during review cycle |
+| **pg-patch-apply** | Apply and test patches from others (for reviewing) |
 
 ### Community Interaction
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-hackers-letter** | Write effective emails to pgsql-hackers |
-| **@pg-commitfest** | Navigate CommitFest workflow and status management |
-| **@pg-feedback** | Address reviewer feedback systematically |
+| **pg-hackers-letter** | Write effective emails to pgsql-hackers |
+| **pg-commitfest** | Navigate CommitFest workflow and status management |
+| **pg-feedback** | Address reviewer feedback systematically |
 
 ### Quality Gate
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-readiness** | Comprehensive patch readiness evaluation (use BEFORE submission) |
+| **pg-readiness** | Comprehensive patch readiness evaluation (use BEFORE submission) |
 
 ---
 
 ## Quick Start
 
-```bash
+```
 # Set up development environment
-@pg-build help me build PostgreSQL for development
+Use the pg-build subagent to help me build Postgres for development
 
 # Run tests after making changes
-@pg-test run regression tests and help me add coverage
+Use the pg-test subagent to run regression tests
 
 # Before submitting - check readiness
-@pg-readiness evaluate my patch for submission
+Use the pg-readiness subagent to evaluate my patch
 
 # Create the patch
-@pg-patch-create prepare my changes as a patch
+Use the pg-patch-create subagent to prepare my changes
 
 # Write the email
-@pg-hackers-letter draft a submission email for my patch
+Use the pg-hackers-letter subagent to draft a submission email
 
 # After feedback arrives
-@pg-feedback help me address the review comments
+Use the pg-feedback subagent to address the review comments
 ```
 
 ---
@@ -80,12 +81,12 @@ In the AI era, **come to pgsql-hackers with a patch**, not just an idea. Draftin
 DEVELOP ──► SUBMIT WITH PATCH ──► REVIEW CYCLE ──► COMMIT
     │              │                    │
     ▼              ▼                    ▼
- @pg-build     @pg-patch-create     @pg-feedback
- @pg-test      @pg-hackers-letter   @pg-patch-version
- @pg-style     @pg-commitfest
- @pg-docs
- @pg-review
- @pg-readiness
+ pg-build      pg-patch-create      pg-feedback
+ pg-test       pg-hackers-letter    pg-patch-version
+ pg-style      pg-commitfest
+ pg-docs
+ pg-review
+ pg-readiness
 ```
 
 **Key Facts:**
@@ -101,9 +102,9 @@ DEVELOP ──► SUBMIT WITH PATCH ──► REVIEW CYCLE ──► COMMIT
 | Task | Human | AI Assists |
 |------|:-----:|------------|
 | **Test with real data** | Required | - |
-| **Evaluate architectural fit** | Final call | @pg-review analyzes patterns and fit |
-| **Build community consensus** | Owns relationships | @pg-hackers-letter crafts reasoning |
-| **Engage with reviewers** | Required | @pg-feedback structures responses |
+| **Evaluate architectural fit** | Final call | pg-review analyzes patterns and fit |
+| **Build community consensus** | Owns relationships | pg-hackers-letter crafts reasoning |
+| **Engage with reviewers** | Required | pg-feedback structures responses |
 | **Final judgment calls** | Required | - |
 
 ---
