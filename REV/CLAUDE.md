@@ -49,27 +49,28 @@ Agents are defined in `.claude/agents/` and invoked via natural language:
 
 ---
 
+## Slash Commands
+
+Quick actions defined in `.claude/commands/`:
+
+| Command | Description |
+|---------|-------------|
+| `/pg-ready` | Check if patch is ready for submission |
+| `/pg-submit` | Prepare patch and draft submission email |
+| `/pg-respond` | Help respond to reviewer feedback |
+
+---
+
 ## Quick Start
 
 ```
-# Set up development environment
-Use the pg-build subagent to help me build Postgres for development
-
-# Run tests after making changes
-Use the pg-test subagent to run regression tests
-
-# Before submitting - check readiness
-Use the pg-readiness subagent to evaluate my patch
-
-# Create the patch
-Use the pg-patch-create subagent to prepare my changes
-
-# Write the email
-Use the pg-hackers-letter subagent to draft a submission email
-
-# After feedback arrives
-Use the pg-feedback subagent to address the review comments
+/pg-ready      # Check if patch is ready
+/pg-submit     # Prepare patch + draft email
+/pg-respond    # Address reviewer feedback
 ```
+
+For detailed help, invoke agents via natural language:
+> "Use the pg-build subagent to help me configure a debug build"
 
 ---
 
