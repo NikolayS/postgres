@@ -725,6 +725,14 @@ PSQLexecWatch(const char *query, const printQueryOpt *opt, FILE *printQueryFout,
 
 	ResetCancelConn();
 
+	/* Always store timing in LAST_QUERY_MS variable */
+	{
+		char		buf[64];
+
+		snprintf(buf, sizeof(buf), "%.3f", elapsed_msec);
+		SetVariable(pset.vars, "LAST_QUERY_MS", buf);
+	}
+
 	/* Possible microtiming output */
 	if (timing)
 		PrintTiming(elapsed_msec);
@@ -1271,6 +1279,14 @@ SendQuery(const char *query)
 		}
 	}
 
+	/* Always store timing in LAST_QUERY_MS variable */
+	{
+		char		buf[64];
+
+		snprintf(buf, sizeof(buf), "%.3f", elapsed_msec);
+		SetVariable(pset.vars, "LAST_QUERY_MS", buf);
+	}
+
 	/* Possible microtiming output */
 	if (timing)
 		PrintTiming(elapsed_msec);
@@ -1357,10 +1373,11 @@ DescribeQuery(const char *query, double *elapsed_msec)
 
 	*elapsed_msec = 0;
 
-	if (timing)
-		INSTR_TIME_SET_CURRENT(before);
-	else
-		INSTR_TIME_SET_ZERO(before);
+	/*
+	 * Always measure query timing. The \timing setting only controls whether
+	 * we display it. The elapsed time is always stored in LAST_QUERY_MS.
+	 */
+	INSTR_TIME_SET_CURRENT(before);
 
 	/*
 	 * To parse the query but not execute it, we prepare it, using the unnamed
@@ -1431,12 +1448,10 @@ DescribeQuery(const char *query, double *elapsed_msec)
 			result = PQexec(pset.db, buf.data);
 			OK = AcceptResult(result, true);
 
-			if (timing)
-			{
-				INSTR_TIME_SET_CURRENT(after);
-				INSTR_TIME_SUBTRACT(after, before);
-				*elapsed_msec += INSTR_TIME_GET_MILLISEC(after);
-			}
+			/* Always calculate for LAST_QUERY_MS */
+			INSTR_TIME_SET_CURRENT(after);
+			INSTR_TIME_SUBTRACT(after, before);
+			*elapsed_msec += INSTR_TIME_GET_MILLISEC(after);
 
 			if (OK && result)
 				OK = PrintQueryResult(result, true, NULL, NULL, NULL);
@@ -1568,10 +1583,11 @@ ExecQueryAndProcessResults(const char *query,
 	FILE	   *gfile_fout = NULL;
 	bool		gfile_is_pipe = false;
 
-	if (timing)
-		INSTR_TIME_SET_CURRENT(before);
-	else
-		INSTR_TIME_SET_ZERO(before);
+	/*
+	 * Always measure query timing. The \timing setting only controls whether
+	 * we display it. The elapsed time is always stored in LAST_QUERY_MS.
+	 */
+	INSTR_TIME_SET_CURRENT(before);
 
 	switch (pset.send_mode)
 	{
@@ -1831,14 +1847,12 @@ ExecQueryAndProcessResults(const char *query,
 				result = PQgetResult(pset.db);
 
 			/*
-			 * Get current timing measure in case an error occurs
+			 * Get current timing measure in case an error occurs.
+			 * Always calculated so LAST_QUERY_MS is available.
 			 */
-			if (timing)
-			{
-				INSTR_TIME_SET_CURRENT(after);
-				INSTR_TIME_SUBTRACT(after, before);
-				*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
-			}
+			INSTR_TIME_SET_CURRENT(after);
+			INSTR_TIME_SUBTRACT(after, before);
+			*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 
 			continue;
 		}
@@ -2113,13 +2127,12 @@ ExecQueryAndProcessResults(const char *query,
 		 *
 		 * With combined queries, timing must be understood as an upper bound
 		 * of the time spent processing them.
+		 *
+		 * Always calculated so LAST_QUERY_MS is available.
 		 */
-		if (timing)
-		{
-			INSTR_TIME_SET_CURRENT(after);
-			INSTR_TIME_SUBTRACT(after, before);
-			*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
-		}
+		INSTR_TIME_SET_CURRENT(after);
+		INSTR_TIME_SUBTRACT(after, before);
+		*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 
 		/*
 		 * This may or may not print something depending on settings.

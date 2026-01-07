@@ -198,6 +198,9 @@ main(int argc, char *argv[])
 	SetVariable(pset.vars, "LAST_ERROR_MESSAGE", "");
 	SetVariable(pset.vars, "LAST_ERROR_SQLSTATE", "00000");
 
+	/* Initialize timing variable (always measured, display controlled by \timing) */
+	SetVariable(pset.vars, "LAST_QUERY_MS", "0");
+
 	/* Default values for variables (that don't match the result of \unset) */
 	SetVariableBool(pset.vars, "AUTOCOMMIT");
 	SetVariable(pset.vars, "PROMPT1", DEFAULT_PROMPT1);
