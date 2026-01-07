@@ -1359,13 +1359,13 @@ sendquery_cleanup:
  *
  * Returns true if the operation executed successfully, false otherwise.
  *
- * If pset.timing is on, total query time (exclusive of result-printing) is
- * stored into *elapsed_msec.
+ * Total query time (exclusive of result-printing) is always stored into
+ * *elapsed_msec, regardless of the pset.timing setting. This allows the
+ * LAST_QUERY_MS variable to always be available.
  */
 static bool
 DescribeQuery(const char *query, double *elapsed_msec)
 {
-	bool		timing = pset.timing;
 	PGresult   *result;
 	bool		OK;
 	instr_time	before,
@@ -1391,6 +1391,10 @@ DescribeQuery(const char *query, double *elapsed_msec)
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
 		pg_log_info("%s", PQerrorMessage(pset.db));
+		/* Calculate elapsed time even on failure */
+		INSTR_TIME_SET_CURRENT(after);
+		INSTR_TIME_SUBTRACT(after, before);
+		*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 		SetResultVariables(result, false);
 		ClearOrSaveResult(result);
 		return false;
@@ -1429,6 +1433,10 @@ DescribeQuery(const char *query, double *elapsed_msec)
 				if (escname == NULL)
 				{
 					pg_log_info("%s", PQerrorMessage(pset.db));
+					/* Calculate elapsed time even on failure */
+					INSTR_TIME_SET_CURRENT(after);
+					INSTR_TIME_SUBTRACT(after, before);
+					*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 					PQclear(result);
 					termPQExpBuffer(&buf);
 					return false;
@@ -1459,8 +1467,21 @@ DescribeQuery(const char *query, double *elapsed_msec)
 			termPQExpBuffer(&buf);
 		}
 		else
+		{
 			fprintf(pset.queryFout,
 					_("The command has no result, or the result has no columns.\n"));
+			/* Calculate elapsed time for no-columns case */
+			INSTR_TIME_SET_CURRENT(after);
+			INSTR_TIME_SUBTRACT(after, before);
+			*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
+		}
+	}
+	else
+	{
+		/* Calculate elapsed time when AcceptResult failed */
+		INSTR_TIME_SET_CURRENT(after);
+		INSTR_TIME_SUBTRACT(after, before);
+		*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 	}
 
 	SetResultVariables(result, OK);
@@ -1723,6 +1744,11 @@ ExecQueryAndProcessResults(const char *query,
 		CheckConnection();
 
 		SetPipelineVariables();
+
+		/* Calculate elapsed time even on failure */
+		INSTR_TIME_SET_CURRENT(after);
+		INSTR_TIME_SUBTRACT(after, before);
+		*elapsed_msec = INSTR_TIME_GET_MILLISEC(after);
 
 		return -1;
 	}
