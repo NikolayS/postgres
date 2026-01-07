@@ -1,6 +1,6 @@
-# PostgreSQL AI Hacking Tools
+# Postgres AI Hacking Tools
 
-A comprehensive set of subagents for AI-assisted PostgreSQL patch development. These tools help prepare patches for human review—they don't replace the critical human elements of actual testing, architectural judgment, and community engagement.
+A comprehensive set of subagents for AI-assisted Postgres patch development. These tools help prepare patches for human review—they don't replace the critical human elements of actual testing, architectural judgment, and community engagement.
 
 ## Available Agents
 
@@ -10,7 +10,7 @@ All agents are defined in `.claude/agents/` and can be invoked with `@agent-name
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-build** | Build PostgreSQL from source with debug/coverage/performance configurations |
+| **@pg-build** | Build Postgres from source with debug/coverage/performance configurations |
 | **@pg-test** | Run regression tests, TAP tests, and add new test coverage |
 | **@pg-benchmark** | Performance testing with pgbench, before/after comparisons |
 | **@pg-debug** | Debug issues using GDB, core dumps, and logging |
@@ -19,7 +19,7 @@ All agents are defined in `.claude/agents/` and can be invoked with `@agent-name
 
 | Agent | Description |
 |-------|-------------|
-| **@pg-style** | Code style, pgindent, and PostgreSQL conventions |
+| **@pg-style** | Code style, pgindent, and Postgres conventions |
 | **@pg-review** | AI-assisted code review checklist (use PROACTIVELY before submission) |
 | **@pg-coverage** | Test coverage analysis and gap identification |
 | **@pg-docs** | Documentation in DocBook SGML format |
@@ -127,7 +127,7 @@ These CANNOT be automated—humans must:
 - [Submitting a Patch](https://wiki.postgresql.org/wiki/Submitting_a_Patch)
 - [Reviewing a Patch](https://wiki.postgresql.org/wiki/Reviewing_a_Patch)
 - [CommitFest](https://wiki.postgresql.org/wiki/CommitFest)
-- [PostgreSQL Coding Conventions](https://www.postgresql.org/docs/current/source.html)
+- [Postgres Coding Conventions](https://www.postgresql.org/docs/current/source.html)
 
 ### Community
 - [pgsql-hackers Archives](https://www.postgresql.org/list/pgsql-hackers/)
@@ -136,4 +136,4 @@ These CANNOT be automated—humans must:
 
 ---
 
-*Remember: AI assistance helps you be more thorough—it doesn't replace the human judgment, testing, and community engagement that make PostgreSQL great.*
+*Remember: AI assistance helps you be more thorough—it doesn't replace the human judgment, testing, and community engagement that make Postgres great.*
