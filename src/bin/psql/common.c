@@ -1594,7 +1594,6 @@ ExecQueryAndProcessResults(const char *query,
 						   bool is_watch, int min_rows,
 						   const printQueryOpt *opt, FILE *printQueryFout)
 {
-	bool		timing = pset.timing;
 	bool		success = false;
 	bool		return_early = false;
 	bool		end_pipeline = false;
