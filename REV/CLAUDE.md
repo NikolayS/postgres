@@ -96,15 +96,15 @@ DEVELOP ──► SUBMIT WITH PATCH ──► REVIEW CYCLE ──► COMMIT
 
 ---
 
-## Critical Human Checkpoints
+## Human + AI Collaboration
 
-These CANNOT be automated—humans must:
-
-1. **Test with real data** on real systems
-2. **Verify architectural fit** with PostgreSQL design
-3. **Build community consensus** on the approach
-4. **Engage with reviewers** throughout the process
-5. **Make final judgment calls** on trade-offs
+| Task | Human | AI Assists |
+|------|:-----:|------------|
+| **Test with real data** | Required | - |
+| **Evaluate architectural fit** | Final call | @pg-review analyzes patterns and fit |
+| **Build community consensus** | Owns relationships | @pg-hackers-letter crafts reasoning |
+| **Engage with reviewers** | Required | @pg-feedback structures responses |
+| **Final judgment calls** | Required | - |
 
 ---
 
