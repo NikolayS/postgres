@@ -123,11 +123,11 @@ postgres=# \endif
 
 ---
 
-## Open Questions
+## Design Decisions
 
-1. **Variable name:** Kirk suggested `ELAPSED_MS`, we used `LAST_QUERY_MS`. Which is preferred?
-2. **Precision:** Currently 3 decimal places (microsecond precision). Sufficient?
-3. **Backward compatibility:** None required - new variable, existing behavior unchanged.
+1. **Variable name:** `LAST_QUERY_MS` - confirmed by Kirk, matches LAST_ERROR_* pattern
+2. **Precision:** 3 decimal places (microsecond precision)
+3. **Backward compatibility:** None required - new variable, existing behavior unchanged
 
 ---
 

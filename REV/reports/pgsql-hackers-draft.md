@@ -60,9 +60,9 @@ I've included a comprehensive test script (test_last_query_ms.sql) covering:
 
 All test cases confirm LAST_QUERY_MS is set correctly regardless of query outcome.
 
-**Open Question: Variable Name**
+**Variable Naming**
 
-I've named the variable LAST_QUERY_MS to match the LAST_ERROR_* pattern, but ELAPSED_MS might be more concise. Which do folks prefer? Other suggestions welcome.
+The variable is named LAST_QUERY_MS to match the existing LAST_ERROR_* pattern (LAST_ERROR_MESSAGE, LAST_ERROR_SQLSTATE).
 
 **Backward Compatibility**
 
