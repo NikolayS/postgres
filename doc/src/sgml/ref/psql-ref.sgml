@@ -3836,6 +3836,14 @@ SELECT 1 \bind \sendpipeline
          1 second are also shown in minutes:seconds format, with hours and
          days fields added if needed.
         </para>
+        <para>
+         Note that query execution time is always measured regardless of the
+         <literal>\timing</literal> setting.  The <literal>\timing</literal> command
+         only controls whether the timing information is displayed.  The measured
+         time is always available in the <varname>LAST_QUERY_MS</varname> variable
+         (see <xref linkend="app-psql-variables-last-query-ms"/>), which allows
+         scripts to access timing data programmatically without cluttering output.
+        </para>
        </listitem>
       </varlistentry>
 
@@ -4532,6 +4540,36 @@ bar
          recent failed query in the current <application>psql</application> session, or
          an empty string and <literal>00000</literal> if no error has occurred in
          the current session.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="app-psql-variables-last-query-ms">
+       <term><varname>LAST_QUERY_MS</varname></term>
+       <listitem>
+        <para>
+         The execution time of the most recent SQL statement, measured in
+         milliseconds and stored as a decimal number with three decimal places.
+         This variable is always updated after each query execution, regardless of
+         the <literal>\timing</literal> setting.  The <literal>\timing</literal>
+         command only controls whether the timing is displayed; measurement
+         always occurs.
+        </para>
+        <para>
+         The variable is initialized to <literal>0</literal> at the start of each
+         <application>psql</application> session.  This allows scripts to access
+         query timing programmatically for conditional logic or logging without
+         displaying timing information in the output.
+        </para>
+        <para>
+         Example:
+<programlisting>
+\timing off
+SELECT expensive_operation();
+\if :LAST_QUERY_MS > 1000
+  \echo 'WARNING: Query took more than 1 second'
+\endif
+</programlisting>
         </para>
        </listitem>
       </varlistentry>
