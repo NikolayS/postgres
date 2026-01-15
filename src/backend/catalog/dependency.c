@@ -293,7 +293,7 @@ DropTableXactCallback(XactEvent event, void *arg, XLogRecPtr commit_lsn)
 
 				ereport(LOG,
 					(errmsg("DROP TABLE: relation \"%s.%s\" (OID %u), "
-							"drop LSN: %X/%X, commit LSN: %X/%X",
+							"commit LSN: %X/%X",
 							info->schemaname,
 							info->relname,
 							info->reloid,
