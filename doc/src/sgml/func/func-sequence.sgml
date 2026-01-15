@@ -37,7 +37,7 @@
         <indexterm>
          <primary>nextval</primary>
         </indexterm>
-        <function>nextval</function> ( <type>regclass</type> )
+        <function>nextval</function> ( <parameter>regclass</parameter> <type>regclass</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -62,7 +62,7 @@
         <indexterm>
          <primary>setval</primary>
         </indexterm>
-        <function>setval</function> ( <type>regclass</type>, <type>bigint</type> <optional>, <type>boolean</type> </optional> )
+        <function>setval</function> ( <parameter>regclass</parameter> <type>regclass</type>, <parameter>value1</parameter> <type>bigint</type> <optional>, <parameter>value2</parameter> <type>boolean</type> </optional> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -102,7 +102,7 @@ SELECT setval('myseq', 42, false);    <lineannotation>Next <function>nextval</fu
         <indexterm>
          <primary>currval</primary>
         </indexterm>
-        <function>currval</function> ( <type>regclass</type> )
+        <function>currval</function> ( <parameter>regclass</parameter> <type>regclass</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -149,7 +149,7 @@ SELECT setval('myseq', 42, false);    <lineannotation>Next <function>nextval</fu
         <indexterm>
          <primary>pg_get_sequence_data</primary>
         </indexterm>
-        <function>pg_get_sequence_data</function> ( <type>regclass</type> )
+        <function>pg_get_sequence_data</function> ( <parameter>sequence_oid</parameter> <type>regclass</type> )
         <returnvalue>record</returnvalue>
         ( <parameter>last_value</parameter> <type>bigint</type>,
         <parameter>is_called</parameter> <type>bool</type>,

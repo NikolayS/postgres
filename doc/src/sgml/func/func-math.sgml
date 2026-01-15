@@ -366,7 +366,7 @@
         <indexterm>
          <primary>cbrt</primary>
         </indexterm>
-        <function>cbrt</function> ( <type>double precision</type> )
+        <function>cbrt</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -383,11 +383,11 @@
         <indexterm>
          <primary>ceil</primary>
         </indexterm>
-        <function>ceil</function> ( <type>numeric</type> )
+        <function>ceil</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>ceil</function> ( <type>double precision</type> )
+        <function>ceil</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -408,11 +408,11 @@
         <indexterm>
          <primary>ceiling</primary>
         </indexterm>
-        <function>ceiling</function> ( <type>numeric</type> )
+        <function>ceiling</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>ceiling</function> ( <type>double precision</type> )
+        <function>ceiling</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -430,7 +430,7 @@
         <indexterm>
          <primary>degrees</primary>
         </indexterm>
-        <function>degrees</function> ( <type>double precision</type> )
+        <function>degrees</function> ( <parameter>radians</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -466,7 +466,7 @@
         <indexterm>
          <primary>erf</primary>
         </indexterm>
-        <function>erf</function> ( <type>double precision</type> )
+        <function>erf</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -483,7 +483,7 @@
         <indexterm>
          <primary>erfc</primary>
         </indexterm>
-        <function>erfc</function> ( <type>double precision</type> )
+        <function>erfc</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -501,11 +501,11 @@
         <indexterm>
          <primary>exp</primary>
         </indexterm>
-        <function>exp</function> ( <type>numeric</type> )
+        <function>exp</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>exp</function> ( <type>double precision</type> )
+        <function>exp</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -522,7 +522,7 @@
         <indexterm id="function-factorial">
          <primary>factorial</primary>
         </indexterm>
-        <function>factorial</function> ( <type>bigint</type> )
+        <function>factorial</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para>
@@ -539,11 +539,11 @@
         <indexterm>
          <primary>floor</primary>
         </indexterm>
-        <function>floor</function> ( <type>numeric</type> )
+        <function>floor</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>floor</function> ( <type>double precision</type> )
+        <function>floor</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -564,7 +564,7 @@
         <indexterm>
          <primary>gamma</primary>
         </indexterm>
-        <function>gamma</function> ( <type>double precision</type> )
+        <function>gamma</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -625,7 +625,7 @@
         <indexterm>
          <primary>lgamma</primary>
         </indexterm>
-        <function>lgamma</function> ( <type>double precision</type> )
+        <function>lgamma</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -642,11 +642,11 @@
         <indexterm>
          <primary>ln</primary>
         </indexterm>
-        <function>ln</function> ( <type>numeric</type> )
+        <function>ln</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>ln</function> ( <type>double precision</type> )
+        <function>ln</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -663,11 +663,11 @@
         <indexterm>
          <primary>log</primary>
         </indexterm>
-        <function>log</function> ( <type>numeric</type> )
+        <function>log</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>log</function> ( <type>double precision</type> )
+        <function>log</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -684,11 +684,11 @@
         <indexterm>
          <primary>log10</primary>
         </indexterm>
-        <function>log10</function> ( <type>numeric</type> )
+        <function>log10</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>log10</function> ( <type>double precision</type> )
+        <function>log10</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -720,7 +720,7 @@
         <indexterm>
          <primary>min_scale</primary>
         </indexterm>
-        <function>min_scale</function> ( <type>numeric</type> )
+        <function>min_scale</function> ( <parameter>n</parameter> <type>numeric</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -798,7 +798,7 @@
         <indexterm>
          <primary>radians</primary>
         </indexterm>
-        <function>radians</function> ( <type>double precision</type> )
+        <function>radians</function> ( <parameter>degrees</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -815,11 +815,11 @@
         <indexterm>
          <primary>round</primary>
         </indexterm>
-        <function>round</function> ( <type>numeric</type> )
+        <function>round</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>round</function> ( <type>double precision</type> )
+        <function>round</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -858,7 +858,7 @@
         <indexterm>
          <primary>scale</primary>
         </indexterm>
-        <function>scale</function> ( <type>numeric</type> )
+        <function>scale</function> ( <parameter>n</parameter> <type>numeric</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -875,11 +875,11 @@
         <indexterm>
          <primary>sign</primary>
         </indexterm>
-        <function>sign</function> ( <type>numeric</type> )
+        <function>sign</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sign</function> ( <type>double precision</type> )
+        <function>sign</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -896,11 +896,11 @@
         <indexterm>
          <primary>sqrt</primary>
         </indexterm>
-         <function>sqrt</function> ( <type>numeric</type> )
+         <function>sqrt</function> ( <parameter>x</parameter> <type>numeric</type> )
          <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-         <function>sqrt</function> ( <type>double precision</type> )
+         <function>sqrt</function> ( <parameter>x</parameter> <type>double precision</type> )
          <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -917,7 +917,7 @@
         <indexterm>
          <primary>trim_scale</primary>
         </indexterm>
-        <function>trim_scale</function> ( <type>numeric</type> )
+        <function>trim_scale</function> ( <parameter>n</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para>
@@ -935,11 +935,11 @@
         <indexterm>
          <primary>trunc</primary>
         </indexterm>
-        <function>trunc</function> ( <type>numeric</type> )
+        <function>trunc</function> ( <parameter>x</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>trunc</function> ( <type>double precision</type> )
+        <function>trunc</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1133,7 +1133,7 @@
         <indexterm id="function-setseed">
          <primary>setseed</primary>
         </indexterm>
-        <function>setseed</function> ( <type>double precision</type> )
+        <function>setseed</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>void</returnvalue>
        </para>
        <para>
@@ -1197,7 +1197,7 @@
         <indexterm>
          <primary>acos</primary>
         </indexterm>
-        <function>acos</function> ( <type>double precision</type> )
+        <function>acos</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1214,7 +1214,7 @@
         <indexterm>
          <primary>acosd</primary>
         </indexterm>
-        <function>acosd</function> ( <type>double precision</type> )
+        <function>acosd</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1231,7 +1231,7 @@
         <indexterm>
          <primary>asin</primary>
         </indexterm>
-        <function>asin</function> ( <type>double precision</type> )
+        <function>asin</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1248,7 +1248,7 @@
         <indexterm>
          <primary>asind</primary>
         </indexterm>
-        <function>asind</function> ( <type>double precision</type> )
+        <function>asind</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1265,7 +1265,7 @@
         <indexterm>
          <primary>atan</primary>
         </indexterm>
-        <function>atan</function> ( <type>double precision</type> )
+        <function>atan</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1282,7 +1282,7 @@
         <indexterm>
          <primary>atand</primary>
         </indexterm>
-        <function>atand</function> ( <type>double precision</type> )
+        <function>atand</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1339,7 +1339,7 @@
         <indexterm>
          <primary>cos</primary>
         </indexterm>
-        <function>cos</function> ( <type>double precision</type> )
+        <function>cos</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1356,7 +1356,7 @@
         <indexterm>
          <primary>cosd</primary>
         </indexterm>
-        <function>cosd</function> ( <type>double precision</type> )
+        <function>cosd</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1373,7 +1373,7 @@
         <indexterm>
          <primary>cot</primary>
         </indexterm>
-        <function>cot</function> ( <type>double precision</type> )
+        <function>cot</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1390,7 +1390,7 @@
         <indexterm>
          <primary>cotd</primary>
         </indexterm>
-        <function>cotd</function> ( <type>double precision</type> )
+        <function>cotd</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1407,7 +1407,7 @@
         <indexterm>
          <primary>sin</primary>
         </indexterm>
-        <function>sin</function> ( <type>double precision</type> )
+        <function>sin</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1424,7 +1424,7 @@
         <indexterm>
          <primary>sind</primary>
         </indexterm>
-        <function>sind</function> ( <type>double precision</type> )
+        <function>sind</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1441,7 +1441,7 @@
         <indexterm>
          <primary>tan</primary>
         </indexterm>
-        <function>tan</function> ( <type>double precision</type> )
+        <function>tan</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1458,7 +1458,7 @@
         <indexterm>
          <primary>tand</primary>
         </indexterm>
-        <function>tand</function> ( <type>double precision</type> )
+        <function>tand</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1513,7 +1513,7 @@
         <indexterm>
          <primary>sinh</primary>
         </indexterm>
-        <function>sinh</function> ( <type>double precision</type> )
+        <function>sinh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1530,7 +1530,7 @@
         <indexterm>
          <primary>cosh</primary>
         </indexterm>
-        <function>cosh</function> ( <type>double precision</type> )
+        <function>cosh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1547,7 +1547,7 @@
         <indexterm>
          <primary>tanh</primary>
         </indexterm>
-        <function>tanh</function> ( <type>double precision</type> )
+        <function>tanh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1564,7 +1564,7 @@
         <indexterm>
          <primary>asinh</primary>
         </indexterm>
-        <function>asinh</function> ( <type>double precision</type> )
+        <function>asinh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1581,7 +1581,7 @@
         <indexterm>
          <primary>acosh</primary>
         </indexterm>
-        <function>acosh</function> ( <type>double precision</type> )
+        <function>acosh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -1598,7 +1598,7 @@
         <indexterm>
          <primary>atanh</primary>
         </indexterm>
-        <function>atanh</function> ( <type>double precision</type> )
+        <function>atanh</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>

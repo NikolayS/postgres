@@ -64,7 +64,7 @@
         <indexterm>
          <primary>bit_length</primary>
         </indexterm>
-        <function>bit_length</function> ( <type>bytea</type> )
+        <function>bit_length</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -122,7 +122,7 @@
         <indexterm>
          <primary>octet_length</primary>
         </indexterm>
-        <function>octet_length</function> ( <type>bytea</type> )
+        <function>octet_length</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -310,7 +310,7 @@
         <indexterm>
          <primary>crc32</primary>
         </indexterm>
-        <function>crc32</function> ( <type>bytea</type> )
+        <function>crc32</function> ( <parameter>bytes</parameter> <type>bytea</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -327,7 +327,7 @@
         <indexterm>
          <primary>crc32c</primary>
         </indexterm>
-        <function>crc32c</function> ( <type>bytea</type> )
+        <function>crc32c</function> ( <parameter>bytes</parameter> <type>bytea</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -391,7 +391,7 @@
          <secondary sortas="binary string">of a binary string</secondary>
          <see>binary strings, length</see>
         </indexterm>
-        <function>length</function> ( <type>bytea</type> )
+        <function>length</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -424,7 +424,7 @@
         <indexterm>
          <primary>md5</primary>
         </indexterm>
-        <function>md5</function> ( <type>bytea</type> )
+        <function>md5</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -442,7 +442,7 @@
         <indexterm>
          <primary>reverse</primary>
         </indexterm>
-        <function>reverse</function> ( <type>bytea</type> )
+        <function>reverse</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>bytea</returnvalue>
        </para>
        <para>
@@ -499,7 +499,7 @@
         <indexterm>
          <primary>sha224</primary>
         </indexterm>
-        <function>sha224</function> ( <type>bytea</type> )
+        <function>sha224</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>bytea</returnvalue>
        </para>
        <para>
@@ -517,7 +517,7 @@
         <indexterm>
          <primary>sha256</primary>
         </indexterm>
-        <function>sha256</function> ( <type>bytea</type> )
+        <function>sha256</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>bytea</returnvalue>
        </para>
        <para>
@@ -535,7 +535,7 @@
         <indexterm>
          <primary>sha384</primary>
         </indexterm>
-        <function>sha384</function> ( <type>bytea</type> )
+        <function>sha384</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>bytea</returnvalue>
        </para>
        <para>
@@ -553,7 +553,7 @@
         <indexterm>
          <primary>sha512</primary>
         </indexterm>
-        <function>sha512</function> ( <type>bytea</type> )
+        <function>sha512</function> ( <parameter>string</parameter> <type>bytea</type> )
         <returnvalue>bytea</returnvalue>
        </para>
        <para>

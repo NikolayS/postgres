@@ -166,7 +166,7 @@
         <indexterm>
          <primary>bit_count</primary>
         </indexterm>
-        <function>bit_count</function> ( <type>bit</type> )
+        <function>bit_count</function> ( <parameter>bits</parameter> <type>bit</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -184,7 +184,7 @@
         <indexterm>
          <primary>bit_length</primary>
         </indexterm>
-        <function>bit_length</function> ( <type>bit</type> )
+        <function>bit_length</function> ( <parameter>string</parameter> <type>bit</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -205,7 +205,7 @@
          <primary>bit string</primary>
          <secondary>length</secondary>
         </indexterm>
-        <function>length</function> ( <type>bit</type> )
+        <function>length</function> ( <parameter>string</parameter> <type>bit</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -222,7 +222,7 @@
         <indexterm>
          <primary>octet_length</primary>
         </indexterm>
-        <function>octet_length</function> ( <type>bit</type> )
+        <function>octet_length</function> ( <parameter>string</parameter> <type>bit</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>

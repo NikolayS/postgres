@@ -700,7 +700,7 @@
         <indexterm>
          <primary>diagonal</primary>
         </indexterm>
-        <function>diagonal</function> ( <type>box</type> )
+        <function>diagonal</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>lseg</returnvalue>
        </para>
        <para>
@@ -718,7 +718,7 @@
         <indexterm>
          <primary>diameter</primary>
         </indexterm>
-        <function>diameter</function> ( <type>circle</type> )
+        <function>diameter</function> ( <parameter>value</parameter> <type>circle</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -735,7 +735,7 @@
         <indexterm>
          <primary>height</primary>
         </indexterm>
-        <function>height</function> ( <type>box</type> )
+        <function>height</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -752,7 +752,7 @@
         <indexterm>
          <primary>isclosed</primary>
         </indexterm>
-        <function>isclosed</function> ( <type>path</type> )
+        <function>isclosed</function> ( <parameter>value</parameter> <type>path</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -769,7 +769,7 @@
         <indexterm>
          <primary>isopen</primary>
         </indexterm>
-        <function>isopen</function> ( <type>path</type> )
+        <function>isopen</function> ( <parameter>value</parameter> <type>path</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -822,7 +822,7 @@
         <indexterm>
          <primary>pclose</primary>
         </indexterm>
-        <function>pclose</function> ( <type>path</type> )
+        <function>pclose</function> ( <parameter>value</parameter> <type>path</type> )
         <returnvalue>path</returnvalue>
        </para>
        <para>
@@ -839,7 +839,7 @@
         <indexterm>
          <primary>popen</primary>
         </indexterm>
-        <function>popen</function> ( <type>path</type> )
+        <function>popen</function> ( <parameter>value</parameter> <type>path</type> )
         <returnvalue>path</returnvalue>
        </para>
        <para>
@@ -856,7 +856,7 @@
         <indexterm>
          <primary>radius</primary>
         </indexterm>
-        <function>radius</function> ( <type>circle</type> )
+        <function>radius</function> ( <parameter>value</parameter> <type>circle</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -873,7 +873,7 @@
         <indexterm>
          <primary>slope</primary>
         </indexterm>
-        <function>slope</function> ( <type>point</type>, <type>point</type> )
+        <function>slope</function> ( <parameter>value1</parameter> <type>point</type>, <parameter>value2</parameter> <type>point</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -890,7 +890,7 @@
         <indexterm>
          <primary>width</primary>
         </indexterm>
-        <function>width</function> ( <type>box</type> )
+        <function>width</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para>
@@ -928,7 +928,7 @@
         <indexterm>
          <primary>box</primary>
         </indexterm>
-        <function>box</function> ( <type>circle</type> )
+        <function>box</function> ( <parameter>value</parameter> <type>circle</type> )
         <returnvalue>box</returnvalue>
        </para>
        <para>
@@ -942,7 +942,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>box</function> ( <type>point</type> )
+        <function>box</function> ( <parameter>value</parameter> <type>point</type> )
         <returnvalue>box</returnvalue>
        </para>
        <para>
@@ -956,7 +956,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>box</function> ( <type>point</type>, <type>point</type> )
+        <function>box</function> ( <parameter>value1</parameter> <type>point</type>, <parameter>value2</parameter> <type>point</type> )
         <returnvalue>box</returnvalue>
        </para>
        <para>
@@ -970,7 +970,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>box</function> ( <type>polygon</type> )
+        <function>box</function> ( <parameter>value</parameter> <type>polygon</type> )
         <returnvalue>box</returnvalue>
        </para>
        <para>
@@ -987,7 +987,7 @@
         <indexterm>
          <primary>bound_box</primary>
         </indexterm>
-        <function>bound_box</function> ( <type>box</type>, <type>box</type> )
+        <function>bound_box</function> ( <parameter>value1</parameter> <type>box</type>, <parameter>value2</parameter> <type>box</type> )
         <returnvalue>box</returnvalue>
        </para>
        <para>
@@ -1004,7 +1004,7 @@
         <indexterm>
          <primary>circle</primary>
         </indexterm>
-        <function>circle</function> ( <type>box</type> )
+        <function>circle</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>circle</returnvalue>
        </para>
        <para>
@@ -1018,7 +1018,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>circle</function> ( <type>point</type>, <type>double precision</type> )
+        <function>circle</function> ( <parameter>value</parameter> <type>point</type>, <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>circle</returnvalue>
        </para>
        <para>
@@ -1032,7 +1032,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>circle</function> ( <type>polygon</type> )
+        <function>circle</function> ( <parameter>value</parameter> <type>polygon</type> )
         <returnvalue>circle</returnvalue>
        </para>
        <para>
@@ -1051,7 +1051,7 @@
         <indexterm>
          <primary>line</primary>
         </indexterm>
-        <function>line</function> ( <type>point</type>, <type>point</type> )
+        <function>line</function> ( <parameter>value1</parameter> <type>point</type>, <parameter>value2</parameter> <type>point</type> )
         <returnvalue>line</returnvalue>
        </para>
        <para>
@@ -1068,7 +1068,7 @@
         <indexterm>
          <primary>lseg</primary>
         </indexterm>
-        <function>lseg</function> ( <type>box</type> )
+        <function>lseg</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>lseg</returnvalue>
        </para>
        <para>
@@ -1082,7 +1082,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>lseg</function> ( <type>point</type>, <type>point</type> )
+        <function>lseg</function> ( <parameter>value1</parameter> <type>point</type>, <parameter>value2</parameter> <type>point</type> )
         <returnvalue>lseg</returnvalue>
        </para>
        <para>
@@ -1099,7 +1099,7 @@
         <indexterm>
          <primary>path</primary>
         </indexterm>
-        <function>path</function> ( <type>polygon</type> )
+        <function>path</function> ( <parameter>value</parameter> <type>polygon</type> )
         <returnvalue>path</returnvalue>
        </para>
        <para>
@@ -1116,7 +1116,7 @@
         <indexterm>
          <primary>point</primary>
         </indexterm>
-        <function>point</function> ( <type>double precision</type>, <type>double precision</type> )
+        <function>point</function> ( <parameter>x1</parameter> <type>double precision</type>, <parameter>x2</parameter> <type>double precision</type> )
         <returnvalue>point</returnvalue>
        </para>
        <para>
@@ -1130,7 +1130,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>point</function> ( <type>box</type> )
+        <function>point</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>point</returnvalue>
        </para>
        <para>
@@ -1144,7 +1144,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>point</function> ( <type>circle</type> )
+        <function>point</function> ( <parameter>value</parameter> <type>circle</type> )
         <returnvalue>point</returnvalue>
        </para>
        <para>
@@ -1158,7 +1158,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>point</function> ( <type>lseg</type> )
+        <function>point</function> ( <parameter>value</parameter> <type>lseg</type> )
         <returnvalue>point</returnvalue>
        </para>
        <para>
@@ -1172,7 +1172,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>point</function> ( <type>polygon</type> )
+        <function>point</function> ( <parameter>value</parameter> <type>polygon</type> )
         <returnvalue>point</returnvalue>
        </para>
        <para>
@@ -1190,7 +1190,7 @@
         <indexterm>
          <primary>polygon</primary>
         </indexterm>
-        <function>polygon</function> ( <type>box</type> )
+        <function>polygon</function> ( <parameter>value</parameter> <type>box</type> )
         <returnvalue>polygon</returnvalue>
        </para>
        <para>
@@ -1204,7 +1204,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>polygon</function> ( <type>circle</type> )
+        <function>polygon</function> ( <parameter>value</parameter> <type>circle</type> )
         <returnvalue>polygon</returnvalue>
        </para>
        <para>
@@ -1218,7 +1218,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>polygon</function> ( <type>integer</type>, <type>circle</type> )
+        <function>polygon</function> ( <parameter>n</parameter> <type>integer</type>, <parameter>value</parameter> <type>circle</type> )
         <returnvalue>polygon</returnvalue>
        </para>
        <para>
@@ -1232,7 +1232,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>polygon</function> ( <type>path</type> )
+        <function>polygon</function> ( <parameter>value</parameter> <type>path</type> )
         <returnvalue>polygon</returnvalue>
        </para>
        <para>

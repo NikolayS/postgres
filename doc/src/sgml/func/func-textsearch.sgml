@@ -220,7 +220,7 @@
         <indexterm>
          <primary>array_to_tsvector</primary>
         </indexterm>
-        <function>array_to_tsvector</function> ( <type>text[]</type> )
+        <function>array_to_tsvector</function> ( <parameter>value</parameter> <type>text[]</type> )
         <returnvalue>tsvector</returnvalue>
        </para>
        <para>
@@ -258,7 +258,7 @@
         <indexterm>
          <primary>length</primary>
         </indexterm>
-        <function>length</function> ( <type>tsvector</type> )
+        <function>length</function> ( <parameter>string</parameter> <type>tsvector</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -275,7 +275,7 @@
         <indexterm>
          <primary>numnode</primary>
         </indexterm>
-        <function>numnode</function> ( <type>tsquery</type> )
+        <function>numnode</function> ( <parameter>query</parameter> <type>tsquery</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -365,7 +365,7 @@
         <indexterm>
          <primary>querytree</primary>
         </indexterm>
-        <function>querytree</function> ( <type>tsquery</type> )
+        <function>querytree</function> ( <parameter>query</parameter> <type>tsquery</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -425,7 +425,7 @@
         <indexterm>
          <primary>strip</primary>
         </indexterm>
-        <function>strip</function> ( <type>tsvector</type> )
+        <function>strip</function> ( <parameter>vector</parameter> <type>tsvector</type> )
         <returnvalue>tsvector</returnvalue>
        </para>
        <para>
@@ -807,7 +807,7 @@
         <indexterm>
          <primary>tsvector_to_array</primary>
         </indexterm>
-        <function>tsvector_to_array</function> ( <type>tsvector</type> )
+        <function>tsvector_to_array</function> ( <parameter>vector</parameter> <type>tsvector</type> )
         <returnvalue>text[]</returnvalue>
        </para>
        <para>
@@ -825,7 +825,7 @@
          <primary>unnest</primary>
          <secondary>for tsvector</secondary>
         </indexterm>
-        <function>unnest</function> ( <type>tsvector</type> )
+        <function>unnest</function> ( <parameter>tsvector</parameter> <type>tsvector</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>lexeme</parameter> <type>text</type>,
         <parameter>positions</parameter> <type>smallint[]</type>,

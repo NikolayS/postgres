@@ -60,7 +60,7 @@
         <indexterm>
          <primary>any_value</primary>
         </indexterm>
-        <function>any_value</function> ( <type>anyelement</type> )
+        <function>any_value</function> ( <parameter>value</parameter> <type>anyelement</type> )
         <returnvalue><replaceable>same as input type</replaceable></returnvalue>
        </para>
        <para>
@@ -74,7 +74,7 @@
         <indexterm>
          <primary>array_agg</primary>
         </indexterm>
-        <function>array_agg</function> ( <type>anynonarray</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
+        <function>array_agg</function> ( <parameter>value</parameter> <type>anynonarray</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
         <returnvalue>anyarray</returnvalue>
        </para>
        <para>
@@ -85,7 +85,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>array_agg</function> ( <type>anyarray</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
+        <function>array_agg</function> ( <parameter>array</parameter> <type>anyarray</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
         <returnvalue>anyarray</returnvalue>
        </para>
        <para>
@@ -104,31 +104,31 @@
         <indexterm>
          <primary>avg</primary>
         </indexterm>
-        <function>avg</function> ( <type>smallint</type> )
+        <function>avg</function> ( <parameter>n</parameter> <type>smallint</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>integer</type> )
+        <function>avg</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>bigint</type> )
+        <function>avg</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>numeric</type> )
+        <function>avg</function> ( <parameter>n</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>real</type> )
+        <function>avg</function> ( <parameter>x</parameter> <type>real</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>double precision</type> )
+        <function>avg</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para role="func_signature">
-        <function>avg</function> ( <type>interval</type> )
+        <function>avg</function> ( <parameter>interval</parameter> <type>interval</type> )
         <returnvalue>interval</returnvalue>
        </para>
        <para>
@@ -143,19 +143,19 @@
         <indexterm>
          <primary>bit_and</primary>
         </indexterm>
-        <function>bit_and</function> ( <type>smallint</type> )
+        <function>bit_and</function> ( <parameter>n</parameter> <type>smallint</type> )
         <returnvalue>smallint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_and</function> ( <type>integer</type> )
+        <function>bit_and</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_and</function> ( <type>bigint</type> )
+        <function>bit_and</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_and</function> ( <type>bit</type> )
+        <function>bit_and</function> ( <parameter>bits</parameter> <type>bit</type> )
         <returnvalue>bit</returnvalue>
        </para>
        <para>
@@ -169,19 +169,19 @@
         <indexterm>
          <primary>bit_or</primary>
         </indexterm>
-        <function>bit_or</function> ( <type>smallint</type> )
+        <function>bit_or</function> ( <parameter>n</parameter> <type>smallint</type> )
         <returnvalue>smallint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_or</function> ( <type>integer</type> )
+        <function>bit_or</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_or</function> ( <type>bigint</type> )
+        <function>bit_or</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_or</function> ( <type>bit</type> )
+        <function>bit_or</function> ( <parameter>bits</parameter> <type>bit</type> )
         <returnvalue>bit</returnvalue>
        </para>
        <para>
@@ -195,19 +195,19 @@
         <indexterm>
          <primary>bit_xor</primary>
         </indexterm>
-        <function>bit_xor</function> ( <type>smallint</type> )
+        <function>bit_xor</function> ( <parameter>n</parameter> <type>smallint</type> )
         <returnvalue>smallint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_xor</function> ( <type>integer</type> )
+        <function>bit_xor</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_xor</function> ( <type>bigint</type> )
+        <function>bit_xor</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>bit_xor</function> ( <type>bit</type> )
+        <function>bit_xor</function> ( <parameter>bits</parameter> <type>bit</type> )
         <returnvalue>bit</returnvalue>
        </para>
        <para>
@@ -222,7 +222,7 @@
         <indexterm>
          <primary>bool_and</primary>
         </indexterm>
-        <function>bool_and</function> ( <type>boolean</type> )
+        <function>bool_and</function> ( <parameter>value</parameter> <type>boolean</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -236,7 +236,7 @@
         <indexterm>
          <primary>bool_or</primary>
         </indexterm>
-        <function>bool_or</function> ( <type>boolean</type> )
+        <function>bool_or</function> ( <parameter>value</parameter> <type>boolean</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -261,7 +261,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>count</function> ( <type>"any"</type> )
+        <function>count</function> ( <parameter>value</parameter> <type>"any"</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -276,7 +276,7 @@
         <indexterm>
          <primary>every</primary>
         </indexterm>
-        <function>every</function> ( <type>boolean</type> )
+        <function>every</function> ( <parameter>value</parameter> <type>boolean</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -290,14 +290,14 @@
         <indexterm>
          <primary>json_agg</primary>
         </indexterm>
-        <function>json_agg</function> ( <type>anyelement</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
+        <function>json_agg</function> ( <parameter>value</parameter> <type>anyelement</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
         <returnvalue>json</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_agg</primary>
         </indexterm>
-        <function>jsonb_agg</function> ( <type>anyelement</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
+        <function>jsonb_agg</function> ( <parameter>value</parameter> <type>anyelement</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
         <returnvalue>jsonb</returnvalue>
        </para>
        <para>
@@ -313,14 +313,14 @@
         <indexterm>
          <primary>json_agg_strict</primary>
         </indexterm>
-        <function>json_agg_strict</function> ( <type>anyelement</type> )
+        <function>json_agg_strict</function> ( <parameter>value</parameter> <type>anyelement</type> )
         <returnvalue>json</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_agg_strict</primary>
         </indexterm>
-        <function>jsonb_agg_strict</function> ( <type>anyelement</type> )
+        <function>jsonb_agg_strict</function> ( <parameter>value</parameter> <type>anyelement</type> )
         <returnvalue>jsonb</returnvalue>
        </para>
        <para>
@@ -602,35 +602,35 @@
         <indexterm>
          <primary>sum</primary>
         </indexterm>
-        <function>sum</function> ( <type>smallint</type> )
+        <function>sum</function> ( <parameter>n</parameter> <type>smallint</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>integer</type> )
+        <function>sum</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>bigint</type> )
+        <function>sum</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>numeric</type> )
+        <function>sum</function> ( <parameter>n</parameter> <type>numeric</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>real</type> )
+        <function>sum</function> ( <parameter>x</parameter> <type>real</type> )
         <returnvalue>real</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>double precision</type> )
+        <function>sum</function> ( <parameter>x</parameter> <type>double precision</type> )
         <returnvalue>double precision</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>interval</type> )
+        <function>sum</function> ( <parameter>interval</parameter> <type>interval</type> )
         <returnvalue>interval</returnvalue>
        </para>
        <para role="func_signature">
-        <function>sum</function> ( <type>money</type> )
+        <function>sum</function> ( <parameter>value</parameter> <type>money</type> )
         <returnvalue>money</returnvalue>
        </para>
        <para>
@@ -644,7 +644,7 @@
         <indexterm>
          <primary>xmlagg</primary>
         </indexterm>
-        <function>xmlagg</function> ( <type>xml</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
+        <function>xmlagg</function> ( <parameter>xml</parameter> <type>xml</type> <literal>ORDER BY</literal> <literal>input_sort_columns</literal> )
         <returnvalue>xml</returnvalue>
        </para>
        <para>

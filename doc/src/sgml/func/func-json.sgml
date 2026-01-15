@@ -535,14 +535,14 @@
         <indexterm>
          <primary>to_json</primary>
         </indexterm>
-        <function>to_json</function> ( <type>anyelement</type> )
+        <function>to_json</function> ( <parameter>value</parameter> <type>anyelement</type> )
         <returnvalue>json</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>to_jsonb</primary>
         </indexterm>
-        <function>to_jsonb</function> ( <type>anyelement</type> )
+        <function>to_jsonb</function> ( <parameter>value</parameter> <type>anyelement</type> )
         <returnvalue>jsonb</returnvalue>
        </para>
        <para>
@@ -578,7 +578,7 @@
         <indexterm>
          <primary>array_to_json</primary>
         </indexterm>
-        <function>array_to_json</function> ( <type>anyarray</type> <optional>, <type>boolean</type> </optional> )
+        <function>array_to_json</function> ( <parameter>array</parameter> <type>anyarray</type> <optional>, <parameter>value</parameter> <type>boolean</type> </optional> )
         <returnvalue>json</returnvalue>
        </para>
        <para>
@@ -637,7 +637,7 @@
         <indexterm>
          <primary>row_to_json</primary>
         </indexterm>
-        <function>row_to_json</function> ( <type>record</type> <optional>, <type>boolean</type> </optional> )
+        <function>row_to_json</function> ( <parameter>value1</parameter> <type>record</type> <optional>, <parameter>value2</parameter> <type>boolean</type> </optional> )
         <returnvalue>json</returnvalue>
        </para>
        <para>
@@ -742,14 +742,14 @@
         <indexterm>
          <primary>json_object</primary>
         </indexterm>
-        <function>json_object</function> ( <type>text[]</type> )
+        <function>json_object</function> ( <parameter>value</parameter> <type>text[]</type> )
         <returnvalue>json</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_object</primary>
         </indexterm>
-        <function>jsonb_object</function> ( <type>text[]</type> )
+        <function>jsonb_object</function> ( <parameter>value</parameter> <type>text[]</type> )
         <returnvalue>jsonb</returnvalue>
        </para>
        <para>
@@ -967,14 +967,14 @@ array w/o UK? | t
         <indexterm>
          <primary>json_array_elements</primary>
         </indexterm>
-        <function>json_array_elements</function> ( <type>json</type> )
+        <function>json_array_elements</function> ( <parameter>from_json</parameter> <type>json</type> )
         <returnvalue>setof json</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_array_elements</primary>
         </indexterm>
-        <function>jsonb_array_elements</function> ( <type>jsonb</type> )
+        <function>jsonb_array_elements</function> ( <parameter>from_json</parameter> <type>jsonb</type> )
         <returnvalue>setof jsonb</returnvalue>
        </para>
        <para>
@@ -998,14 +998,14 @@ array w/o UK? | t
         <indexterm>
          <primary>json_array_elements_text</primary>
         </indexterm>
-        <function>json_array_elements_text</function> ( <type>json</type> )
+        <function>json_array_elements_text</function> ( <parameter>from_json</parameter> <type>json</type> )
         <returnvalue>setof text</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_array_elements_text</primary>
         </indexterm>
-        <function>jsonb_array_elements_text</function> ( <type>jsonb</type> )
+        <function>jsonb_array_elements_text</function> ( <parameter>from_json</parameter> <type>jsonb</type> )
         <returnvalue>setof text</returnvalue>
        </para>
        <para>
@@ -1028,14 +1028,14 @@ array w/o UK? | t
         <indexterm>
          <primary>json_array_length</primary>
         </indexterm>
-        <function>json_array_length</function> ( <type>json</type> )
+        <function>json_array_length</function> ( <parameter>json</parameter> <type>json</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_array_length</primary>
         </indexterm>
-        <function>jsonb_array_length</function> ( <type>jsonb</type> )
+        <function>jsonb_array_length</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -1056,7 +1056,7 @@ array w/o UK? | t
         <indexterm>
          <primary>json_each</primary>
         </indexterm>
-        <function>json_each</function> ( <type>json</type> )
+        <function>json_each</function> ( <parameter>from_json</parameter> <type>json</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>key</parameter> <type>text</type>,
         <parameter>value</parameter> <type>json</type> )
@@ -1065,7 +1065,7 @@ array w/o UK? | t
         <indexterm>
          <primary>jsonb_each</primary>
         </indexterm>
-        <function>jsonb_each</function> ( <type>jsonb</type> )
+        <function>jsonb_each</function> ( <parameter>from_json</parameter> <type>jsonb</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>key</parameter> <type>text</type>,
         <parameter>value</parameter> <type>jsonb</type> )
@@ -1090,7 +1090,7 @@ array w/o UK? | t
         <indexterm>
          <primary>json_each_text</primary>
         </indexterm>
-        <function>json_each_text</function> ( <type>json</type> )
+        <function>json_each_text</function> ( <parameter>from_json</parameter> <type>json</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>key</parameter> <type>text</type>,
         <parameter>value</parameter> <type>text</type> )
@@ -1099,7 +1099,7 @@ array w/o UK? | t
         <indexterm>
          <primary>jsonb_each_text</primary>
         </indexterm>
-        <function>jsonb_each_text</function> ( <type>jsonb</type> )
+        <function>jsonb_each_text</function> ( <parameter>from_json</parameter> <type>jsonb</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>key</parameter> <type>text</type>,
         <parameter>value</parameter> <type>text</type> )
@@ -1179,14 +1179,14 @@ array w/o UK? | t
         <indexterm>
          <primary>json_object_keys</primary>
         </indexterm>
-        <function>json_object_keys</function> ( <type>json</type> )
+        <function>json_object_keys</function> ( <parameter>json</parameter> <type>json</type> )
         <returnvalue>setof text</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_object_keys</primary>
         </indexterm>
-        <function>jsonb_object_keys</function> ( <type>jsonb</type> )
+        <function>jsonb_object_keys</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>setof text</returnvalue>
        </para>
        <para>
@@ -1394,14 +1394,14 @@ ERROR:  value too long for type character(2)
         <indexterm>
          <primary>json_to_record</primary>
         </indexterm>
-        <function>json_to_record</function> ( <type>json</type> )
+        <function>json_to_record</function> ( <parameter>json</parameter> <type>json</type> )
         <returnvalue>record</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_to_record</primary>
         </indexterm>
-        <function>jsonb_to_record</function> ( <type>jsonb</type> )
+        <function>jsonb_to_record</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>record</returnvalue>
        </para>
        <para>
@@ -1433,14 +1433,14 @@ ERROR:  value too long for type character(2)
         <indexterm>
          <primary>json_to_recordset</primary>
         </indexterm>
-        <function>json_to_recordset</function> ( <type>json</type> )
+        <function>json_to_recordset</function> ( <parameter>json</parameter> <type>json</type> )
         <returnvalue>setof record</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_to_recordset</primary>
         </indexterm>
-        <function>jsonb_to_recordset</function> ( <type>jsonb</type> )
+        <function>jsonb_to_recordset</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>setof record</returnvalue>
        </para>
        <para>
@@ -1787,7 +1787,7 @@ ERROR:  value too long for type character(2)
         <indexterm>
          <primary>jsonb_pretty</primary>
         </indexterm>
-        <function>jsonb_pretty</function> ( <type>jsonb</type> )
+        <function>jsonb_pretty</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1813,14 +1813,14 @@ ERROR:  value too long for type character(2)
         <indexterm>
          <primary>json_typeof</primary>
         </indexterm>
-        <function>json_typeof</function> ( <type>json</type> )
+        <function>json_typeof</function> ( <parameter>json</parameter> <type>json</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>jsonb_typeof</primary>
         </indexterm>
-        <function>jsonb_typeof</function> ( <type>jsonb</type> )
+        <function>jsonb_typeof</function> ( <parameter>json</parameter> <type>jsonb</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>

@@ -253,7 +253,7 @@
         <indexterm>
          <primary>abbrev</primary>
         </indexterm>
-        <function>abbrev</function> ( <type>inet</type> )
+        <function>abbrev</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -271,7 +271,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>abbrev</function> ( <type>cidr</type> )
+        <function>abbrev</function> ( <parameter>address</parameter> <type>cidr</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -291,7 +291,7 @@
         <indexterm>
          <primary>broadcast</primary>
         </indexterm>
-        <function>broadcast</function> ( <type>inet</type> )
+        <function>broadcast</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>inet</returnvalue>
        </para>
        <para>
@@ -308,7 +308,7 @@
         <indexterm>
          <primary>family</primary>
         </indexterm>
-        <function>family</function> ( <type>inet</type> )
+        <function>family</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -326,7 +326,7 @@
         <indexterm>
          <primary>host</primary>
         </indexterm>
-        <function>host</function> ( <type>inet</type> )
+        <function>host</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -343,7 +343,7 @@
         <indexterm>
          <primary>hostmask</primary>
         </indexterm>
-        <function>hostmask</function> ( <type>inet</type> )
+        <function>hostmask</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>inet</returnvalue>
        </para>
        <para>
@@ -360,7 +360,7 @@
         <indexterm>
          <primary>inet_merge</primary>
         </indexterm>
-        <function>inet_merge</function> ( <type>inet</type>, <type>inet</type> )
+        <function>inet_merge</function> ( <parameter>address1</parameter> <type>inet</type>, <parameter>address2</parameter> <type>inet</type> )
         <returnvalue>cidr</returnvalue>
        </para>
        <para>
@@ -377,7 +377,7 @@
         <indexterm>
          <primary>inet_same_family</primary>
         </indexterm>
-        <function>inet_same_family</function> ( <type>inet</type>, <type>inet</type> )
+        <function>inet_same_family</function> ( <parameter>address1</parameter> <type>inet</type>, <parameter>address2</parameter> <type>inet</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -394,7 +394,7 @@
         <indexterm>
          <primary>masklen</primary>
         </indexterm>
-        <function>masklen</function> ( <type>inet</type> )
+        <function>masklen</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -411,7 +411,7 @@
         <indexterm>
          <primary>netmask</primary>
         </indexterm>
-        <function>netmask</function> ( <type>inet</type> )
+        <function>netmask</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>inet</returnvalue>
        </para>
        <para>
@@ -428,7 +428,7 @@
         <indexterm>
          <primary>network</primary>
         </indexterm>
-        <function>network</function> ( <type>inet</type> )
+        <function>network</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>cidr</returnvalue>
        </para>
        <para>
@@ -447,7 +447,7 @@
         <indexterm>
          <primary>set_masklen</primary>
         </indexterm>
-        <function>set_masklen</function> ( <type>inet</type>, <type>integer</type> )
+        <function>set_masklen</function> ( <parameter>address</parameter> <type>inet</type>, <parameter>length</parameter> <type>integer</type> )
         <returnvalue>inet</returnvalue>
        </para>
        <para>
@@ -462,7 +462,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>set_masklen</function> ( <type>cidr</type>, <type>integer</type> )
+        <function>set_masklen</function> ( <parameter>address</parameter> <type>cidr</type>, <parameter>length</parameter> <type>integer</type> )
         <returnvalue>cidr</returnvalue>
        </para>
        <para>
@@ -480,7 +480,7 @@
         <indexterm>
          <primary>text</primary>
         </indexterm>
-        <function>text</function> ( <type>inet</type> )
+        <function>text</function> ( <parameter>address</parameter> <type>inet</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -538,7 +538,7 @@
         <indexterm>
          <primary>trunc</primary>
         </indexterm>
-        <function>trunc</function> ( <type>macaddr</type> )
+        <function>trunc</function> ( <parameter>x</parameter> <type>macaddr</type> )
         <returnvalue>macaddr</returnvalue>
        </para>
        <para>
@@ -554,7 +554,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>trunc</function> ( <type>macaddr8</type> )
+        <function>trunc</function> ( <parameter>x</parameter> <type>macaddr8</type> )
         <returnvalue>macaddr8</returnvalue>
        </para>
        <para>
@@ -573,7 +573,7 @@
         <indexterm>
          <primary>macaddr8_set7bit</primary>
         </indexterm>
-        <function>macaddr8_set7bit</function> ( <type>macaddr8</type> )
+        <function>macaddr8_set7bit</function> ( <parameter>address</parameter> <type>macaddr8</type> )
         <returnvalue>macaddr8</returnvalue>
        </para>
        <para>

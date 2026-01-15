@@ -171,7 +171,7 @@
         <indexterm>
          <primary>array_append</primary>
         </indexterm>
-        <function>array_append</function> ( <type>anycompatiblearray</type>, <type>anycompatible</type> )
+        <function>array_append</function> ( <parameter>array</parameter> <type>anycompatiblearray</type>, <parameter>value</parameter> <type>anycompatible</type> )
         <returnvalue>anycompatiblearray</returnvalue>
        </para>
        <para>
@@ -190,7 +190,7 @@
         <indexterm>
          <primary>array_cat</primary>
         </indexterm>
-        <function>array_cat</function> ( <type>anycompatiblearray</type>, <type>anycompatiblearray</type> )
+        <function>array_cat</function> ( <parameter>array1</parameter> <type>anycompatiblearray</type>, <parameter>array2</parameter> <type>anycompatiblearray</type> )
         <returnvalue>anycompatiblearray</returnvalue>
        </para>
        <para>
@@ -209,7 +209,7 @@
         <indexterm>
          <primary>array_dims</primary>
         </indexterm>
-        <function>array_dims</function> ( <type>anyarray</type> )
+        <function>array_dims</function> ( <parameter>array</parameter> <type>anyarray</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -226,8 +226,8 @@
         <indexterm>
          <primary>array_fill</primary>
         </indexterm>
-        <function>array_fill</function> ( <type>anyelement</type>, <type>integer[]</type>
-          <optional>, <type>integer[]</type> </optional> )
+        <function>array_fill</function> ( <parameter>value1</parameter> <type>anyelement</type>, <parameter>value2</parameter> <type>integer[]</type>
+          <optional>, <parameter>value3</parameter> <type>integer[]</type> </optional> )
         <returnvalue>anyarray</returnvalue>
        </para>
        <para>
@@ -251,7 +251,7 @@
         <indexterm>
          <primary>array_length</primary>
         </indexterm>
-        <function>array_length</function> ( <type>anyarray</type>, <type>integer</type> )
+        <function>array_length</function> ( <parameter>array</parameter> <type>anyarray</type>, <parameter>dimension</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -277,7 +277,7 @@
         <indexterm>
          <primary>array_lower</primary>
         </indexterm>
-        <function>array_lower</function> ( <type>anyarray</type>, <type>integer</type> )
+        <function>array_lower</function> ( <parameter>array</parameter> <type>anyarray</type>, <parameter>dimension</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -294,7 +294,7 @@
         <indexterm>
          <primary>array_ndims</primary>
         </indexterm>
-        <function>array_ndims</function> ( <type>anyarray</type> )
+        <function>array_ndims</function> ( <parameter>array</parameter> <type>anyarray</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -311,7 +311,7 @@
         <indexterm>
          <primary>array_position</primary>
         </indexterm>
-        <function>array_position</function> ( <type>anycompatiblearray</type>, <type>anycompatible</type> <optional>, <type>integer</type> </optional> )
+        <function>array_position</function> ( <parameter>array</parameter> <type>anycompatiblearray</type>, <parameter>value</parameter> <type>anycompatible</type> <optional>, <parameter>n</parameter> <type>integer</type> </optional> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -333,7 +333,7 @@
         <indexterm>
          <primary>array_positions</primary>
         </indexterm>
-        <function>array_positions</function> ( <type>anycompatiblearray</type>, <type>anycompatible</type> )
+        <function>array_positions</function> ( <parameter>array</parameter> <type>anycompatiblearray</type>, <parameter>value</parameter> <type>anycompatible</type> )
         <returnvalue>integer[]</returnvalue>
        </para>
        <para>
@@ -357,7 +357,7 @@
         <indexterm>
          <primary>array_prepend</primary>
         </indexterm>
-        <function>array_prepend</function> ( <type>anycompatible</type>, <type>anycompatiblearray</type> )
+        <function>array_prepend</function> ( <parameter>value</parameter> <type>anycompatible</type>, <parameter>array</parameter> <type>anycompatiblearray</type> )
         <returnvalue>anycompatiblearray</returnvalue>
        </para>
        <para>
@@ -376,7 +376,7 @@
         <indexterm>
          <primary>array_remove</primary>
         </indexterm>
-        <function>array_remove</function> ( <type>anycompatiblearray</type>, <type>anycompatible</type> )
+        <function>array_remove</function> ( <parameter>array</parameter> <type>anycompatiblearray</type>, <parameter>value</parameter> <type>anycompatible</type> )
         <returnvalue>anycompatiblearray</returnvalue>
        </para>
        <para>
@@ -396,7 +396,7 @@
         <indexterm>
          <primary>array_replace</primary>
         </indexterm>
-        <function>array_replace</function> ( <type>anycompatiblearray</type>, <type>anycompatible</type>, <type>anycompatible</type> )
+        <function>array_replace</function> ( <parameter>array</parameter> <type>anycompatiblearray</type>, <parameter>value1</parameter> <type>anycompatible</type>, <parameter>value2</parameter> <type>anycompatible</type> )
         <returnvalue>anycompatiblearray</returnvalue>
        </para>
        <para>
@@ -414,7 +414,7 @@
         <indexterm>
          <primary>array_reverse</primary>
         </indexterm>
-        <function>array_reverse</function> ( <type>anyarray</type> )
+        <function>array_reverse</function> ( <parameter>array</parameter> <type>anyarray</type> )
         <returnvalue>anyarray</returnvalue>
        </para>
        <para>
@@ -456,7 +456,7 @@
         <indexterm>
          <primary>array_shuffle</primary>
         </indexterm>
-        <function>array_shuffle</function> ( <type>anyarray</type> )
+        <function>array_shuffle</function> ( <parameter>array</parameter> <type>anyarray</type> )
         <returnvalue>anyarray</returnvalue>
        </para>
        <para>
@@ -532,7 +532,7 @@
         <indexterm>
          <primary>array_upper</primary>
         </indexterm>
-        <function>array_upper</function> ( <type>anyarray</type>, <type>integer</type> )
+        <function>array_upper</function> ( <parameter>array</parameter> <type>anyarray</type>, <parameter>dimension</parameter> <type>integer</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -549,7 +549,7 @@
         <indexterm>
          <primary>cardinality</primary>
         </indexterm>
-        <function>cardinality</function> ( <type>anyarray</type> )
+        <function>cardinality</function> ( <parameter>array</parameter> <type>anyarray</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -585,7 +585,7 @@
         <indexterm>
          <primary>unnest</primary>
         </indexterm>
-        <function>unnest</function> ( <type>anyarray</type> )
+        <function>unnest</function> ( <parameter>tsvector</parameter> <type>anyarray</type> )
         <returnvalue>setof anyelement</returnvalue>
        </para>
        <para>
@@ -614,7 +614,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>unnest</function> ( <type>anyarray</type>, <type>anyarray</type> <optional>, ... </optional> )
+        <function>unnest</function> ( <parameter>array1</parameter> <type>anyarray</type>, <parameter>array2</parameter> <type>anyarray</type> <optional>, ... </optional> )
         <returnvalue>setof anyelement, anyelement [, ... ]</returnvalue>
        </para>
        <para>

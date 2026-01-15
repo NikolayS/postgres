@@ -230,7 +230,7 @@
         <indexterm>
          <primary>pg_blocking_pids</primary>
         </indexterm>
-        <function>pg_blocking_pids</function> ( <type>integer</type> )
+        <function>pg_blocking_pids</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>integer[]</returnvalue>
        </para>
        <para>
@@ -365,7 +365,7 @@
         <indexterm>
          <primary>pg_is_other_temp_schema</primary>
         </indexterm>
-        <function>pg_is_other_temp_schema</function> ( <type>oid</type> )
+        <function>pg_is_other_temp_schema</function> ( <parameter>oid</parameter> <type>oid</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -453,7 +453,7 @@
         <indexterm>
          <primary>pg_safe_snapshot_blocking_pids</primary>
         </indexterm>
-        <function>pg_safe_snapshot_blocking_pids</function> ( <type>integer</type> )
+        <function>pg_safe_snapshot_blocking_pids</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>integer[]</returnvalue>
        </para>
        <para>
@@ -1099,7 +1099,7 @@ SELECT has_function_privilege('joeuser', 'myfunc(int, text)', 'execute');
         <indexterm>
          <primary>aclexplode</primary>
         </indexterm>
-        <function>aclexplode</function> ( <type>aclitem[]</type> )
+        <function>aclexplode</function> ( <parameter>acl</parameter> <type>aclitem[]</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>grantor</parameter> <type>oid</type>,
         <parameter>grantee</parameter> <type>oid</type>,
@@ -1421,7 +1421,7 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
         <indexterm>
          <primary>pg_basetype</primary>
         </indexterm>
-        <function>pg_basetype</function> ( <type>regtype</type> )
+        <function>pg_basetype</function> ( <parameter>type</parameter> <type>regtype</type> )
         <returnvalue>regtype</returnvalue>
        </para>
        <para>
@@ -1929,7 +1929,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>pg_typeof</primary>
         </indexterm>
-        <function>pg_typeof</function> ( <type>"any"</type> )
+        <function>pg_typeof</function> ( <parameter>value</parameter> <type>"any"</type> )
         <returnvalue>regtype</returnvalue>
        </para>
        <para>
@@ -1976,7 +1976,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regclass</primary>
         </indexterm>
-        <function>to_regclass</function> ( <type>text</type> )
+        <function>to_regclass</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regclass</returnvalue>
        </para>
        <para>
@@ -1993,7 +1993,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regdatabase</primary>
         </indexterm>
-        <function>to_regdatabase</function> ( <type>text</type> )
+        <function>to_regdatabase</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regdatabase</returnvalue>
        </para>
        <para>
@@ -2010,7 +2010,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regcollation</primary>
         </indexterm>
-        <function>to_regcollation</function> ( <type>text</type> )
+        <function>to_regcollation</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regcollation</returnvalue>
        </para>
        <para>
@@ -2027,7 +2027,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regnamespace</primary>
         </indexterm>
-        <function>to_regnamespace</function> ( <type>text</type> )
+        <function>to_regnamespace</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regnamespace</returnvalue>
        </para>
        <para>
@@ -2044,7 +2044,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regoper</primary>
         </indexterm>
-        <function>to_regoper</function> ( <type>text</type> )
+        <function>to_regoper</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regoper</returnvalue>
        </para>
        <para>
@@ -2061,7 +2061,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regoperator</primary>
         </indexterm>
-        <function>to_regoperator</function> ( <type>text</type> )
+        <function>to_regoperator</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regoperator</returnvalue>
        </para>
        <para>
@@ -2078,7 +2078,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regproc</primary>
         </indexterm>
-        <function>to_regproc</function> ( <type>text</type> )
+        <function>to_regproc</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regproc</returnvalue>
        </para>
        <para>
@@ -2095,7 +2095,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regprocedure</primary>
         </indexterm>
-        <function>to_regprocedure</function> ( <type>text</type> )
+        <function>to_regprocedure</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regprocedure</returnvalue>
        </para>
        <para>
@@ -2112,7 +2112,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regrole</primary>
         </indexterm>
-        <function>to_regrole</function> ( <type>text</type> )
+        <function>to_regrole</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regrole</returnvalue>
        </para>
        <para>
@@ -2129,7 +2129,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regtype</primary>
         </indexterm>
-        <function>to_regtype</function> ( <type>text</type> )
+        <function>to_regtype</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>regtype</returnvalue>
        </para>
        <para>
@@ -2149,7 +2149,7 @@ SELECT currval(pg_get_serial_sequence('sometable', 'id'));
         <indexterm>
          <primary>to_regtypemod</primary>
         </indexterm>
-        <function>to_regtypemod</function> ( <type>text</type> )
+        <function>to_regtypemod</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -2790,7 +2790,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>age</primary>
         </indexterm>
-        <function>age</function>  ( <type>xid</type> )
+        <function>age</function>  ( <parameter>timestamp</parameter> <type>xid</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -2804,7 +2804,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>mxid_age</primary>
         </indexterm>
-        <function>mxid_age</function>  ( <type>xid</type> )
+        <function>mxid_age</function>  ( <parameter>value</parameter> <type>xid</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -2854,7 +2854,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_xact_status</primary>
         </indexterm>
-        <function>pg_xact_status</function> ( <type>xid8</type> )
+        <function>pg_xact_status</function> ( <parameter>value</parameter> <type>xid8</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -2900,7 +2900,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_snapshot_xip</primary>
         </indexterm>
-        <function>pg_snapshot_xip</function> ( <type>pg_snapshot</type> )
+        <function>pg_snapshot_xip</function> ( <parameter>value</parameter> <type>pg_snapshot</type> )
         <returnvalue>setof xid8</returnvalue>
        </para>
        <para>
@@ -2913,7 +2913,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_snapshot_xmax</primary>
         </indexterm>
-        <function>pg_snapshot_xmax</function> ( <type>pg_snapshot</type> )
+        <function>pg_snapshot_xmax</function> ( <parameter>value</parameter> <type>pg_snapshot</type> )
         <returnvalue>xid8</returnvalue>
        </para>
        <para>
@@ -2926,7 +2926,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_snapshot_xmin</primary>
         </indexterm>
-        <function>pg_snapshot_xmin</function> ( <type>pg_snapshot</type> )
+        <function>pg_snapshot_xmin</function> ( <parameter>value</parameter> <type>pg_snapshot</type> )
         <returnvalue>xid8</returnvalue>
        </para>
        <para>
@@ -2939,7 +2939,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_visible_in_snapshot</primary>
         </indexterm>
-        <function>pg_visible_in_snapshot</function> ( <type>xid8</type>, <type>pg_snapshot</type> )
+        <function>pg_visible_in_snapshot</function> ( <parameter>value1</parameter> <type>xid8</type>, <parameter>value2</parameter> <type>pg_snapshot</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -3146,7 +3146,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>txid_snapshot_xip</primary>
         </indexterm>
-        <function>txid_snapshot_xip</function> ( <type>txid_snapshot</type> )
+        <function>txid_snapshot_xip</function> ( <parameter>value</parameter> <type>txid_snapshot</type> )
         <returnvalue>setof bigint</returnvalue>
        </para>
        <para>
@@ -3159,7 +3159,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>txid_snapshot_xmax</primary>
         </indexterm>
-        <function>txid_snapshot_xmax</function> ( <type>txid_snapshot</type> )
+        <function>txid_snapshot_xmax</function> ( <parameter>value</parameter> <type>txid_snapshot</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -3172,7 +3172,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>txid_snapshot_xmin</primary>
         </indexterm>
-        <function>txid_snapshot_xmin</function> ( <type>txid_snapshot</type> )
+        <function>txid_snapshot_xmin</function> ( <parameter>value</parameter> <type>txid_snapshot</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -3185,7 +3185,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>txid_visible_in_snapshot</primary>
         </indexterm>
-        <function>txid_visible_in_snapshot</function> ( <type>bigint</type>, <type>txid_snapshot</type> )
+        <function>txid_visible_in_snapshot</function> ( <parameter>n</parameter> <type>bigint</type>, <parameter>value</parameter> <type>txid_snapshot</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -3198,7 +3198,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>txid_status</primary>
         </indexterm>
-        <function>txid_status</function> ( <type>bigint</type> )
+        <function>txid_status</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -3244,7 +3244,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_xact_commit_timestamp</primary>
         </indexterm>
-        <function>pg_xact_commit_timestamp</function> ( <type>xid</type> )
+        <function>pg_xact_commit_timestamp</function> ( <parameter>value</parameter> <type>xid</type> )
         <returnvalue>timestamp with time zone</returnvalue>
        </para>
        <para>
@@ -3257,7 +3257,7 @@ acl      | {postgres=arwdDxtm/postgres,foo=r/postgres}
         <indexterm>
          <primary>pg_xact_commit_timestamp_origin</primary>
         </indexterm>
-        <function>pg_xact_commit_timestamp_origin</function> ( <type>xid</type> )
+        <function>pg_xact_commit_timestamp_origin</function> ( <parameter>xid</parameter> <type>xid</type> )
         <returnvalue>record</returnvalue>
         ( <parameter>timestamp</parameter> <type>timestamp with time zone</type>,
          <parameter>roident</parameter> <type>oid</type>)

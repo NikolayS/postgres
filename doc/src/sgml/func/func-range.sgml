@@ -708,7 +708,7 @@
         <indexterm>
          <primary>lower</primary>
         </indexterm>
-        <function>lower</function> ( <type>anyrange</type> )
+        <function>lower</function> ( <parameter>string</parameter> <type>anyrange</type> )
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
@@ -726,7 +726,7 @@
         <indexterm>
          <primary>upper</primary>
         </indexterm>
-        <function>upper</function> ( <type>anyrange</type> )
+        <function>upper</function> ( <parameter>string</parameter> <type>anyrange</type> )
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
@@ -744,7 +744,7 @@
         <indexterm>
          <primary>isempty</primary>
         </indexterm>
-        <function>isempty</function> ( <type>anyrange</type> )
+        <function>isempty</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -761,7 +761,7 @@
         <indexterm>
          <primary>lower_inc</primary>
         </indexterm>
-        <function>lower_inc</function> ( <type>anyrange</type> )
+        <function>lower_inc</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -778,7 +778,7 @@
         <indexterm>
          <primary>upper_inc</primary>
         </indexterm>
-        <function>upper_inc</function> ( <type>anyrange</type> )
+        <function>upper_inc</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -795,7 +795,7 @@
         <indexterm>
          <primary>lower_inf</primary>
         </indexterm>
-        <function>lower_inf</function> ( <type>anyrange</type> )
+        <function>lower_inf</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -813,7 +813,7 @@
         <indexterm>
          <primary>upper_inf</primary>
         </indexterm>
-        <function>upper_inf</function> ( <type>anyrange</type> )
+        <function>upper_inf</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -831,7 +831,7 @@
         <indexterm>
          <primary>range_merge</primary>
         </indexterm>
-        <function>range_merge</function> ( <type>anyrange</type>, <type>anyrange</type> )
+        <function>range_merge</function> ( <parameter>range1</parameter> <type>anyrange</type>, <parameter>range2</parameter> <type>anyrange</type> )
         <returnvalue>anyrange</returnvalue>
        </para>
        <para>
@@ -848,7 +848,7 @@
         <indexterm>
          <primary>range_minus_multi</primary>
         </indexterm>
-        <function>range_minus_multi</function> ( <type>anyrange</type>, <type>anyrange</type> )
+        <function>range_minus_multi</function> ( <parameter>range1</parameter> <type>anyrange</type>, <parameter>range2</parameter> <type>anyrange</type> )
         <returnvalue>setof anyrange</returnvalue>
        </para>
        <para>
@@ -891,7 +891,7 @@
         <indexterm>
          <primary>lower</primary>
         </indexterm>
-        <function>lower</function> ( <type>anymultirange</type> )
+        <function>lower</function> ( <parameter>string</parameter> <type>anymultirange</type> )
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
@@ -909,7 +909,7 @@
         <indexterm>
          <primary>upper</primary>
         </indexterm>
-        <function>upper</function> ( <type>anymultirange</type> )
+        <function>upper</function> ( <parameter>string</parameter> <type>anymultirange</type> )
         <returnvalue>anyelement</returnvalue>
        </para>
        <para>
@@ -927,7 +927,7 @@
         <indexterm>
          <primary>isempty</primary>
         </indexterm>
-        <function>isempty</function> ( <type>anymultirange</type> )
+        <function>isempty</function> ( <parameter>range</parameter> <type>anymultirange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -944,7 +944,7 @@
         <indexterm>
          <primary>lower_inc</primary>
         </indexterm>
-        <function>lower_inc</function> ( <type>anymultirange</type> )
+        <function>lower_inc</function> ( <parameter>range</parameter> <type>anymultirange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -961,7 +961,7 @@
         <indexterm>
          <primary>upper_inc</primary>
         </indexterm>
-        <function>upper_inc</function> ( <type>anymultirange</type> )
+        <function>upper_inc</function> ( <parameter>range</parameter> <type>anymultirange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -978,7 +978,7 @@
         <indexterm>
          <primary>lower_inf</primary>
         </indexterm>
-        <function>lower_inf</function> ( <type>anymultirange</type> )
+        <function>lower_inf</function> ( <parameter>range</parameter> <type>anymultirange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -996,7 +996,7 @@
         <indexterm>
          <primary>upper_inf</primary>
         </indexterm>
-        <function>upper_inf</function> ( <type>anymultirange</type> )
+        <function>upper_inf</function> ( <parameter>range</parameter> <type>anymultirange</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -1014,7 +1014,7 @@
         <indexterm>
          <primary>range_merge</primary>
         </indexterm>
-        <function>range_merge</function> ( <type>anymultirange</type> )
+        <function>range_merge</function> ( <parameter>range1</parameter> <type>anymultirange</type> )
         <returnvalue>anyrange</returnvalue>
        </para>
        <para>
@@ -1031,7 +1031,7 @@
         <indexterm>
          <primary>multirange (function)</primary>
         </indexterm>
-        <function>multirange</function> ( <type>anyrange</type> )
+        <function>multirange</function> ( <parameter>range</parameter> <type>anyrange</type> )
         <returnvalue>anymultirange</returnvalue>
        </para>
        <para>
@@ -1049,7 +1049,7 @@
          <primary>unnest</primary>
          <secondary>for multirange</secondary>
         </indexterm>
-        <function>unnest</function> ( <type>anymultirange</type> )
+        <function>unnest</function> ( <parameter>tsvector</parameter> <type>anymultirange</type> )
         <returnvalue>setof anyrange</returnvalue>
        </para>
        <para>
@@ -1070,7 +1070,7 @@
         <indexterm>
          <primary>multirange_minus_multi</primary>
         </indexterm>
-        <function>multirange_minus_multi</function> ( <type>anymultirange</type>, <type>anymultirange</type> )
+        <function>multirange_minus_multi</function> ( <parameter>multirange1</parameter> <type>anymultirange</type>, <parameter>multirange2</parameter> <type>anymultirange</type> )
         <returnvalue>setof anymultirange</returnvalue>
        </para>
        <para>

@@ -1557,7 +1557,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_column_size</primary>
         </indexterm>
-        <function>pg_column_size</function> ( <type>"any"</type> )
+        <function>pg_column_size</function> ( <parameter>value</parameter> <type>"any"</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -1572,7 +1572,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_column_compression</primary>
         </indexterm>
-        <function>pg_column_compression</function> ( <type>"any"</type> )
+        <function>pg_column_compression</function> ( <parameter>value</parameter> <type>"any"</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1587,7 +1587,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_column_toast_chunk_id</primary>
         </indexterm>
-        <function>pg_column_toast_chunk_id</function> ( <type>"any"</type> )
+        <function>pg_column_toast_chunk_id</function> ( <parameter>value</parameter> <type>"any"</type> )
         <returnvalue>oid</returnvalue>
        </para>
        <para>
@@ -1604,11 +1604,11 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_database_size</primary>
         </indexterm>
-        <function>pg_database_size</function> ( <type>name</type> )
+        <function>pg_database_size</function> ( <parameter>database</parameter> <type>name</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>pg_database_size</function> ( <type>oid</type> )
+        <function>pg_database_size</function> ( <parameter>database</parameter> <type>oid</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1625,7 +1625,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_indexes_size</primary>
         </indexterm>
-        <function>pg_indexes_size</function> ( <type>regclass</type> )
+        <function>pg_indexes_size</function> ( <parameter>relation</parameter> <type>regclass</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1685,7 +1685,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_size_bytes</primary>
         </indexterm>
-        <function>pg_size_bytes</function> ( <type>text</type> )
+        <function>pg_size_bytes</function> ( <parameter>size</parameter> <type>text</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1702,11 +1702,11 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_size_pretty</primary>
         </indexterm>
-        <function>pg_size_pretty</function> ( <type>bigint</type> )
+        <function>pg_size_pretty</function> ( <parameter>size</parameter> <type>bigint</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
-        <function>pg_size_pretty</function> ( <type>numeric</type> )
+        <function>pg_size_pretty</function> ( <parameter>size</parameter> <type>numeric</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1722,7 +1722,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_table_size</primary>
         </indexterm>
-        <function>pg_table_size</function> ( <type>regclass</type> )
+        <function>pg_table_size</function> ( <parameter>relation</parameter> <type>regclass</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1737,11 +1737,11 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_tablespace_size</primary>
         </indexterm>
-        <function>pg_tablespace_size</function> ( <type>name</type> )
+        <function>pg_tablespace_size</function> ( <parameter>name</parameter> <type>name</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para role="func_signature">
-        <function>pg_tablespace_size</function> ( <type>oid</type> )
+        <function>pg_tablespace_size</function> ( <parameter>oid</parameter> <type>oid</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1758,7 +1758,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_total_relation_size</primary>
         </indexterm>
-        <function>pg_total_relation_size</function> ( <type>regclass</type> )
+        <function>pg_total_relation_size</function> ( <parameter>relation</parameter> <type>regclass</type> )
         <returnvalue>bigint</returnvalue>
        </para>
        <para>
@@ -1884,7 +1884,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_collation_actual_version</primary>
         </indexterm>
-        <function>pg_collation_actual_version</function> ( <type>oid</type> )
+        <function>pg_collation_actual_version</function> ( <parameter>oid</parameter> <type>oid</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1902,7 +1902,7 @@ postgres=# SELECT '0/0'::pg_lsn + pd.segment_number * ps.setting::int + :offset 
         <indexterm>
          <primary>pg_database_collation_actual_version</primary>
         </indexterm>
-        <function>pg_database_collation_actual_version</function> ( <type>oid</type> )
+        <function>pg_database_collation_actual_version</function> ( <parameter>oid</parameter> <type>oid</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -2194,7 +2194,7 @@ SELECT pg_restore_attribute_stats(
         <indexterm>
          <primary>pg_partition_tree</primary>
         </indexterm>
-        <function>pg_partition_tree</function> ( <type>regclass</type> )
+        <function>pg_partition_tree</function> ( <parameter>rootrelid</parameter> <type>regclass</type> )
         <returnvalue>setof record</returnvalue>
         ( <parameter>relid</parameter> <type>regclass</type>,
         <parameter>parentrelid</parameter> <type>regclass</type>,
@@ -2219,7 +2219,7 @@ SELECT pg_restore_attribute_stats(
         <indexterm>
          <primary>pg_partition_ancestors</primary>
         </indexterm>
-        <function>pg_partition_ancestors</function> ( <type>regclass</type> )
+        <function>pg_partition_ancestors</function> ( <parameter>partitionid</parameter> <type>regclass</type> )
         <returnvalue>setof regclass</returnvalue>
        </para>
        <para>
@@ -2234,7 +2234,7 @@ SELECT pg_restore_attribute_stats(
         <indexterm>
          <primary>pg_partition_root</primary>
         </indexterm>
-        <function>pg_partition_root</function> ( <type>regclass</type> )
+        <function>pg_partition_root</function> ( <parameter>relation</parameter> <type>regclass</type> )
         <returnvalue>regclass</returnvalue>
        </para>
        <para>

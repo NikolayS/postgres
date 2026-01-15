@@ -125,7 +125,7 @@
      <row>
       <entry role="func_table_entry"><para role="func_signature">
         <function>uuid_extract_timestamp</function>
-        ( <type>uuid</type> )
+        ( <parameter>uuid</parameter> <type>uuid</type> )
         <returnvalue>timestamp with time zone</returnvalue>
        </para>
        <para>
@@ -143,7 +143,7 @@
      <row>
       <entry role="func_table_entry"><para role="func_signature">
         <function>uuid_extract_version</function>
-        ( <type>uuid</type> )
+        ( <parameter>uuid</parameter> <type>uuid</type> )
         <returnvalue>smallint</returnvalue>
        </para>
        <para>

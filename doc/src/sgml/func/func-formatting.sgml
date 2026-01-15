@@ -39,11 +39,11 @@
         <indexterm>
          <primary>to_char</primary>
         </indexterm>
-        <function>to_char</function> ( <type>timestamp</type>, <type>text</type> )
+        <function>to_char</function> ( <parameter>timestamp</parameter> <type>timestamp</type>, <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
-        <function>to_char</function> ( <type>timestamp with time zone</type>, <type>text</type> )
+        <function>to_char</function> ( <parameter>timestamp</parameter> <type>timestamp with time zone</type>, <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -57,7 +57,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>to_char</function> ( <type>interval</type>, <type>text</type> )
+        <function>to_char</function> ( <parameter>interval</parameter> <type>interval</type>, <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -98,7 +98,7 @@
         <indexterm>
          <primary>to_date</primary>
         </indexterm>
-        <function>to_date</function> ( <type>text</type>, <type>text</type> )
+        <function>to_date</function> ( <parameter>string1</parameter> <type>text</type>, <parameter>string2</parameter> <type>text</type> )
         <returnvalue>date</returnvalue>
        </para>
        <para>
@@ -115,7 +115,7 @@
         <indexterm>
          <primary>to_number</primary>
         </indexterm>
-        <function>to_number</function> ( <type>text</type>, <type>text</type> )
+        <function>to_number</function> ( <parameter>string1</parameter> <type>text</type>, <parameter>string2</parameter> <type>text</type> )
         <returnvalue>numeric</returnvalue>
        </para>
        <para>
@@ -132,7 +132,7 @@
         <indexterm>
          <primary>to_timestamp</primary>
         </indexterm>
-        <function>to_timestamp</function> ( <type>text</type>, <type>text</type> )
+        <function>to_timestamp</function> ( <parameter>string1</parameter> <type>text</type>, <parameter>string2</parameter> <type>text</type> )
         <returnvalue>timestamp with time zone</returnvalue>
        </para>
        <para>

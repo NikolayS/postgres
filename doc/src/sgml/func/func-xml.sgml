@@ -39,7 +39,7 @@
     </indexterm>
 
 <synopsis>
-<function>xmltext</function> ( <type>text</type> ) <returnvalue>xml</returnvalue>
+<function>xmltext</function> ( <parameter>string</parameter> <type>text</type> ) <returnvalue>xml</returnvalue>
 </synopsis>
 
     <para>
@@ -69,7 +69,7 @@ SELECT xmltext('< foo & bar >');
     </indexterm>
 
 <synopsis>
-<function>xmlcomment</function> ( <type>text</type> ) <returnvalue>xml</returnvalue>
+<function>xmlcomment</function> ( <parameter>string</parameter> <type>text</type> ) <returnvalue>xml</returnvalue>
 </synopsis>
 
     <para>
@@ -101,7 +101,7 @@ SELECT xmlcomment('hello');
     </indexterm>
 
 <synopsis>
-<function>xmlconcat</function> ( <type>xml</type> <optional>, ...</optional> ) <returnvalue>xml</returnvalue>
+<function>xmlconcat</function> ( <parameter>xml</parameter> <type>xml</type> <optional>, ...</optional> ) <returnvalue>xml</returnvalue>
 </synopsis>
 
     <para>
@@ -358,7 +358,7 @@ SELECT xmlpi(name php, 'echo "hello world";');
    </indexterm>
 
 <synopsis>
-<function>xmlroot</function> ( <type>xml</type>, <literal>VERSION</literal> {<type>text</type>|<literal>NO VALUE</literal>} <optional>, <literal>STANDALONE</literal> {<literal>YES</literal>|<literal>NO</literal>|<literal>NO VALUE</literal>} </optional> ) <returnvalue>xml</returnvalue>
+<function>xmlroot</function> ( <parameter>xml</parameter> <type>xml</type>, <literal>VERSION</literal> {<parameter>string</parameter> <type>text</type>|<literal>NO VALUE</literal>} <optional>, <literal>STANDALONE</literal> {<literal>YES</literal>|<literal>NO</literal>|<literal>NO VALUE</literal>} </optional> ) <returnvalue>xml</returnvalue>
 </synopsis>
 
     <para>
@@ -390,7 +390,7 @@ SELECT xmlroot(xmlparse(document '<?xml version="1.1"?><content>abc</content>'),
     </indexterm>
 
 <synopsis>
-<function>xmlagg</function> ( <type>xml</type> ) <returnvalue>xml</returnvalue>
+<function>xmlagg</function> ( <parameter>xml</parameter> <type>xml</type> ) <returnvalue>xml</returnvalue>
 </synopsis>
 
     <para>
@@ -498,7 +498,7 @@ SELECT xmlagg(x) FROM (SELECT * FROM test ORDER BY y DESC) AS tab;
     </indexterm>
 
 <synopsis>
-<function>XMLEXISTS</function> ( <type>text</type> <literal>PASSING</literal> <optional><literal>BY</literal> {<literal>REF</literal>|<literal>VALUE</literal>}</optional> <type>xml</type> <optional><literal>BY</literal> {<literal>REF</literal>|<literal>VALUE</literal>}</optional> ) <returnvalue>boolean</returnvalue>
+<function>XMLEXISTS</function> ( <parameter>string</parameter> <type>text</type> <literal>PASSING</literal> <optional><literal>BY</literal> {<literal>REF</literal>|<literal>VALUE</literal>}</optional> <parameter>xml</parameter> <type>xml</type> <optional><literal>BY</literal> {<literal>REF</literal>|<literal>VALUE</literal>}</optional> ) <returnvalue>boolean</returnvalue>
 </synopsis>
 
     <para>
@@ -554,9 +554,9 @@ SELECT xmlexists('//town[text() = ''Toronto'']' PASSING BY VALUE '<towns><town>T
     </indexterm>
 
 <synopsis>
-<function>xml_is_well_formed</function> ( <type>text</type> ) <returnvalue>boolean</returnvalue>
-<function>xml_is_well_formed_document</function> ( <type>text</type> ) <returnvalue>boolean</returnvalue>
-<function>xml_is_well_formed_content</function> ( <type>text</type> ) <returnvalue>boolean</returnvalue>
+<function>xml_is_well_formed</function> ( <parameter>string</parameter> <type>text</type> ) <returnvalue>boolean</returnvalue>
+<function>xml_is_well_formed_document</function> ( <parameter>string</parameter> <type>text</type> ) <returnvalue>boolean</returnvalue>
+<function>xml_is_well_formed_content</function> ( <parameter>string</parameter> <type>text</type> ) <returnvalue>boolean</returnvalue>
 </synopsis>
 
     <para>

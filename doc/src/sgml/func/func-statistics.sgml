@@ -19,7 +19,7 @@
    </indexterm>
 
 <synopsis>
-<function>pg_mcv_list_items</function> ( <type>pg_mcv_list</type> ) <returnvalue>setof record</returnvalue>
+<function>pg_mcv_list_items</function> ( <parameter>mcv_list</parameter> <type>pg_mcv_list</type> ) <returnvalue>setof record</returnvalue>
 </synopsis>
 
    <para>

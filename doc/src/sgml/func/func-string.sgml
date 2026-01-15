@@ -142,7 +142,7 @@
         <indexterm>
          <primary>bit_length</primary>
         </indexterm>
-        <function>bit_length</function> ( <type>text</type> )
+        <function>bit_length</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -169,14 +169,14 @@
          <secondary sortas="character string">of a character string</secondary>
          <see>character string, length</see>
         </indexterm>
-        <function>char_length</function> ( <type>text</type> )
+        <function>char_length</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para role="func_signature">
         <indexterm>
          <primary>character_length</primary>
         </indexterm>
-        <function>character_length</function> ( <type>text</type> )
+        <function>character_length</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -193,7 +193,7 @@
         <indexterm id="function-lower">
          <primary>lower</primary>
         </indexterm>
-        <function>lower</function> ( <type>text</type> )
+        <function>lower</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -257,7 +257,7 @@
         <indexterm>
          <primary>Unicode normalization</primary>
         </indexterm>
-        <function>normalize</function> ( <type>text</type>
+        <function>normalize</function> ( <parameter>string</parameter> <type>text</type>
         <optional>, <parameter>form</parameter> </optional> )
         <returnvalue>text</returnvalue>
        </para>
@@ -280,7 +280,7 @@
         <indexterm>
          <primary>octet_length</primary>
         </indexterm>
-        <function>octet_length</function> ( <type>text</type> )
+        <function>octet_length</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -297,7 +297,7 @@
         <indexterm>
          <primary>octet_length</primary>
         </indexterm>
-        <function>octet_length</function> ( <type>character</type> )
+        <function>octet_length</function> ( <parameter>string</parameter> <type>character</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -503,7 +503,7 @@
         <indexterm>
          <primary>unicode_assigned</primary>
         </indexterm>
-        <function>unicode_assigned</function> ( <type>text</type> )
+        <function>unicode_assigned</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>boolean</returnvalue>
        </para>
        <para>
@@ -519,7 +519,7 @@
         <indexterm>
          <primary>upper</primary>
         </indexterm>
-        <function>upper</function> ( <type>text</type> )
+        <function>upper</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -588,7 +588,7 @@
         <indexterm>
          <primary>ascii</primary>
         </indexterm>
-        <function>ascii</function> ( <type>text</type> )
+        <function>ascii</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -608,7 +608,7 @@
         <indexterm>
          <primary>chr</primary>
         </indexterm>
-        <function>chr</function> ( <type>integer</type> )
+        <function>chr</function> ( <parameter>code</parameter> <type>integer</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -689,7 +689,7 @@
         <indexterm>
          <primary>initcap</primary>
         </indexterm>
-        <function>initcap</function> ( <type>text</type> )
+        <function>initcap</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -720,7 +720,7 @@
         <indexterm>
          <primary>casefold</primary>
         </indexterm>
-        <function>casefold</function> ( <type>text</type> )
+        <function>casefold</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -778,7 +778,7 @@
         <indexterm>
          <primary>length</primary>
         </indexterm>
-        <function>length</function> ( <type>text</type> )
+        <function>length</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>integer</returnvalue>
        </para>
        <para>
@@ -795,7 +795,7 @@
         <indexterm>
          <primary>md5</primary>
         </indexterm>
-        <function>md5</function> ( <type>text</type> )
+        <function>md5</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -855,7 +855,7 @@
         <indexterm>
          <primary>quote_ident</primary>
         </indexterm>
-        <function>quote_ident</function> ( <type>text</type> )
+        <function>quote_ident</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -877,7 +877,7 @@
         <indexterm>
          <primary>quote_literal</primary>
         </indexterm>
-        <function>quote_literal</function> ( <type>text</type> )
+        <function>quote_literal</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -897,7 +897,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>quote_literal</function> ( <type>anyelement</type> )
+        <function>quote_literal</function> ( <parameter>string</parameter> <type>anyelement</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -915,7 +915,7 @@
         <indexterm>
          <primary>quote_nullable</primary>
         </indexterm>
-        <function>quote_nullable</function> ( <type>text</type> )
+        <function>quote_nullable</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -933,7 +933,7 @@
 
       <row>
        <entry role="func_table_entry"><para role="func_signature">
-        <function>quote_nullable</function> ( <type>anyelement</type> )
+        <function>quote_nullable</function> ( <parameter>string</parameter> <type>anyelement</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1227,7 +1227,7 @@
         <indexterm>
          <primary>reverse</primary>
         </indexterm>
-        <function>reverse</function> ( <type>text</type> )
+        <function>reverse</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1453,11 +1453,11 @@
         <indexterm>
          <primary>to_bin</primary>
         </indexterm>
-        <function>to_bin</function> ( <type>integer</type> )
+        <function>to_bin</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
-        <function>to_bin</function> ( <type>bigint</type> )
+        <function>to_bin</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1479,11 +1479,11 @@
         <indexterm>
          <primary>to_hex</primary>
         </indexterm>
-        <function>to_hex</function> ( <type>integer</type> )
+        <function>to_hex</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
-        <function>to_hex</function> ( <type>bigint</type> )
+        <function>to_hex</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1505,11 +1505,11 @@
         <indexterm>
          <primary>to_oct</primary>
         </indexterm>
-        <function>to_oct</function> ( <type>integer</type> )
+        <function>to_oct</function> ( <parameter>n</parameter> <type>integer</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para role="func_signature">
-        <function>to_oct</function> ( <type>bigint</type> )
+        <function>to_oct</function> ( <parameter>n</parameter> <type>bigint</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>
@@ -1555,7 +1555,7 @@
         <indexterm>
          <primary>unistr</primary>
         </indexterm>
-        <function>unistr</function> ( <type>text</type> )
+        <function>unistr</function> ( <parameter>string</parameter> <type>text</type> )
         <returnvalue>text</returnvalue>
        </para>
        <para>

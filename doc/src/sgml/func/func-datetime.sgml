@@ -332,7 +332,7 @@
          <indexterm>
           <primary>age</primary>
          </indexterm>
-         <function>age</function> ( <type>timestamp</type>, <type>timestamp</type> )
+         <function>age</function> ( <parameter>timestamp1</parameter> <type>timestamp</type>, <parameter>timestamp2</parameter> <type>timestamp</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -347,7 +347,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>age</function> ( <type>timestamp</type> )
+         <function>age</function> ( <parameter>timestamp</parameter> <type>timestamp</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -413,7 +413,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>current_time</function> ( <type>integer</type> )
+         <function>current_time</function> ( <parameter>n</parameter> <type>integer</type> )
          <returnvalue>time with time zone</returnvalue>
         </para>
         <para>
@@ -446,7 +446,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>current_timestamp</function> ( <type>integer</type> )
+         <function>current_timestamp</function> ( <parameter>n</parameter> <type>integer</type> )
          <returnvalue>timestamp with time zone</returnvalue>
         </para>
         <para>
@@ -464,7 +464,7 @@
          <indexterm>
           <primary>date_add</primary>
          </indexterm>
-         <function>date_add</function> ( <type>timestamp with time zone</type>, <type>interval</type> <optional>, <type>text</type> </optional> )
+         <function>date_add</function> ( <parameter>timestamp</parameter> <type>timestamp with time zone</type>, <parameter>interval</parameter> <type>interval</type> <optional>, <parameter>string</parameter> <type>text</type> </optional> )
          <returnvalue>timestamp with time zone</returnvalue>
         </para>
         <para>
@@ -483,7 +483,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>date_bin</function> ( <type>interval</type>, <type>timestamp</type>, <type>timestamp</type> )
+         <function>date_bin</function> ( <parameter>interval</parameter> <type>interval</type>, <parameter>timestamp1</parameter> <type>timestamp</type>, <parameter>timestamp2</parameter> <type>timestamp</type> )
          <returnvalue>timestamp</returnvalue>
         </para>
         <para>
@@ -500,7 +500,7 @@
          <indexterm>
           <primary>date_part</primary>
          </indexterm>
-         <function>date_part</function> ( <type>text</type>, <type>timestamp</type> )
+         <function>date_part</function> ( <parameter>field</parameter> <type>text</type>, <parameter>source</parameter> <type>timestamp</type> )
          <returnvalue>double precision</returnvalue>
         </para>
         <para>
@@ -515,7 +515,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>date_part</function> ( <type>text</type>, <type>interval</type> )
+         <function>date_part</function> ( <parameter>field</parameter> <type>text</type>, <parameter>source</parameter> <type>interval</type> )
          <returnvalue>double precision</returnvalue>
         </para>
         <para>
@@ -533,7 +533,7 @@
          <indexterm>
           <primary>date_subtract</primary>
          </indexterm>
-         <function>date_subtract</function> ( <type>timestamp with time zone</type>, <type>interval</type> <optional>, <type>text</type> </optional> )
+         <function>date_subtract</function> ( <parameter>timestamp</parameter> <type>timestamp with time zone</type>, <parameter>interval</parameter> <type>interval</type> <optional>, <parameter>string</parameter> <type>text</type> </optional> )
          <returnvalue>timestamp with time zone</returnvalue>
         </para>
         <para>
@@ -555,7 +555,7 @@
          <indexterm>
           <primary>date_trunc</primary>
          </indexterm>
-         <function>date_trunc</function> ( <type>text</type>, <type>timestamp</type> )
+         <function>date_trunc</function> ( <parameter>field</parameter> <type>text</type>, <parameter>source</parameter> <type>timestamp</type> )
          <returnvalue>timestamp</returnvalue>
         </para>
         <para>
@@ -569,7 +569,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>date_trunc</function> ( <type>text</type>, <type>timestamp with time zone</type>, <type>text</type> )
+         <function>date_trunc</function> ( <parameter>field</parameter> <type>text</type>, <parameter>source</parameter> <type>timestamp with time zone</type>, <parameter>string</parameter> <type>text</type> )
          <returnvalue>timestamp with time zone</returnvalue>
         </para>
         <para>
@@ -584,7 +584,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>date_trunc</function> ( <type>text</type>, <type>interval</type> )
+         <function>date_trunc</function> ( <parameter>field</parameter> <type>text</type>, <parameter>source</parameter> <type>interval</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -633,7 +633,7 @@
          <indexterm>
           <primary>isfinite</primary>
          </indexterm>
-         <function>isfinite</function> ( <type>date</type> )
+         <function>isfinite</function> ( <parameter>value</parameter> <type>date</type> )
          <returnvalue>boolean</returnvalue>
         </para>
         <para>
@@ -647,7 +647,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>isfinite</function> ( <type>timestamp</type> )
+         <function>isfinite</function> ( <parameter>value</parameter> <type>timestamp</type> )
          <returnvalue>boolean</returnvalue>
         </para>
         <para>
@@ -661,7 +661,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>isfinite</function> ( <type>interval</type> )
+         <function>isfinite</function> ( <parameter>value</parameter> <type>interval</type> )
          <returnvalue>boolean</returnvalue>
         </para>
         <para>
@@ -678,7 +678,7 @@
          <indexterm id="function-justify-days">
           <primary>justify_days</primary>
          </indexterm>
-         <function>justify_days</function> ( <type>interval</type> )
+         <function>justify_days</function> ( <parameter>interval</parameter> <type>interval</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -695,7 +695,7 @@
          <indexterm id="function-justify-hours">
           <primary>justify_hours</primary>
          </indexterm>
-         <function>justify_hours</function> ( <type>interval</type> )
+         <function>justify_hours</function> ( <parameter>interval</parameter> <type>interval</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -712,7 +712,7 @@
          <indexterm>
           <primary>justify_interval</primary>
          </indexterm>
-         <function>justify_interval</function> ( <type>interval</type> )
+         <function>justify_interval</function> ( <parameter>interval</parameter> <type>interval</type> )
          <returnvalue>interval</returnvalue>
         </para>
         <para>
@@ -746,7 +746,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>localtime</function> ( <type>integer</type> )
+         <function>localtime</function> ( <parameter>n</parameter> <type>integer</type> )
          <returnvalue>time</returnvalue>
         </para>
         <para>
@@ -779,7 +779,7 @@
 
        <row>
         <entry role="func_table_entry"><para role="func_signature">
-         <function>localtimestamp</function> ( <type>integer</type> )
+         <function>localtimestamp</function> ( <parameter>n</parameter> <type>integer</type> )
          <returnvalue>timestamp</returnvalue>
         </para>
         <para>
@@ -1024,7 +1024,7 @@
          <indexterm>
           <primary>to_timestamp</primary>
          </indexterm>
-         <function>to_timestamp</function> ( <type>double precision</type> )
+         <function>to_timestamp</function> ( <parameter>x</parameter> <type>double precision</type> )
          <returnvalue>timestamp with time zone</returnvalue>
         </para>
         <para>
