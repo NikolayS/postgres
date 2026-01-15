@@ -18,6 +18,7 @@
 #include "access/htup_details.h"
 #include "access/table.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
@@ -66,6 +67,7 @@
 #include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_user_mapping.h"
+#include "utils/guc.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
@@ -177,6 +179,145 @@ static bool stack_address_present_add_flags(const ObjectAddress *object,
 											ObjectAddressStack *stack);
 static void DeleteInitPrivs(const ObjectAddress *object);
 
+/* Structure to hold DROP TABLE information */
+typedef struct DropTableInfo
+{
+	Oid			reloid;
+	char		relname[NAMEDATALEN];
+	char		schemaname[NAMEDATALEN];
+	SubTransactionId subxid;
+	bool valid;
+} DropTableInfo;
+
+/* Per-transaction list of dropped tables */
+static List *pending_drop_tables = NIL;
+static bool drop_table_callback_registered = false;
+
+static void DropTableXactCallback(XactEvent event, void *arg, XLogRecPtr lsn);
+static void DropTableSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
+									  SubTransactionId parentSubid, void *arg);
+
+/*
+ * Register a table drop for logging lsn.
+ */
+static void
+RegisterDropTable(Oid reloid, const char *relname, const char *schemaname)
+{
+	DropTableInfo *info;
+	MemoryContext oldcontext;
+
+	if (!drop_table_callback_registered)
+	{
+		RegisterXactCallback(DropTableXactCallback, NULL);
+		RegisterSubXactCallback(DropTableSubXactCallback, NULL);
+		drop_table_callback_registered = true;
+	}
+
+	oldcontext = MemoryContextSwitchTo(TopTransactionContext);
+
+	info = (DropTableInfo *) palloc(sizeof(DropTableInfo));
+	info->reloid = reloid;
+	strlcpy(info->relname, relname, NAMEDATALEN);
+	strlcpy(info->schemaname, schemaname, NAMEDATALEN);
+	info->subxid = GetCurrentSubTransactionId();
+	info->valid = true;
+
+	pending_drop_tables = lappend(pending_drop_tables, info);
+
+	MemoryContextSwitchTo(oldcontext);
+}
+
+/*
+ * SubXactCallback - handle ROLLBACK TO SAVEPOINT
+ */
+static void
+DropTableSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
+						 SubTransactionId parentSubid, void *arg)
+{
+	ListCell *lc;
+	MemoryContext oldcontext;
+
+	if (pending_drop_tables == NIL)
+        return;
+
+	/*
+	 * On subtransaction abort, remove all entries belonging to
+	 * the aborted subtransaction and its children.
+	 */
+	if (event == SUBXACT_EVENT_ABORT_SUB)
+	{
+		List *new_list = NIL;
+
+		/* Switch to TopTransactionContext for the new list */
+		oldcontext = MemoryContextSwitchTo(TopTransactionContext);
+
+		foreach(lc, pending_drop_tables)
+		{
+			DropTableInfo *info = (DropTableInfo *) lfirst(lc);
+
+			/*
+			 * Mark entries that belong to our subtransactions.
+			 * SubTransactionIds are assigned incrementally, so we can
+			 * compare them.
+			 */
+			if (info->subxid >= mySubid)
+			{
+				info->valid = false;
+			}
+		}
+
+		MemoryContextSwitchTo(oldcontext);
+	}
+}
+
+/*
+ * DropTableXactCallback
+ * Transaction callback to log commit LSN for DROP TABLE operations.
+ */
+static void
+DropTableXactCallback(XactEvent event, void *arg, XLogRecPtr commit_lsn)
+{
+	ListCell *lc;
+
+	if (pending_drop_tables == NIL)
+        return;
+
+	if (event == XACT_EVENT_COMMIT)
+	{
+		foreach(lc, pending_drop_tables)
+		{
+			DropTableInfo *info = (DropTableInfo *) lfirst(lc);
+			if (info->valid)
+			{
+				Assert(!XLogRecPtrIsInvalid(commit_lsn));
+
+				ereport(LOG,
+					(errmsg("DROP TABLE: relation \"%s.%s\" (OID %u), "
+							"drop LSN: %X/%X, commit LSN: %X/%X",
+							info->schemaname,
+							info->relname,
+							info->reloid,
+							LSN_FORMAT_ARGS(commit_lsn))));
+			}
+		}
+	}
+
+	/* Clean up after commit or abort */
+	if (event == XACT_EVENT_COMMIT ||
+		event == XACT_EVENT_ABORT ||
+		event == XACT_EVENT_PARALLEL_ABORT)
+	{
+		/* Free the DropTableInfo structures */
+		foreach(lc, pending_drop_tables)
+		{
+			DropTableInfo *info = (DropTableInfo *) lfirst(lc);
+			pfree(info);
+		}
+
+		list_free(pending_drop_tables);
+		pending_drop_tables = NIL;
+	}
+}
 
 /*
  * Go through the objects given running the final actions on them, and execute
@@ -1406,6 +1547,32 @@ doDeletion(const ObjectAddress *object, int flags)
 		case RelationRelationId:
 			{
 				char		relKind = get_rel_relkind(object->objectId);
+
+				/*
+				* Log all table drops that go through this function.
+				*/
+				if ((relKind == RELKIND_RELATION ||
+					relKind == RELKIND_PARTITIONED_TABLE)
+					&& log_object_drops)
+				{
+					char *relname = get_rel_name(object->objectId);
+
+					if (relname != NULL)
+					{
+						char *schemaname = NULL;
+						Oid schemaoid = get_rel_namespace(object->objectId);
+						if (OidIsValid(schemaoid))
+						{
+							schemaname = get_namespace_name(schemaoid);
+						}
+
+						RegisterDropTable(object->objectId, relname, schemaname ? schemaname : "unknown");
+
+						pfree(relname);
+						if (schemaname)
+							pfree(schemaname);
+					}
+				}
 
 				if (relKind == RELKIND_INDEX ||
 					relKind == RELKIND_PARTITIONED_INDEX)

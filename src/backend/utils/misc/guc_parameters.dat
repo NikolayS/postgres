@@ -3516,5 +3516,11 @@
   variable => 'zero_damaged_pages',
   boot_val => 'false',
 },
+{ name => 'log_object_drops', type => 'bool', context => 'PGC_SUSET', group => 'LOGGING_WHAT',
+  short_desc => 'Logs LSN for DROP TABLE and DROP DATABASE operations.',
+  long_desc => 'When enabled, the system will log the LSN (Log Sequence Number) whenever a DROP TABLE or DROP DATABASE command is executed.',
+  variable => 'log_object_drops',
+  boot_val => 'false',
+},
 
 ]

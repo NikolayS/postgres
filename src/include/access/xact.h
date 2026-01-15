@@ -136,7 +136,7 @@ typedef enum
 	XACT_EVENT_PRE_PREPARE,
 } XactEvent;
 
-typedef void (*XactCallback) (XactEvent event, void *arg);
+typedef void (*XactCallback) (XactEvent event, void *arg, XLogRecPtr lsn);
 
 typedef enum
 {

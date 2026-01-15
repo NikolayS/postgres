@@ -7701,6 +7701,51 @@ local0.*    /var/log/postgresql
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-log_object_drops" xreflabel="log_object_drops">
+      <term><varname>log_object_drops</varname> (<type>boolean</type>)
+      <indexterm>
+        <primary><varname>log_object_drops</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+      <para>
+        Causes <command>DROP TABLE</command> and <command>DROP DATABASE</command>
+        operations to be logged with their commit LSN (Log Sequence Number).
+        The commit LSN represents the point in the write-ahead log where the
+        drop operation becomes durable and visible to other transactions.
+      </para>
+
+      <para>
+        Each logged entry includes the schema name, table name, OID, and the
+        commit LSN. For example:
+        <programlisting>
+        LOG:  DROP TABLE: relation "public.employees" (OID 16384), LSN: 0/15D4A48
+        LOG:  DROP DATABASE: database "testdb" (OID 16385), LSN: 0/15D4B20
+        </programlisting>
+      </para>
+
+      <para>
+        Logged operations include: direct <command>DROP TABLE</command> statements,
+        tables dropped via <command>DROP SCHEMA CASCADE</command>,
+        partitioned tables and their partitions, tables in inheritance hierarchies,
+        and <command>DROP DATABASE</command> commands.
+        Operations that are rolled back (via <command>ROLLBACK</command> or
+        <command>ROLLBACK TO SAVEPOINT</command>) are not logged.
+      </para>
+
+      <para>
+        This parameter is useful for tracking and auditing destructive operations,
+        and for coordinating with external systems that monitor the write-ahead log.
+        Note that enabling this option may generate substantial log volume
+        when dropping schemas or databases containing many tables.
+      </para>
+
+      <para>
+        The default is <literal>off</literal>. Only superusers and users with
+        the appropriate <literal>SET</literal> privilege can change this setting.
+      </para>
+      </listitem>
+     </varlistentry>
 
      <varlistentry id="guc-log-duration" xreflabel="log_duration">
       <term><varname>log_duration</varname> (<type>boolean</type>)
