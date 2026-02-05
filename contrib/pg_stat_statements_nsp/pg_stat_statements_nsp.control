@@ -1,0 +1,5 @@
+# pg_stat_statements_nsp extension
+comment = 'track execution statistics of SQL statements without shared_preload_libraries'
+default_version = '1.0'
+module_pathname = '$libdir/pg_stat_statements_nsp'
+relocatable = true
