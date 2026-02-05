@@ -34,6 +34,7 @@
 #include "funcapi.h"
 #include "lib/dshash.h"
 #include "miscadmin.h"
+#include "nodes/queryjumble.h"
 #include "storage/dsm_registry.h"
 #include "storage/lwlock.h"
 #include "tcop/utility.h"
@@ -263,7 +264,7 @@ pgss_nsp_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 						QueryEnvironment *queryEnv,
 						DestReceiver *dest, QueryCompletion *qc)
 {
-	int64		queryid;
+	int64		queryid = 0;
 	instr_time	start_time;
 	instr_time	end_time;
 	double		total_time;
