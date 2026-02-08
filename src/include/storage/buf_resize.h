@@ -17,7 +17,6 @@
 #ifndef BUF_RESIZE_H
 #define BUF_RESIZE_H
 
-#include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
 
@@ -35,8 +34,8 @@ typedef enum BufPoolResizeStatus
 /*
  * Shared memory state for buffer pool resize coordination.
  *
- * Protected by BufResizeLock (an LWLock), except for fields that are
- * atomically accessed.
+ * Non-atomic fields are protected by the mutex spinlock.  The
+ * current_buffers field is accessed atomically without the lock.
  */
 typedef struct BufPoolResizeCtl
 {
@@ -49,7 +48,9 @@ typedef struct BufPoolResizeCtl
 	/* Target NBuffers for the current resize operation */
 	int			target_buffers;
 
-	/* Progress tracking for shrink operations */
+	/* Progress tracking for shrink drain (run by bgwriter) */
+	int			drain_from;		/* start of condemned range (= new NBuffers) */
+	int			drain_to;		/* end of condemned range (= old NBuffers) */
 	int			condemned_remaining;
 	int			condemned_pinned;
 	int			condemned_dirty;
@@ -104,6 +105,13 @@ extern void RequestBufferPoolResize(int new_nbuffers);
  * main loop or a dedicated background worker.
  */
 extern void ExecuteBufferPoolResize(void);
+
+/*
+ * Drain condemned buffers after a shrink.  Called from the bgwriter
+ * main loop, which has full backend infrastructure (ResourceOwner,
+ * private refcounts, etc.) needed for buffer eviction.
+ */
+extern void BufPoolDrainCondemnedBuffers(void);
 
 /*
  * GUC hooks for shared_buffers are declared in utils/guc_hooks.h,

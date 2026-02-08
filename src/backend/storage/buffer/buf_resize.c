@@ -12,11 +12,13 @@
  * 2. Committing physical memory only for the initial shared_buffers.
  *
  * 3. On grow: committing additional memory, initializing new descriptors,
- *    and updating NBuffers via a ProcSignalBarrier so all backends see
- *    the new value atomically.
+ *    and publishing the new NBuffers via an atomic variable.  The
+ *    postmaster performs the resize then signals children via SIGHUP;
+ *    each child reads current_buffers from shared memory.
  *
- * 4. On shrink: draining condemned buffers (flushing dirty pages, waiting
- *    for unpins), then updating NBuffers and decommitting memory.
+ * 4. On shrink: updating NBuffers immediately, then having the bgwriter
+ *    asynchronously drain condemned buffers (flushing dirty pages,
+ *    evicting unpinned buffers) before decommitting memory.
  *
  * The key invariant is that the base pointers (BufferDescriptors,
  * BufferBlocks, etc.) never change -- only NBuffers changes.  This means
@@ -36,14 +38,11 @@
 #include <unistd.h>
 
 #include "miscadmin.h"
-#include "postmaster/bgwriter.h"
 #include "storage/aio.h"
 #include "storage/buf_internals.h"
 #include "storage/buf_resize.h"
 #include "storage/bufmgr.h"
 #include "storage/condition_variable.h"
-#include "storage/ipc.h"
-#include "storage/pg_shmem.h"
 #include "storage/proc.h"
 #include "storage/proclist.h"
 #include "storage/shmem.h"
@@ -99,22 +98,19 @@ BufferPoolReserveMemory(void)
 	/*
 	 * Calculate sizes for the maximum possible buffer count.
 	 */
-	blocks_size = (Size) max_bufs * BLCKSZ + PG_IO_ALIGN_SIZE;
-	descs_size = (Size) max_bufs * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE;
-	iocv_size = (Size) max_bufs * sizeof(ConditionVariableMinimallyPadded) + PG_CACHE_LINE_SIZE;
-	ckpt_size = (Size) max_bufs * sizeof(CkptSortItem);
+	blocks_size = add_size(mul_size((Size) max_bufs, BLCKSZ), PG_IO_ALIGN_SIZE);
+	descs_size = add_size(mul_size((Size) max_bufs, sizeof(BufferDescPadded)), PG_CACHE_LINE_SIZE);
+	iocv_size = add_size(mul_size((Size) max_bufs, sizeof(ConditionVariableMinimallyPadded)), PG_CACHE_LINE_SIZE);
+	ckpt_size = mul_size((Size) max_bufs, sizeof(CkptSortItem));
 
 	/*
 	 * Reserve virtual address space for each array.  MAP_NORESERVE tells
 	 * the kernel not to reserve swap space for pages we haven't touched.
-	 * PROT_NONE means no access until we commit specific ranges.
+	 * MAP_SHARED | MAP_ANONYMOUS gives us pages visible across fork(),
+	 * so child processes inherit the same mappings.
 	 *
-	 * We use MAP_ANONYMOUS | MAP_PRIVATE for the reservation, then overlay
-	 * with MAP_SHARED | MAP_FIXED for committed regions in
-	 * BufferPoolCommitMemory().
-	 *
-	 * Note: On Linux, this just reserves VA space; no physical memory or
-	 * swap is consumed.
+	 * Note: On Linux, MAP_NORESERVE means no physical memory or swap is
+	 * consumed until pages are actually touched.
 	 */
 	ReservedBufferBlocks = mmap(NULL, blocks_size,
 								PROT_READ | PROT_WRITE,
@@ -184,10 +180,10 @@ BufferPoolReserveMemory(void)
 bool
 BufferPoolCommitMemory(int nbufs)
 {
-	Size		blocks_size = (Size) nbufs * BLCKSZ;
-	Size		descs_size = (Size) nbufs * sizeof(BufferDescPadded);
-	Size		iocv_size = (Size) nbufs * sizeof(ConditionVariableMinimallyPadded);
-	Size		ckpt_size = (Size) nbufs * sizeof(CkptSortItem);
+	Size		blocks_size = mul_size((Size) nbufs, BLCKSZ);
+	Size		descs_size = mul_size((Size) nbufs, sizeof(BufferDescPadded));
+	Size		iocv_size = mul_size((Size) nbufs, sizeof(ConditionVariableMinimallyPadded));
+	Size		ckpt_size = mul_size((Size) nbufs, sizeof(CkptSortItem));
 	bool		use_madvise = false;
 
 #ifdef MADV_POPULATE_WRITE
@@ -195,17 +191,43 @@ BufferPoolCommitMemory(int nbufs)
 	 * Try MADV_POPULATE_WRITE first.  This causes the kernel to allocate
 	 * physical pages for the range.  If unsupported (EINVAL on older
 	 * kernels), fall back to manual page touching.
+	 *
+	 * If population succeeds for some arrays but fails for others, we
+	 * roll back by releasing any already-committed pages with MADV_DONTNEED
+	 * to avoid leaving the pool in an inconsistent state.
 	 */
 	if (madvise(BufferBlocks, blocks_size, MADV_POPULATE_WRITE) == 0)
 	{
 		use_madvise = true;
-		if (madvise(BufferDescriptors, descs_size, MADV_POPULATE_WRITE) != 0 ||
-			madvise(BufferIOCVArray, iocv_size, MADV_POPULATE_WRITE) != 0 ||
-			madvise(CkptBufferIds, ckpt_size, MADV_POPULATE_WRITE) != 0)
+
+		if (madvise(BufferDescriptors, descs_size, MADV_POPULATE_WRITE) != 0)
 		{
+			/* Roll back blocks */
+			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
 			ereport(WARNING,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
-					 errmsg("could not commit memory for %d buffers: %m", nbufs)));
+					 errmsg("could not commit memory for buffer descriptors: %m")));
+			return false;
+		}
+		if (madvise(BufferIOCVArray, iocv_size, MADV_POPULATE_WRITE) != 0)
+		{
+			/* Roll back blocks + descriptors */
+			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
+			madvise(BufferDescriptors, descs_size, MADV_DONTNEED);
+			ereport(WARNING,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("could not commit memory for buffer IO CVs: %m")));
+			return false;
+		}
+		if (madvise(CkptBufferIds, ckpt_size, MADV_POPULATE_WRITE) != 0)
+		{
+			/* Roll back blocks + descriptors + IO CVs */
+			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
+			madvise(BufferDescriptors, descs_size, MADV_DONTNEED);
+			madvise(BufferIOCVArray, iocv_size, MADV_DONTNEED);
+			ereport(WARNING,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("could not commit memory for checkpoint buffer IDs: %m")));
 			return false;
 		}
 	}
@@ -265,14 +287,14 @@ BufferPoolCommitMemory(int nbufs)
 void
 BufferPoolDecommitMemory(int old_nbufs, int new_nbufs)
 {
-	Size		blocks_offset = (Size) new_nbufs * BLCKSZ;
-	Size		blocks_len = (Size) (old_nbufs - new_nbufs) * BLCKSZ;
-	Size		descs_offset = (Size) new_nbufs * sizeof(BufferDescPadded);
-	Size		descs_len = (Size) (old_nbufs - new_nbufs) * sizeof(BufferDescPadded);
-	Size		iocv_offset = (Size) new_nbufs * sizeof(ConditionVariableMinimallyPadded);
-	Size		iocv_len = (Size) (old_nbufs - new_nbufs) * sizeof(ConditionVariableMinimallyPadded);
-	Size		ckpt_offset = (Size) new_nbufs * sizeof(CkptSortItem);
-	Size		ckpt_len = (Size) (old_nbufs - new_nbufs) * sizeof(CkptSortItem);
+	Size		blocks_offset = mul_size((Size) new_nbufs, BLCKSZ);
+	Size		blocks_len = mul_size((Size) (old_nbufs - new_nbufs), BLCKSZ);
+	Size		descs_offset = mul_size((Size) new_nbufs, sizeof(BufferDescPadded));
+	Size		descs_len = mul_size((Size) (old_nbufs - new_nbufs), sizeof(BufferDescPadded));
+	Size		iocv_offset = mul_size((Size) new_nbufs, sizeof(ConditionVariableMinimallyPadded));
+	Size		iocv_len = mul_size((Size) (old_nbufs - new_nbufs), sizeof(ConditionVariableMinimallyPadded));
+	Size		ckpt_offset = mul_size((Size) new_nbufs, sizeof(CkptSortItem));
+	Size		ckpt_len = mul_size((Size) (old_nbufs - new_nbufs), sizeof(CkptSortItem));
 
 	/* Release physical pages back to the OS */
 	if (blocks_len > 0)
@@ -413,28 +435,26 @@ GrowBufferPool(int new_nbuffers)
  */
 
 /*
- * ShrinkBufferPool - remove buffers from the pool.
+ * ShrinkBufferPool - reduce the buffer pool size.
  *
- * This is considerably more complex than growing because we must ensure
- * all condemned buffers (those in [new_nbuffers, old_nbuffers)) are:
- *   - Not pinned by any backend
- *   - Not dirty (flushed to disk)
- *   - Removed from the buffer hash table
- *   - Not referenced by in-flight I/O
+ * Called from the postmaster during ExecuteBufferPoolResize().  This
+ * function only updates NBuffers and records the condemned range.  The
+ * actual eviction of condemned buffers is done asynchronously by the
+ * bgwriter via BufPoolDrainCondemnedBuffers(), because eviction requires
+ * full backend infrastructure (ResourceOwner, private refcounts, etc.)
+ * that the postmaster does not have.
  *
- * Returns true if shrink succeeded, false if it had to be cancelled
- * (e.g., timeout waiting for pinned buffers).
+ * After this call, no new buffer allocations will use the condemned range
+ * (clock sweep respects NBuffers).  Existing pins on condemned buffers
+ * will complete normally; the bgwriter will evict them once unpinned.
  */
 static bool
 ShrinkBufferPool(int new_nbuffers)
 {
 	int			old_nbuffers = NBuffers;
-	int			i;
-	int			max_attempts = 600;		/* ~60 seconds with 100ms sleep */
-	int			attempt;
 
 	Assert(new_nbuffers < old_nbuffers);
-	Assert(new_nbuffers >= 16);
+	Assert(new_nbuffers >= 16);	/* matches GUC minimum for shared_buffers */
 
 	elog(LOG, "buffer pool shrink started: %d -> %d buffers (%d MB -> %d MB)",
 		 old_nbuffers, new_nbuffers,
@@ -442,132 +462,125 @@ ShrinkBufferPool(int new_nbuffers)
 		 (int) ((Size) new_nbuffers * BLCKSZ / (1024 * 1024)));
 
 	/*
-	 * Update status for monitoring.
+	 * Record the condemned range for the bgwriter to drain, then update
+	 * NBuffers.  The order matters: we set the drain range before publishing
+	 * the new NBuffers so the bgwriter knows what to clean up.
 	 */
 	SpinLockAcquire(&BufResizeCtl->mutex);
 	BufResizeCtl->status = BUF_RESIZE_DRAINING;
+	BufResizeCtl->drain_from = new_nbuffers;
+	BufResizeCtl->drain_to = old_nbuffers;
 	BufResizeCtl->condemned_remaining = old_nbuffers - new_nbuffers;
-	SpinLockRelease(&BufResizeCtl->mutex);
-
-	/*
-	 * Step 1: Drain condemned buffers.
-	 *
-	 * Iterate over the condemned range and invalidate each buffer.  This
-	 * may require multiple passes if buffers are pinned or dirty.
-	 */
-	for (attempt = 0; attempt < max_attempts; attempt++)
-	{
-		int			remaining = 0;
-		int			pinned = 0;
-		int			dirty = 0;
-
-		for (i = new_nbuffers; i < old_nbuffers; i++)
-		{
-			BufferDesc *buf = GetBufferDescriptor(i);
-			uint64		buf_state;
-
-			buf_state = pg_atomic_read_u64(&buf->state);
-
-			/* Skip already-invalidated buffers */
-			if (!(buf_state & BM_TAG_VALID))
-				continue;
-
-			remaining++;
-
-			/* Can't touch pinned buffers */
-			if (BUF_STATE_GET_REFCOUNT(buf_state) != 0)
-			{
-				pinned++;
-				continue;
-			}
-
-			/*
-			 * If dirty, request a write.  Use EvictUnpinnedBuffer which
-			 * handles the full flush + invalidation cycle.
-			 */
-			if (buf_state & BM_DIRTY)
-			{
-				bool		flushed = false;
-
-				dirty++;
-				(void) EvictUnpinnedBuffer(BufferDescriptorGetBuffer(buf),
-										   &flushed);
-				continue;
-			}
-
-			/*
-			 * Buffer is valid, clean, and unpinned.  Evict it.
-			 */
-			{
-				bool		flushed = false;
-
-				(void) EvictUnpinnedBuffer(BufferDescriptorGetBuffer(buf),
-										   &flushed);
-			}
-		}
-
-		/* Update progress */
-		SpinLockAcquire(&BufResizeCtl->mutex);
-		BufResizeCtl->condemned_remaining = remaining;
-		BufResizeCtl->condemned_pinned = pinned;
-		BufResizeCtl->condemned_dirty = dirty;
-		SpinLockRelease(&BufResizeCtl->mutex);
-
-		if (remaining == 0)
-			break;
-
-		if (attempt > 0 && attempt % 100 == 0)
-			elog(WARNING, "buffer pool shrink: still draining %d buffers "
-				 "(%d pinned, %d dirty) after %d seconds",
-				 remaining, pinned, dirty, attempt / 10);
-
-		/* Sleep briefly before retrying */
-		pg_usleep(100000L);		/* 100ms */
-	}
-
-	if (attempt >= max_attempts)
-	{
-		elog(WARNING, "buffer pool shrink cancelled: could not drain all "
-			 "condemned buffers within timeout");
-
-		SpinLockAcquire(&BufResizeCtl->mutex);
-		BufResizeCtl->status = BUF_RESIZE_IDLE;
-		BufResizeCtl->target_buffers = old_nbuffers;
-		BufResizeCtl->condemned_remaining = 0;
-		SpinLockRelease(&BufResizeCtl->mutex);
-		return false;
-	}
-
-	/*
-	 * Step 2: All condemned buffers are now invalid.  Update NBuffers.
-	 *
-	 * A write barrier ensures all the evictions above are visible before
-	 * we publish the new buffer count.
-	 */
-	SpinLockAcquire(&BufResizeCtl->mutex);
-	BufResizeCtl->status = BUF_RESIZE_COMPLETING;
 	SpinLockRelease(&BufResizeCtl->mutex);
 
 	pg_write_barrier();
 	pg_atomic_write_u32(&BufResizeCtl->current_buffers, (uint32) new_nbuffers);
 	NBuffers = new_nbuffers;
 
-	/*
-	 * Child processes will update their NBuffers when they process the
-	 * SIGHUP that the postmaster sends after this function returns.
-	 *
-	 * Note: we defer memory decommit to avoid racing with backends that
-	 * still have the old NBuffers.  The decommit happens on the next
-	 * check once all children have updated.  For now, the pages remain
-	 * allocated but unused (MADV_DONTNEED would be safe since all buffers
-	 * in the condemned range are already invalidated, but we err on the
-	 * side of caution).
-	 */
-
-	elog(LOG, "buffer pool shrink completed: %d -> %d buffers",
-		 old_nbuffers, new_nbuffers);
+	elog(LOG, "buffer pool shrink completed: NBuffers %d -> %d "
+		 "(bgwriter will drain %d condemned buffers)",
+		 old_nbuffers, new_nbuffers, old_nbuffers - new_nbuffers);
 
 	return true;
+}
+
+/*
+ * BufPoolDrainCondemnedBuffers - evict buffers in the condemned range.
+ *
+ * Called from the bgwriter main loop each cycle (~200ms).  The bgwriter
+ * has full backend infrastructure needed for EvictUnpinnedBuffer().
+ *
+ * This does one pass over the condemned range per call, evicting what it
+ * can.  When all condemned buffers are invalidated, it marks the drain
+ * as complete and optionally decommits memory.
+ */
+void
+BufPoolDrainCondemnedBuffers(void)
+{
+	int			drain_from,
+				drain_to;
+	int			i;
+	int			remaining = 0;
+	int			pinned = 0;
+	int			dirty = 0;
+	BufPoolResizeStatus status;
+
+	if (BufResizeCtl == NULL)
+		return;
+
+	/* Quick check without lock */
+	status = BufResizeCtl->status;
+	if (status != BUF_RESIZE_DRAINING)
+		return;
+
+	SpinLockAcquire(&BufResizeCtl->mutex);
+	drain_from = BufResizeCtl->drain_from;
+	drain_to = BufResizeCtl->drain_to;
+	SpinLockRelease(&BufResizeCtl->mutex);
+
+	if (drain_from >= drain_to)
+		return;
+
+	/* One pass over the condemned range */
+	for (i = drain_from; i < drain_to; i++)
+	{
+		BufferDesc *buf = GetBufferDescriptor(i);
+		uint64		buf_state;
+
+		buf_state = pg_atomic_read_u64(&buf->state);
+
+		/* Skip already-invalidated buffers */
+		if (!(buf_state & BM_TAG_VALID))
+			continue;
+
+		remaining++;
+
+		/* Can't touch pinned buffers */
+		if (BUF_STATE_GET_REFCOUNT(buf_state) != 0)
+		{
+			pinned++;
+			continue;
+		}
+
+		/* Evict the buffer (handles dirty flush + invalidation) */
+		{
+			bool		flushed = false;
+
+			if (buf_state & BM_DIRTY)
+				dirty++;
+			(void) EvictUnpinnedBuffer(BufferDescriptorGetBuffer(buf),
+									   &flushed);
+		}
+	}
+
+	/* Update progress */
+	SpinLockAcquire(&BufResizeCtl->mutex);
+	BufResizeCtl->condemned_remaining = remaining;
+	BufResizeCtl->condemned_pinned = pinned;
+	BufResizeCtl->condemned_dirty = dirty;
+
+	if (remaining == 0)
+	{
+		/* All condemned buffers drained */
+		BufResizeCtl->status = BUF_RESIZE_IDLE;
+		BufResizeCtl->drain_from = 0;
+		BufResizeCtl->drain_to = 0;
+		BufResizeCtl->started_at = 0;
+		BufResizeCtl->condemned_remaining = 0;
+		BufResizeCtl->condemned_pinned = 0;
+		BufResizeCtl->condemned_dirty = 0;
+		SpinLockRelease(&BufResizeCtl->mutex);
+
+		elog(LOG, "bgwriter: condemned buffer drain complete");
+
+		/* Now safe to decommit memory */
+		if (ReservedBufferBlocks != NULL)
+			BufferPoolDecommitMemory(drain_to, drain_from);
+	}
+	else
+	{
+		SpinLockRelease(&BufResizeCtl->mutex);
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -589,8 +602,16 @@ RequestBufferPoolResize(int new_nbuffers)
 
 	SpinLockAcquire(&BufResizeCtl->mutex);
 
-	/* Don't interrupt an in-progress resize */
-	if (BufResizeCtl->status != BUF_RESIZE_IDLE)
+	/*
+	 * If a bgwriter drain is in progress (BUF_RESIZE_DRAINING from a
+	 * previous shrink), cancel it -- the new request supersedes.  The
+	 * orphaned condemned buffers are harmless (just waste some memory).
+	 *
+	 * Don't interrupt a grow (BUF_RESIZE_GROWING/COMPLETING) since the
+	 * postmaster is actively executing it.
+	 */
+	if (BufResizeCtl->status == BUF_RESIZE_GROWING ||
+		BufResizeCtl->status == BUF_RESIZE_COMPLETING)
 	{
 		SpinLockRelease(&BufResizeCtl->mutex);
 		ereport(WARNING,
@@ -599,12 +620,20 @@ RequestBufferPoolResize(int new_nbuffers)
 		return;
 	}
 
+	/* Cancel any pending drain */
+	BufResizeCtl->drain_from = 0;
+	BufResizeCtl->drain_to = 0;
+	BufResizeCtl->condemned_remaining = 0;
+	BufResizeCtl->condemned_pinned = 0;
+	BufResizeCtl->condemned_dirty = 0;
+
 	BufResizeCtl->target_buffers = new_nbuffers;
 	if (new_nbuffers > NBuffers)
 		BufResizeCtl->status = BUF_RESIZE_GROWING;
 	else if (new_nbuffers < NBuffers)
 		BufResizeCtl->status = BUF_RESIZE_DRAINING;
-	/* else: same value, no-op */
+	else
+		BufResizeCtl->status = BUF_RESIZE_IDLE;
 
 	BufResizeCtl->started_at = GetCurrentTimestamp();
 	SpinLockRelease(&BufResizeCtl->mutex);
@@ -633,23 +662,25 @@ ExecuteBufferPoolResize(void)
 	if (status == BUF_RESIZE_IDLE)
 		return;
 
-	if (target > NBuffers)
+	if (status == BUF_RESIZE_GROWING && target > NBuffers)
 	{
 		GrowBufferPool(target);
+
+		/* Mark grow as complete immediately */
+		SpinLockAcquire(&BufResizeCtl->mutex);
+		BufResizeCtl->status = BUF_RESIZE_IDLE;
+		BufResizeCtl->started_at = 0;
+		SpinLockRelease(&BufResizeCtl->mutex);
 	}
-	else if (target < NBuffers)
+	else if (status == BUF_RESIZE_DRAINING && target < NBuffers)
 	{
+		/*
+		 * ShrinkBufferPool updates NBuffers and keeps status as
+		 * BUF_RESIZE_DRAINING.  The bgwriter will drain the condemned
+		 * buffers asynchronously and set status to BUF_RESIZE_IDLE.
+		 */
 		ShrinkBufferPool(target);
 	}
-
-	/* Mark resize as complete */
-	SpinLockAcquire(&BufResizeCtl->mutex);
-	BufResizeCtl->status = BUF_RESIZE_IDLE;
-	BufResizeCtl->started_at = 0;
-	BufResizeCtl->condemned_remaining = 0;
-	BufResizeCtl->condemned_pinned = 0;
-	BufResizeCtl->condemned_dirty = 0;
-	SpinLockRelease(&BufResizeCtl->mutex);
 }
 
 /* ----------------------------------------------------------------
@@ -738,6 +769,13 @@ assign_shared_buffers(int newval, void *extra)
 		 * current_buffers before sending us SIGHUP.
 		 */
 		int		current = (int) pg_atomic_read_u32(&BufResizeCtl->current_buffers);
+
+		/*
+		 * A read barrier ensures we see the fully initialized descriptor
+		 * data that the postmaster wrote before publishing current_buffers.
+		 * Pairs with the pg_write_barrier() in GrowBufferPool/ShrinkBufferPool.
+		 */
+		pg_read_barrier();
 
 		if (current != NBuffers)
 		{
