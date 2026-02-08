@@ -27,8 +27,7 @@ typedef enum BufPoolResizeStatus
 {
 	BUF_RESIZE_IDLE = 0,		/* No resize in progress */
 	BUF_RESIZE_GROWING,			/* Adding new buffers */
-	BUF_RESIZE_DRAINING,		/* Draining condemned buffers for shrink */
-	BUF_RESIZE_COMPLETING		/* Completing resize, children updating */
+	BUF_RESIZE_DRAINING			/* Draining condemned buffers for shrink */
 } BufPoolResizeStatus;
 
 /*
@@ -83,10 +82,10 @@ extern void BufPoolResizeShmemInit(void);
 extern void BufferPoolReserveMemory(void);
 
 /*
- * Commit physical memory for the given number of buffers within
- * the previously reserved address space.
+ * Commit physical memory for buffers in the range [start_buf, end_buf)
+ * within the previously reserved address space.
  */
-extern bool BufferPoolCommitMemory(int nbufs);
+extern bool BufferPoolCommitMemory(int start_buf, int end_buf);
 
 /*
  * Decommit physical memory for buffers beyond the given count.

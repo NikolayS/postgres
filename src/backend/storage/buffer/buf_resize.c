@@ -95,6 +95,19 @@ BufferPoolReserveMemory(void)
 	if (MaxNBuffers <= 0 || MaxNBuffers <= NBuffers)
 		return;
 
+#ifdef EXEC_BACKEND
+	/*
+	 * On EXEC_BACKEND (Windows), child processes are started via CreateProcess
+	 * rather than fork(), so they do not inherit mmap'd regions.  Online
+	 * buffer pool resize requires fork() semantics for shared anonymous
+	 * mappings.  Refuse to start rather than silently breaking.
+	 */
+	ereport(FATAL,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("max_shared_buffers is not supported on this platform"),
+			 errhint("Remove the max_shared_buffers setting from postgresql.conf.")));
+#endif
+
 	/*
 	 * Calculate sizes for the maximum possible buffer count.
 	 */
@@ -165,7 +178,7 @@ BufferPoolReserveMemory(void)
 }
 
 /*
- * Commit physical memory for the given number of buffers.
+ * Commit physical memory for buffers in the range [start_buf, end_buf).
  *
  * When growing, this makes new pages accessible.  The memory was already
  * reserved by BufferPoolReserveMemory() using MAP_NORESERVE.  On Linux,
@@ -175,15 +188,23 @@ BufferPoolReserveMemory(void)
  * population with early OOM detection.  If unsupported, we fall back to
  * manually touching each page to fault it in.
  *
+ * Only the delta range [start_buf, end_buf) is committed, not the entire
+ * pool.  This avoids re-touching already-committed pages and ensures
+ * rollback on failure only affects the new range (not live buffers).
+ *
  * Returns true on success, false if memory could not be committed (OOM).
  */
 bool
-BufferPoolCommitMemory(int nbufs)
+BufferPoolCommitMemory(int start_buf, int end_buf)
 {
-	Size		blocks_size = mul_size((Size) nbufs, BLCKSZ);
-	Size		descs_size = mul_size((Size) nbufs, sizeof(BufferDescPadded));
-	Size		iocv_size = mul_size((Size) nbufs, sizeof(ConditionVariableMinimallyPadded));
-	Size		ckpt_size = mul_size((Size) nbufs, sizeof(CkptSortItem));
+	Size		blocks_off = mul_size((Size) start_buf, BLCKSZ);
+	Size		blocks_len = mul_size((Size) (end_buf - start_buf), BLCKSZ);
+	Size		descs_off = mul_size((Size) start_buf, sizeof(BufferDescPadded));
+	Size		descs_len = mul_size((Size) (end_buf - start_buf), sizeof(BufferDescPadded));
+	Size		iocv_off = mul_size((Size) start_buf, sizeof(ConditionVariableMinimallyPadded));
+	Size		iocv_len = mul_size((Size) (end_buf - start_buf), sizeof(ConditionVariableMinimallyPadded));
+	Size		ckpt_off = mul_size((Size) start_buf, sizeof(CkptSortItem));
+	Size		ckpt_len = mul_size((Size) (end_buf - start_buf), sizeof(CkptSortItem));
 	bool		use_madvise = false;
 
 #ifdef MADV_POPULATE_WRITE
@@ -193,38 +214,37 @@ BufferPoolCommitMemory(int nbufs)
 	 * kernels), fall back to manual page touching.
 	 *
 	 * If population succeeds for some arrays but fails for others, we
-	 * roll back by releasing any already-committed pages with MADV_DONTNEED
-	 * to avoid leaving the pool in an inconsistent state.
+	 * roll back by releasing only the newly-committed pages.
 	 */
-	if (madvise(BufferBlocks, blocks_size, MADV_POPULATE_WRITE) == 0)
+	if (madvise(BufferBlocks + blocks_off, blocks_len, MADV_POPULATE_WRITE) == 0)
 	{
 		use_madvise = true;
 
-		if (madvise(BufferDescriptors, descs_size, MADV_POPULATE_WRITE) != 0)
+		if (madvise((char *) BufferDescriptors + descs_off, descs_len,
+					MADV_POPULATE_WRITE) != 0)
 		{
-			/* Roll back blocks */
-			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
+			madvise(BufferBlocks + blocks_off, blocks_len, MADV_DONTNEED);
 			ereport(WARNING,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("could not commit memory for buffer descriptors: %m")));
 			return false;
 		}
-		if (madvise(BufferIOCVArray, iocv_size, MADV_POPULATE_WRITE) != 0)
+		if (madvise((char *) BufferIOCVArray + iocv_off, iocv_len,
+					MADV_POPULATE_WRITE) != 0)
 		{
-			/* Roll back blocks + descriptors */
-			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
-			madvise(BufferDescriptors, descs_size, MADV_DONTNEED);
+			madvise(BufferBlocks + blocks_off, blocks_len, MADV_DONTNEED);
+			madvise((char *) BufferDescriptors + descs_off, descs_len, MADV_DONTNEED);
 			ereport(WARNING,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("could not commit memory for buffer IO CVs: %m")));
 			return false;
 		}
-		if (madvise(CkptBufferIds, ckpt_size, MADV_POPULATE_WRITE) != 0)
+		if (madvise((char *) CkptBufferIds + ckpt_off, ckpt_len,
+					MADV_POPULATE_WRITE) != 0)
 		{
-			/* Roll back blocks + descriptors + IO CVs */
-			madvise(BufferBlocks, blocks_size, MADV_DONTNEED);
-			madvise(BufferDescriptors, descs_size, MADV_DONTNEED);
-			madvise(BufferIOCVArray, iocv_size, MADV_DONTNEED);
+			madvise(BufferBlocks + blocks_off, blocks_len, MADV_DONTNEED);
+			madvise((char *) BufferDescriptors + descs_off, descs_len, MADV_DONTNEED);
+			madvise((char *) BufferIOCVArray + iocv_off, iocv_len, MADV_DONTNEED);
 			ereport(WARNING,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("could not commit memory for checkpoint buffer IDs: %m")));
@@ -233,10 +253,10 @@ BufferPoolCommitMemory(int nbufs)
 	}
 	else if (errno != EINVAL)
 	{
-		/* Real error (e.g., ENOMEM), not just unsupported */
 		ereport(WARNING,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("could not commit memory for %d buffers: %m", nbufs)));
+				 errmsg("could not commit memory for buffers %d..%d: %m",
+						start_buf, end_buf)));
 		return false;
 	}
 	/* else: EINVAL means MADV_POPULATE_WRITE not supported, fall through */
@@ -251,28 +271,28 @@ BufferPoolCommitMemory(int nbufs)
 		 * Touch one byte per OS page to fault in the physical memory.
 		 * The volatile pointer prevents the compiler from optimizing this away.
 		 */
-		for (p = (volatile char *) BufferBlocks;
-			 p < (volatile char *) BufferBlocks + blocks_size;
+		for (p = (volatile char *) BufferBlocks + blocks_off;
+			 p < (volatile char *) BufferBlocks + blocks_off + blocks_len;
 			 p += page_size)
 			*p = *p;
 
-		for (p = (volatile char *) BufferDescriptors;
-			 p < (volatile char *) BufferDescriptors + descs_size;
+		for (p = (volatile char *) BufferDescriptors + descs_off;
+			 p < (volatile char *) BufferDescriptors + descs_off + descs_len;
 			 p += page_size)
 			*p = *p;
 
-		for (p = (volatile char *) BufferIOCVArray;
-			 p < (volatile char *) BufferIOCVArray + iocv_size;
+		for (p = (volatile char *) BufferIOCVArray + iocv_off;
+			 p < (volatile char *) BufferIOCVArray + iocv_off + iocv_len;
 			 p += page_size)
 			*p = *p;
 
-		for (p = (volatile char *) CkptBufferIds;
-			 p < (volatile char *) CkptBufferIds + ckpt_size;
+		for (p = (volatile char *) CkptBufferIds + ckpt_off;
+			 p < (volatile char *) CkptBufferIds + ckpt_off + ckpt_len;
 			 p += page_size)
 			*p = *p;
 
-		elog(DEBUG1, "committed buffer pool memory via page touching for %d buffers",
-			 nbufs);
+		elog(DEBUG1, "committed buffer pool memory via page touching for buffers %d..%d",
+			 start_buf, end_buf);
 	}
 
 	return true;
@@ -283,6 +303,16 @@ BufferPoolCommitMemory(int nbufs)
  *
  * After shrinking, we release physical pages back to the OS but keep the
  * virtual address reservation intact for future growth.
+ *
+ * For the buffer blocks array (which is always page-aligned since
+ * BLCKSZ >= page size), we use MADV_REMOVE to punch a hole in the
+ * shmem backing and actually free the pages.  MADV_DONTNEED alone
+ * is insufficient on MAP_SHARED mappings because it only unmaps PTEs
+ * without releasing the underlying shmem pages.
+ *
+ * For smaller arrays (descriptors, CVs, ckpt IDs), their offsets may
+ * not be page-aligned, so we use MADV_DONTNEED as a best-effort hint.
+ * The memory waste from these arrays is small relative to the blocks.
  */
 void
 BufferPoolDecommitMemory(int old_nbufs, int new_nbufs)
@@ -296,9 +326,24 @@ BufferPoolDecommitMemory(int old_nbufs, int new_nbufs)
 	Size		ckpt_offset = mul_size((Size) new_nbufs, sizeof(CkptSortItem));
 	Size		ckpt_len = mul_size((Size) (old_nbufs - new_nbufs), sizeof(CkptSortItem));
 
-	/* Release physical pages back to the OS */
+	/*
+	 * Release physical pages for buffer blocks.  MADV_REMOVE punches a hole
+	 * in the shmem backing store, actually freeing the memory.  If it fails
+	 * (e.g., unsupported kernel), fall back to MADV_DONTNEED.
+	 */
 	if (blocks_len > 0)
-		madvise(BufferBlocks + blocks_offset, blocks_len, MADV_DONTNEED);
+	{
+#ifdef MADV_REMOVE
+		if (madvise(BufferBlocks + blocks_offset, blocks_len, MADV_REMOVE) != 0)
+#endif
+			madvise(BufferBlocks + blocks_offset, blocks_len, MADV_DONTNEED);
+	}
+
+	/*
+	 * For smaller arrays, use MADV_DONTNEED as a best-effort hint.
+	 * These offsets may not be page-aligned, in which case madvise
+	 * silently does nothing (returns EINVAL which we ignore).
+	 */
 	if (descs_len > 0)
 		madvise((char *) BufferDescriptors + descs_offset, descs_len, MADV_DONTNEED);
 	if (iocv_len > 0)
@@ -377,7 +422,7 @@ GrowBufferPool(int new_nbuffers)
 	 */
 	if (ReservedBufferBlocks != NULL)
 	{
-		if (!BufferPoolCommitMemory(new_nbuffers))
+		if (!BufferPoolCommitMemory(old_nbuffers, new_nbuffers))
 		{
 			elog(WARNING, "buffer pool grow failed: could not commit memory");
 			return false;
@@ -390,10 +435,23 @@ GrowBufferPool(int new_nbuffers)
 	 * New buffers are appended at the end, so existing buffers are not
 	 * disturbed.  This is safe because no backend can access buffer IDs
 	 * >= old_nbuffers yet (NBuffers hasn't been updated).
+	 *
+	 * However, if a previous shrink was cancelled before its drain completed,
+	 * some descriptors in this range may still have BM_TAG_VALID set and
+	 * could have active pins from backends.  We must NOT reinitialize those
+	 * -- doing so would zero the refcount and corrupt the buffer state.
+	 * Such buffers will be naturally reused by the clock sweep once NBuffers
+	 * is updated to include them again.
 	 */
 	for (i = old_nbuffers; i < new_nbuffers; i++)
 	{
 		BufferDesc *buf = GetBufferDescriptor(i);
+		uint64		buf_state;
+
+		/* Skip buffers still in use from a cancelled shrink */
+		buf_state = pg_atomic_read_u64(&buf->state);
+		if (buf_state & BM_TAG_VALID)
+			continue;
 
 		ClearBufferTag(&buf->tag);
 		pg_atomic_init_u64(&buf->state, 0);
@@ -533,11 +591,10 @@ BufPoolDrainCondemnedBuffers(void)
 		if (!(buf_state & BM_TAG_VALID))
 			continue;
 
-		remaining++;
-
 		/* Can't touch pinned buffers */
 		if (BUF_STATE_GET_REFCOUNT(buf_state) != 0)
 		{
+			remaining++;
 			pinned++;
 			continue;
 		}
@@ -545,15 +602,18 @@ BufPoolDrainCondemnedBuffers(void)
 		/* Evict the buffer (handles dirty flush + invalidation) */
 		{
 			bool		flushed = false;
+			bool		evicted;
 
 			if (buf_state & BM_DIRTY)
 				dirty++;
-			(void) EvictUnpinnedBuffer(BufferDescriptorGetBuffer(buf),
-									   &flushed);
+			evicted = EvictUnpinnedBuffer(BufferDescriptorGetBuffer(buf),
+										  &flushed);
+			if (!evicted)
+				remaining++;
 		}
 	}
 
-	/* Update progress */
+	/* Update progress under lock */
 	SpinLockAcquire(&BufResizeCtl->mutex);
 	BufResizeCtl->condemned_remaining = remaining;
 	BufResizeCtl->condemned_pinned = pinned;
@@ -561,21 +621,38 @@ BufPoolDrainCondemnedBuffers(void)
 
 	if (remaining == 0)
 	{
-		/* All condemned buffers drained */
-		BufResizeCtl->status = BUF_RESIZE_IDLE;
-		BufResizeCtl->drain_from = 0;
-		BufResizeCtl->drain_to = 0;
-		BufResizeCtl->started_at = 0;
-		BufResizeCtl->condemned_remaining = 0;
-		BufResizeCtl->condemned_pinned = 0;
-		BufResizeCtl->condemned_dirty = 0;
-		SpinLockRelease(&BufResizeCtl->mutex);
+		/*
+		 * All condemned buffers drained.  Before decommitting, verify the
+		 * drain hasn't been superseded by a new resize request.  A grow
+		 * that overlaps the condemned range could have been initiated by
+		 * the postmaster while we were iterating -- in that case, the
+		 * status and/or drain range will have changed under us.
+		 */
+		if (BufResizeCtl->status == BUF_RESIZE_DRAINING &&
+			BufResizeCtl->drain_from == drain_from &&
+			BufResizeCtl->drain_to == drain_to)
+		{
+			BufResizeCtl->status = BUF_RESIZE_IDLE;
+			BufResizeCtl->drain_from = 0;
+			BufResizeCtl->drain_to = 0;
+			BufResizeCtl->started_at = 0;
+			BufResizeCtl->condemned_remaining = 0;
+			BufResizeCtl->condemned_pinned = 0;
+			BufResizeCtl->condemned_dirty = 0;
+			SpinLockRelease(&BufResizeCtl->mutex);
 
-		elog(LOG, "bgwriter: condemned buffer drain complete");
+			elog(LOG, "bgwriter: condemned buffer drain complete");
 
-		/* Now safe to decommit memory */
-		if (ReservedBufferBlocks != NULL)
-			BufferPoolDecommitMemory(drain_to, drain_from);
+			/* Now safe to decommit memory */
+			if (ReservedBufferBlocks != NULL)
+				BufferPoolDecommitMemory(drain_to, drain_from);
+		}
+		else
+		{
+			/* Drain was superseded; skip decommit */
+			SpinLockRelease(&BufResizeCtl->mutex);
+			elog(LOG, "bgwriter: drain superseded by new resize, skipping decommit");
+		}
 	}
 	else
 	{
@@ -605,13 +682,13 @@ RequestBufferPoolResize(int new_nbuffers)
 	/*
 	 * If a bgwriter drain is in progress (BUF_RESIZE_DRAINING from a
 	 * previous shrink), cancel it -- the new request supersedes.  The
-	 * orphaned condemned buffers are harmless (just waste some memory).
+	 * bgwriter validates the drain range before decommitting, so it's
+	 * safe to change the range while it's iterating.
 	 *
-	 * Don't interrupt a grow (BUF_RESIZE_GROWING/COMPLETING) since the
-	 * postmaster is actively executing it.
+	 * Don't interrupt a grow (BUF_RESIZE_GROWING) since the postmaster
+	 * is actively executing it.
 	 */
-	if (BufResizeCtl->status == BUF_RESIZE_GROWING ||
-		BufResizeCtl->status == BUF_RESIZE_COMPLETING)
+	if (BufResizeCtl->status == BUF_RESIZE_GROWING)
 	{
 		SpinLockRelease(&BufResizeCtl->mutex);
 		ereport(WARNING,
