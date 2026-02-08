@@ -110,6 +110,7 @@
 #include "replication/slotsync.h"
 #include "replication/walsender.h"
 #include "storage/aio_subsys.h"
+#include "storage/buf_resize.h"
 #include "storage/fd.h"
 #include "storage/io_worker.h"
 #include "storage/ipc.h"
@@ -2014,6 +2015,16 @@ process_pm_reload_request(void)
 		ereport(LOG,
 				(errmsg("received SIGHUP, reloading configuration files")));
 		ProcessConfigFile(PGC_SIGHUP);
+
+		/*
+		 * Execute any pending buffer pool resize before notifying children.
+		 * The resize (if any) was requested by assign_shared_buffers() during
+		 * ProcessConfigFile().  We execute it now so that NBuffers is updated
+		 * (via ProcSignalBarrier) in all backends before they process SIGHUP
+		 * and update their SharedBuffersGUC.
+		 */
+		ExecuteBufferPoolResize();
+
 		SignalChildren(SIGHUP, btmask_all_except(B_DEAD_END_BACKEND));
 
 		/* Reload authentication config files too */

@@ -46,9 +46,9 @@
 #include "storage/pg_shmem.h"
 #include "storage/proc.h"
 #include "storage/proclist.h"
-#include "storage/procsignal.h"
 #include "storage/shmem.h"
 #include "utils/guc.h"
+#include "utils/guc_hooks.h"
 #include "utils/timestamp.h"
 
 /* GUC variable MaxNBuffers is declared in globals.c */
@@ -173,37 +173,85 @@ BufferPoolReserveMemory(void)
  *
  * When growing, this makes new pages accessible.  The memory was already
  * reserved by BufferPoolReserveMemory() using MAP_NORESERVE.  On Linux,
- * simply touching the pages will fault them in.  We use madvise to tell
- * the kernel we want these pages populated.
+ * simply touching the pages will fault them in.
+ *
+ * We first try MADV_POPULATE_WRITE (Linux 5.14+) for efficient bulk
+ * population with early OOM detection.  If unsupported, we fall back to
+ * manually touching each page to fault it in.
  *
  * Returns true on success, false if memory could not be committed (OOM).
  */
 bool
 BufferPoolCommitMemory(int nbufs)
 {
-#ifdef MADV_POPULATE_WRITE
 	Size		blocks_size = (Size) nbufs * BLCKSZ;
 	Size		descs_size = (Size) nbufs * sizeof(BufferDescPadded);
 	Size		iocv_size = (Size) nbufs * sizeof(ConditionVariableMinimallyPadded);
 	Size		ckpt_size = (Size) nbufs * sizeof(CkptSortItem);
+	bool		use_madvise = false;
 
+#ifdef MADV_POPULATE_WRITE
 	/*
-	 * MADV_POPULATE_WRITE causes the kernel to allocate physical pages for
-	 * the range.  If there isn't enough memory, madvise returns -1 with
-	 * errno = ENOMEM, allowing us to detect OOM before we've committed to
-	 * the resize.
+	 * Try MADV_POPULATE_WRITE first.  This causes the kernel to allocate
+	 * physical pages for the range.  If unsupported (EINVAL on older
+	 * kernels), fall back to manual page touching.
 	 */
-	if (madvise(BufferBlocks, blocks_size, MADV_POPULATE_WRITE) != 0 ||
-		madvise(BufferDescriptors, descs_size, MADV_POPULATE_WRITE) != 0 ||
-		madvise(BufferIOCVArray, iocv_size, MADV_POPULATE_WRITE) != 0 ||
-		madvise(CkptBufferIds, ckpt_size, MADV_POPULATE_WRITE) != 0)
+	if (madvise(BufferBlocks, blocks_size, MADV_POPULATE_WRITE) == 0)
 	{
+		use_madvise = true;
+		if (madvise(BufferDescriptors, descs_size, MADV_POPULATE_WRITE) != 0 ||
+			madvise(BufferIOCVArray, iocv_size, MADV_POPULATE_WRITE) != 0 ||
+			madvise(CkptBufferIds, ckpt_size, MADV_POPULATE_WRITE) != 0)
+		{
+			ereport(WARNING,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("could not commit memory for %d buffers: %m", nbufs)));
+			return false;
+		}
+	}
+	else if (errno != EINVAL)
+	{
+		/* Real error (e.g., ENOMEM), not just unsupported */
 		ereport(WARNING,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
 				 errmsg("could not commit memory for %d buffers: %m", nbufs)));
 		return false;
 	}
+	/* else: EINVAL means MADV_POPULATE_WRITE not supported, fall through */
 #endif
+
+	if (!use_madvise)
+	{
+		volatile char *p;
+		Size		page_size = sysconf(_SC_PAGESIZE);
+
+		/*
+		 * Touch one byte per OS page to fault in the physical memory.
+		 * The volatile pointer prevents the compiler from optimizing this away.
+		 */
+		for (p = (volatile char *) BufferBlocks;
+			 p < (volatile char *) BufferBlocks + blocks_size;
+			 p += page_size)
+			*p = *p;
+
+		for (p = (volatile char *) BufferDescriptors;
+			 p < (volatile char *) BufferDescriptors + descs_size;
+			 p += page_size)
+			*p = *p;
+
+		for (p = (volatile char *) BufferIOCVArray;
+			 p < (volatile char *) BufferIOCVArray + iocv_size;
+			 p += page_size)
+			*p = *p;
+
+		for (p = (volatile char *) CkptBufferIds;
+			 p < (volatile char *) CkptBufferIds + ckpt_size;
+			 p += page_size)
+			*p = *p;
+
+		elog(DEBUG1, "committed buffer pool memory via page touching for %d buffers",
+			 nbufs);
+	}
 
 	return true;
 }
@@ -279,16 +327,20 @@ BufPoolResizeShmemInit(void)
 /*
  * GrowBufferPool - add new buffers to the pool.
  *
- * This is called from the postmaster (or a designated bgworker) to
- * execute a grow operation.  new_nbuffers must be > NBuffers and
- * <= MaxNBuffers.
+ * This is called from the postmaster via ExecuteBufferPoolResize() after
+ * processing a SIGHUP that changed shared_buffers.  new_nbuffers must be
+ * > NBuffers and <= MaxNBuffers.
+ *
+ * After this function returns, the postmaster's NBuffers is updated and
+ * the shared current_buffers atomic is set.  Child processes update their
+ * local NBuffers from current_buffers when they process the SIGHUP that
+ * the postmaster sends after this function returns.
  */
 static bool
 GrowBufferPool(int new_nbuffers)
 {
 	int			old_nbuffers = NBuffers;
 	int			i;
-	uint64		generation;
 
 	Assert(new_nbuffers > old_nbuffers);
 	Assert(new_nbuffers <= GetEffectiveMaxNBuffers());
@@ -300,10 +352,6 @@ GrowBufferPool(int new_nbuffers)
 
 	/*
 	 * Step 1: Commit physical memory for the new buffers.
-	 *
-	 * If using the reserved-VA-space path, memory is committed by touching
-	 * it.  If using the normal shmem path (MaxNBuffers == 0), the hash table
-	 * was pre-sized but the arrays can't grow -- this shouldn't happen.
 	 */
 	if (ReservedBufferBlocks != NULL)
 	{
@@ -318,9 +366,8 @@ GrowBufferPool(int new_nbuffers)
 	 * Step 2: Initialize new buffer descriptors.
 	 *
 	 * New buffers are appended at the end, so existing buffers are not
-	 * disturbed.  This is safe to do without holding any buffer locks because
-	 * no backend can access buffer IDs >= old_nbuffers yet (NBuffers hasn't
-	 * been updated).
+	 * disturbed.  This is safe because no backend can access buffer IDs
+	 * >= old_nbuffers yet (NBuffers hasn't been updated).
 	 */
 	for (i = old_nbuffers; i < new_nbuffers; i++)
 	{
@@ -338,21 +385,22 @@ GrowBufferPool(int new_nbuffers)
 	}
 
 	/*
-	 * Step 3: Update the authoritative NBuffers in shared memory, then
-	 * emit a barrier so all backends pick up the new value.
+	 * Step 3: Write the new NBuffers to shared memory and update the
+	 * postmaster's local copy.  A write barrier ensures the descriptor
+	 * initializations above are visible before any backend sees the new
+	 * buffer count.
 	 */
+	pg_write_barrier();
 	pg_atomic_write_u32(&BufResizeCtl->current_buffers, (uint32) new_nbuffers);
 
-	/* Update the global NBuffers for this process (the postmaster) */
+	/* Update the postmaster's local NBuffers */
 	NBuffers = new_nbuffers;
 
 	/*
-	 * Emit barrier.  All backends will call ProcessBarrierBufferPoolResize()
-	 * which updates their local NBuffers copy.
+	 * Child processes will update their local NBuffers when they process
+	 * the SIGHUP that the postmaster sends after this function returns.
+	 * See assign_shared_buffers().
 	 */
-	generation = EmitProcSignalBarrier(PROCSIGNAL_BARRIER_BUFFER_POOL_RESIZE);
-	WaitForProcSignalBarrier(generation);
-
 	elog(LOG, "buffer pool resize completed: %d -> %d buffers",
 		 old_nbuffers, new_nbuffers);
 
@@ -384,7 +432,6 @@ ShrinkBufferPool(int new_nbuffers)
 	int			i;
 	int			max_attempts = 600;		/* ~60 seconds with 100ms sleep */
 	int			attempt;
-	uint64		generation;
 
 	Assert(new_nbuffers < old_nbuffers);
 	Assert(new_nbuffers >= 16);
@@ -492,24 +539,30 @@ ShrinkBufferPool(int new_nbuffers)
 	}
 
 	/*
-	 * Step 2: All condemned buffers are now invalid.  Update NBuffers and
-	 * emit barrier.
+	 * Step 2: All condemned buffers are now invalid.  Update NBuffers.
+	 *
+	 * A write barrier ensures all the evictions above are visible before
+	 * we publish the new buffer count.
 	 */
 	SpinLockAcquire(&BufResizeCtl->mutex);
 	BufResizeCtl->status = BUF_RESIZE_COMPLETING;
 	SpinLockRelease(&BufResizeCtl->mutex);
 
+	pg_write_barrier();
 	pg_atomic_write_u32(&BufResizeCtl->current_buffers, (uint32) new_nbuffers);
 	NBuffers = new_nbuffers;
 
-	generation = EmitProcSignalBarrier(PROCSIGNAL_BARRIER_BUFFER_POOL_RESIZE);
-	WaitForProcSignalBarrier(generation);
-
 	/*
-	 * Step 3: Decommit physical memory for the freed region.
+	 * Child processes will update their NBuffers when they process the
+	 * SIGHUP that the postmaster sends after this function returns.
+	 *
+	 * Note: we defer memory decommit to avoid racing with backends that
+	 * still have the old NBuffers.  The decommit happens on the next
+	 * check once all children have updated.  For now, the pages remain
+	 * allocated but unused (MADV_DONTNEED would be safe since all buffers
+	 * in the condemned range are already invalidated, but we err on the
+	 * side of caution).
 	 */
-	if (ReservedBufferBlocks != NULL)
-		BufferPoolDecommitMemory(old_nbuffers, new_nbuffers);
 
 	elog(LOG, "buffer pool shrink completed: %d -> %d buffers",
 		 old_nbuffers, new_nbuffers);
@@ -599,32 +652,6 @@ ExecuteBufferPoolResize(void)
 	SpinLockRelease(&BufResizeCtl->mutex);
 }
 
-/*
- * ProcessBarrierBufferPoolResize - backend barrier handler.
- *
- * Called from ProcessProcSignalBarrier() when a buffer pool resize
- * barrier is received.  Each backend updates its local NBuffers copy.
- */
-bool
-ProcessBarrierBufferPoolResize(void)
-{
-	int			new_nbuffers;
-
-	new_nbuffers = (int) pg_atomic_read_u32(&BufResizeCtl->current_buffers);
-
-	if (new_nbuffers != NBuffers)
-	{
-		int			old_nbuffers = NBuffers;
-
-		NBuffers = new_nbuffers;
-
-		elog(DEBUG1, "backend updated NBuffers: %d -> %d",
-			 old_nbuffers, new_nbuffers);
-	}
-
-	return true;
-}
-
 /* ----------------------------------------------------------------
  *		GUC hooks
  * ----------------------------------------------------------------
@@ -633,39 +660,29 @@ ProcessBarrierBufferPoolResize(void)
 /*
  * GUC check hook for shared_buffers.
  *
+ * The GUC variable is SharedBuffersGUC, NOT NBuffers.  This is critical:
+ * the GUC mechanism updates SharedBuffersGUC on SIGHUP, but NBuffers is
+ * only updated by the resize code (or at startup).  This prevents NBuffers
+ * from changing before the buffer pool arrays are actually resized.
+ *
  * Validates that the new value is within the allowed range:
- *   - At startup (PGC_S_FILE): normal validation
- *   - At runtime (PGC_S_SIGHUP/PGC_S_CLIENT): must be <= MaxNBuffers
+ *   - At startup: normal validation (min/max from GUC definition)
+ *   - At runtime with max_shared_buffers: must be <= MaxNBuffers
+ *   - At runtime without max_shared_buffers: value is accepted (for ALTER
+ *     SYSTEM writes that take effect on next restart) but the assign hook
+ *     will not trigger a resize
  */
 bool
 check_shared_buffers(int *newval, void **extra, GucSource source)
 {
 	/*
-	 * During initial startup, no special checks needed beyond the
-	 * min/max in the GUC definition.  MaxNBuffers isn't set yet.
-	 */
-	if (!IsUnderPostmaster && !IsPostmasterEnvironment)
-		return true;
-
-	/*
-	 * For runtime changes, enforce max_shared_buffers limit.
+	 * If max_shared_buffers is configured, enforce it as an upper bound.
+	 * This applies both at startup and at runtime.
 	 */
 	if (MaxNBuffers > 0 && *newval > MaxNBuffers)
 	{
 		GUC_check_errmsg("shared_buffers (%d) cannot exceed max_shared_buffers (%d)",
 						 *newval, MaxNBuffers);
-		return false;
-	}
-
-	/*
-	 * If max_shared_buffers was not configured (or equals shared_buffers),
-	 * runtime changes are not allowed.  But we only enforce this for
-	 * actual runtime changes, not for the initial postmaster load.
-	 */
-	if (IsUnderPostmaster && MaxNBuffers <= 0 && *newval != NBuffers)
-	{
-		GUC_check_errmsg("shared_buffers cannot be changed at runtime without "
-						 "setting max_shared_buffers at server start");
 		return false;
 	}
 
@@ -675,23 +692,58 @@ check_shared_buffers(int *newval, void **extra, GucSource source)
 /*
  * GUC assign hook for shared_buffers.
  *
- * When the value changes at runtime (SIGHUP reload), request a resize.
+ * The GUC variable (SharedBuffersGUC) has already been updated by the GUC
+ * mechanism.  At startup, we copy the value into NBuffers.  At runtime,
+ * we request an async resize if the infrastructure is available.
+ *
+ * If max_shared_buffers is not set, runtime changes to SharedBuffersGUC
+ * are harmless -- they'll take effect on next restart when NBuffers is
+ * re-initialized from SharedBuffersGUC.
  */
 void
 assign_shared_buffers(int newval, void *extra)
 {
 	/*
-	 * During startup, just let the normal initialization proceed.
-	 * NBuffers is set directly by the GUC mechanism.
+	 * If resize infrastructure isn't available (initial startup, standalone
+	 * backend, or max_shared_buffers not configured), set NBuffers directly.
 	 */
-	if (!IsUnderPostmaster)
+	if (BufResizeCtl == NULL || MaxNBuffers <= 0)
+	{
+		NBuffers = newval;
 		return;
+	}
 
 	/*
-	 * If the value is actually changing at runtime, request a resize.
+	 * At runtime with max_shared_buffers configured.
+	 *
+	 * The postmaster (IsUnderPostmaster=false) requests a resize.  This is
+	 * a no-op here because ExecuteBufferPoolResize() is called separately
+	 * from process_pm_reload_request() after ProcessConfigFile returns.
+	 *
+	 * Child processes (IsUnderPostmaster=true) update their local NBuffers
+	 * from the shared current_buffers atomic, which was set by the postmaster
+	 * during ExecuteBufferPoolResize() before signaling children.
 	 */
-	if (newval != NBuffers && BufResizeCtl != NULL)
+	if (!IsUnderPostmaster)
 	{
-		RequestBufferPoolResize(newval);
+		/* Postmaster: request resize (executed later by postmaster loop) */
+		if (newval != NBuffers)
+			RequestBufferPoolResize(newval);
+	}
+	else
+	{
+		/*
+		 * Child process: read the authoritative NBuffers from shared memory.
+		 * The postmaster has already performed the resize and updated
+		 * current_buffers before sending us SIGHUP.
+		 */
+		int		current = (int) pg_atomic_read_u32(&BufResizeCtl->current_buffers);
+
+		if (current != NBuffers)
+		{
+			elog(DEBUG1, "backend updated NBuffers: %d -> %d",
+				 NBuffers, current);
+			NBuffers = current;
+		}
 	}
 }

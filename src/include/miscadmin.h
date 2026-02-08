@@ -174,6 +174,7 @@ extern PGDLLIMPORT char *DataDir;
 extern PGDLLIMPORT int data_directory_mode;
 
 extern PGDLLIMPORT int NBuffers;
+extern PGDLLIMPORT int SharedBuffersGUC;
 extern PGDLLIMPORT int MaxNBuffers;
 extern PGDLLIMPORT int MaxBackends;
 extern PGDLLIMPORT int MaxConnections;

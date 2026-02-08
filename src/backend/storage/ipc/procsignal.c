@@ -28,7 +28,6 @@
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/shmem.h"
-#include "storage/buf_resize.h"
 #include "storage/sinval.h"
 #include "storage/smgr.h"
 #include "tcop/tcopprot.h"
@@ -579,9 +578,6 @@ ProcessProcSignalBarrier(void)
 						break;
 					case PROCSIGNAL_BARRIER_UPDATE_XLOG_LOGICAL_INFO:
 						processed = ProcessBarrierUpdateXLogLogicalInfo();
-						break;
-					case PROCSIGNAL_BARRIER_BUFFER_POOL_RESIZE:
-						processed = ProcessBarrierBufferPoolResize();
 						break;
 				}
 

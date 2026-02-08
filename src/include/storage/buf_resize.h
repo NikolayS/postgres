@@ -29,7 +29,7 @@ typedef enum BufPoolResizeStatus
 	BUF_RESIZE_IDLE = 0,		/* No resize in progress */
 	BUF_RESIZE_GROWING,			/* Adding new buffers */
 	BUF_RESIZE_DRAINING,		/* Draining condemned buffers for shrink */
-	BUF_RESIZE_COMPLETING		/* Waiting for barrier acknowledgment */
+	BUF_RESIZE_COMPLETING		/* Completing resize, children updating */
 } BufPoolResizeStatus;
 
 /*
@@ -104,13 +104,6 @@ extern void RequestBufferPoolResize(int new_nbuffers);
  * main loop or a dedicated background worker.
  */
 extern void ExecuteBufferPoolResize(void);
-
-/*
- * Process buffer pool resize barrier in a backend.
- * Called from ProcessProcSignalBarrier() when the resize barrier fires.
- * Returns true if successfully processed, false to retry later.
- */
-extern bool ProcessBarrierBufferPoolResize(void);
 
 /*
  * GUC hooks for shared_buffers are declared in utils/guc_hooks.h,

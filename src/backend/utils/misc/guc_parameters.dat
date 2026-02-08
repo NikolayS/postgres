@@ -2611,7 +2611,7 @@
 { name => 'shared_buffers', type => 'int', context => 'PGC_SIGHUP', group => 'RESOURCES_MEM',
   short_desc => 'Sets the number of shared memory buffers used by the server.',
   flags => 'GUC_UNIT_BLOCKS',
-  variable => 'NBuffers',
+  variable => 'SharedBuffersGUC',
   boot_val => '16384',
   min => '16',
   max => 'INT_MAX / 2',
