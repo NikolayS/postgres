@@ -2,6 +2,7 @@
 
 backend_sources += files(
   'buf_init.c',
+  'buf_resize.c',
   'buf_table.c',
   'bufmgr.c',
   'freelist.c',

@@ -72,8 +72,6 @@
   variable => 'archiveCleanupCommand',
   boot_val => '""',
 },
-
-
 { name => 'archive_command', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_ARCHIVING',
   short_desc => 'Sets the shell command that will be called to archive a WAL file.',
   long_desc => 'An empty string means use "archive_library".',
@@ -2029,6 +2027,20 @@
   max => 'MAX_BACKENDS /* XXX? */',
 },
 
+
+# Maximum value shared_buffers can be set to without restart.
+# When set to a value greater than shared_buffers, virtual address space
+# is reserved at startup and the buffer pool can be resized online.
+# 0 (default) means same as shared_buffers (no online resize).
+{ name => 'max_shared_buffers', type => 'int', context => 'PGC_POSTMASTER', group => 'RESOURCES_MEM',
+  short_desc => 'Maximum value of shared_buffers that can be set without restart.',
+  long_desc => '0 means same as shared_buffers, disabling online resize.',
+  flags => 'GUC_UNIT_BLOCKS',
+  variable => 'MaxNBuffers',
+  boot_val => '0',
+  min => '0',
+  max => 'INT_MAX / 2',
+},
 { name => 'max_slot_wal_keep_size', type => 'int', context => 'PGC_SIGHUP', group => 'REPLICATION_SENDING',
   short_desc => 'Sets the maximum WAL size that can be reserved by replication slots.',
   long_desc => 'Replication slots will be marked as failed, and segments released for deletion or recycling, if this much space is occupied by WAL on disk. -1 means no maximum.',
@@ -2523,8 +2535,6 @@
   variable => 'send_abort_for_kill',
   boot_val => 'false',
 },
-
-
 { name => 'seq_page_cost', type => 'real', context => 'PGC_USERSET', group => 'QUERY_TUNING_COST',
   short_desc => 'Sets the planner\'s estimate of the cost of a sequentially fetched disk page.',
   flags => 'GUC_EXPLAIN',
@@ -2594,16 +2604,19 @@
   options => 'session_replication_role_options',
   assign_hook => 'assign_session_replication_role',
 },
-
 # We sometimes multiply the number of shared buffers by two without
 # checking for overflow, so we mustn't allow more than INT_MAX / 2.
-{ name => 'shared_buffers', type => 'int', context => 'PGC_POSTMASTER', group => 'RESOURCES_MEM',
+# When max_shared_buffers is set, shared_buffers can be changed at runtime
+# via SIGHUP without requiring a restart (PGC_SIGHUP context).
+{ name => 'shared_buffers', type => 'int', context => 'PGC_SIGHUP', group => 'RESOURCES_MEM',
   short_desc => 'Sets the number of shared memory buffers used by the server.',
   flags => 'GUC_UNIT_BLOCKS',
   variable => 'NBuffers',
   boot_val => '16384',
   min => '16',
   max => 'INT_MAX / 2',
+  check_hook => 'check_shared_buffers',
+  assign_hook => 'assign_shared_buffers',
 },
 
 { name => 'shared_memory_size', type => 'int', context => 'PGC_INTERNAL', group => 'PRESET_OPTIONS',

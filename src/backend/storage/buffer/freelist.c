@@ -381,8 +381,23 @@ StrategyShmemSize(void)
 {
 	Size		size = 0;
 
-	/* size of lookup hash table ... see comment in StrategyInitialize */
-	size = add_size(size, BufTableShmemSize(NBuffers + NUM_BUFFER_PARTITIONS));
+	/*
+	 * Size of lookup hash table ... see comment in StrategyInitialize.
+	 *
+	 * When max_shared_buffers is configured for online resize, pre-size the
+	 * hash table for the maximum possible buffer count so that growing the
+	 * buffer pool doesn't require rehashing.
+	 */
+	{
+		int			hash_size;
+
+		if (MaxNBuffers > 0 && MaxNBuffers > NBuffers)
+			hash_size = MaxNBuffers + NUM_BUFFER_PARTITIONS;
+		else
+			hash_size = NBuffers + NUM_BUFFER_PARTITIONS;
+
+		size = add_size(size, BufTableShmemSize(hash_size));
+	}
 
 	/* size of the shared replacement strategy control block */
 	size = add_size(size, MAXALIGN(sizeof(BufferStrategyControl)));
@@ -412,7 +427,14 @@ StrategyInitialize(bool init)
 	 * happening in each partition concurrently, so we could need as many as
 	 * NBuffers + NUM_BUFFER_PARTITIONS entries.
 	 */
-	InitBufTable(NBuffers + NUM_BUFFER_PARTITIONS);
+	/*
+	 * When max_shared_buffers is configured, pre-size for the maximum to
+	 * avoid needing to rehash when the buffer pool grows.
+	 */
+	if (MaxNBuffers > 0 && MaxNBuffers > NBuffers)
+		InitBufTable(MaxNBuffers + NUM_BUFFER_PARTITIONS);
+	else
+		InitBufTable(NBuffers + NUM_BUFFER_PARTITIONS);
 
 	/*
 	 * Get or create the shared strategy control block

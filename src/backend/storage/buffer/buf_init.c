@@ -16,6 +16,7 @@
 
 #include "storage/aio.h"
 #include "storage/buf_internals.h"
+#include "storage/buf_resize.h"
 #include "storage/bufmgr.h"
 
 BufferDescPadded *BufferDescriptors;
@@ -63,6 +64,16 @@ CkptSortItem *CkptBufferIds;
  *
  * This is called once during shared-memory initialization (either in the
  * postmaster, or in a standalone backend).
+ *
+ * When max_shared_buffers is configured, BufferPoolReserveMemory() has
+ * already set up the global pointers (BufferDescriptors, BufferBlocks, etc.)
+ * pointing into separately-mapped VA regions.  In that case, we skip the
+ * ShmemInitStruct allocations for the buffer arrays and just initialize
+ * the descriptors in the pre-allocated memory.
+ *
+ * When max_shared_buffers is not configured (the default), we use the
+ * traditional path of allocating everything from the main shared memory
+ * segment via ShmemInitStruct.
  */
 void
 BufferManagerShmemInit(void)
@@ -71,36 +82,55 @@ BufferManagerShmemInit(void)
 				foundDescs,
 				foundIOCV,
 				foundBufCkpt;
+	bool		using_reserved_memory = (MaxNBuffers > 0 &&
+										 MaxNBuffers > NBuffers);
 
-	/* Align descriptors to a cacheline boundary. */
-	BufferDescriptors = (BufferDescPadded *)
-		ShmemInitStruct("Buffer Descriptors",
-						NBuffers * sizeof(BufferDescPadded),
-						&foundDescs);
+	if (using_reserved_memory)
+	{
+		/*
+		 * Memory was already reserved by BufferPoolReserveMemory() and
+		 * global pointers are already set.  Mark as "not found" so we
+		 * initialize the descriptors below.
+		 */
+		foundDescs = false;
+		foundBufs = false;
+		foundIOCV = false;
+		foundBufCkpt = false;
+	}
+	else
+	{
+		/* Traditional path: allocate from main shared memory segment */
 
-	/* Align buffer pool on IO page size boundary. */
-	BufferBlocks = (char *)
-		TYPEALIGN(PG_IO_ALIGN_SIZE,
-				  ShmemInitStruct("Buffer Blocks",
-								  NBuffers * (Size) BLCKSZ + PG_IO_ALIGN_SIZE,
-								  &foundBufs));
+		/* Align descriptors to a cacheline boundary. */
+		BufferDescriptors = (BufferDescPadded *)
+			ShmemInitStruct("Buffer Descriptors",
+							NBuffers * sizeof(BufferDescPadded),
+							&foundDescs);
 
-	/* Align condition variables to cacheline boundary. */
-	BufferIOCVArray = (ConditionVariableMinimallyPadded *)
-		ShmemInitStruct("Buffer IO Condition Variables",
-						NBuffers * sizeof(ConditionVariableMinimallyPadded),
-						&foundIOCV);
+		/* Align buffer pool on IO page size boundary. */
+		BufferBlocks = (char *)
+			TYPEALIGN(PG_IO_ALIGN_SIZE,
+					  ShmemInitStruct("Buffer Blocks",
+									  NBuffers * (Size) BLCKSZ + PG_IO_ALIGN_SIZE,
+									  &foundBufs));
 
-	/*
-	 * The array used to sort to-be-checkpointed buffer ids is located in
-	 * shared memory, to avoid having to allocate significant amounts of
-	 * memory at runtime. As that'd be in the middle of a checkpoint, or when
-	 * the checkpointer is restarted, memory allocation failures would be
-	 * painful.
-	 */
-	CkptBufferIds = (CkptSortItem *)
-		ShmemInitStruct("Checkpoint BufferIds",
-						NBuffers * sizeof(CkptSortItem), &foundBufCkpt);
+		/* Align condition variables to cacheline boundary. */
+		BufferIOCVArray = (ConditionVariableMinimallyPadded *)
+			ShmemInitStruct("Buffer IO Condition Variables",
+							NBuffers * sizeof(ConditionVariableMinimallyPadded),
+							&foundIOCV);
+
+		/*
+		 * The array used to sort to-be-checkpointed buffer ids is located in
+		 * shared memory, to avoid having to allocate significant amounts of
+		 * memory at runtime. As that'd be in the middle of a checkpoint, or
+		 * when the checkpointer is restarted, memory allocation failures
+		 * would be painful.
+		 */
+		CkptBufferIds = (CkptSortItem *)
+			ShmemInitStruct("Checkpoint BufferIds",
+							NBuffers * sizeof(CkptSortItem), &foundBufCkpt);
+	}
 
 	if (foundDescs || foundBufs || foundIOCV || foundBufCkpt)
 	{
@@ -148,32 +178,43 @@ BufferManagerShmemInit(void)
  *
  * compute the size of shared memory for the buffer pool including
  * data pages, buffer descriptors, hash tables, etc.
+ *
+ * When max_shared_buffers is configured for online resize, the buffer
+ * arrays are allocated separately (not from the main shmem segment),
+ * so we only include the strategy/hash table sizes here.
  */
 Size
 BufferManagerShmemSize(void)
 {
 	Size		size = 0;
+	bool		using_reserved_memory = (MaxNBuffers > 0 &&
+										 MaxNBuffers > NBuffers);
 
-	/* size of buffer descriptors */
-	size = add_size(size, mul_size(NBuffers, sizeof(BufferDescPadded)));
-	/* to allow aligning buffer descriptors */
-	size = add_size(size, PG_CACHE_LINE_SIZE);
+	if (!using_reserved_memory)
+	{
+		/* Traditional path: everything in main shared memory */
 
-	/* size of data pages, plus alignment padding */
-	size = add_size(size, PG_IO_ALIGN_SIZE);
-	size = add_size(size, mul_size(NBuffers, BLCKSZ));
+		/* size of buffer descriptors */
+		size = add_size(size, mul_size(NBuffers, sizeof(BufferDescPadded)));
+		/* to allow aligning buffer descriptors */
+		size = add_size(size, PG_CACHE_LINE_SIZE);
 
-	/* size of stuff controlled by freelist.c */
+		/* size of data pages, plus alignment padding */
+		size = add_size(size, PG_IO_ALIGN_SIZE);
+		size = add_size(size, mul_size(NBuffers, BLCKSZ));
+
+		/* size of I/O condition variables */
+		size = add_size(size, mul_size(NBuffers,
+									   sizeof(ConditionVariableMinimallyPadded)));
+		/* to allow aligning the above */
+		size = add_size(size, PG_CACHE_LINE_SIZE);
+
+		/* size of checkpoint sort array in bufmgr.c */
+		size = add_size(size, mul_size(NBuffers, sizeof(CkptSortItem)));
+	}
+
+	/* size of stuff controlled by freelist.c (always in main shmem) */
 	size = add_size(size, StrategyShmemSize());
-
-	/* size of I/O condition variables */
-	size = add_size(size, mul_size(NBuffers,
-								   sizeof(ConditionVariableMinimallyPadded)));
-	/* to allow aligning the above */
-	size = add_size(size, PG_CACHE_LINE_SIZE);
-
-	/* size of checkpoint sort array in bufmgr.c */
-	size = add_size(size, mul_size(NBuffers, sizeof(CkptSortItem)));
 
 	return size;
 }

@@ -39,6 +39,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/aio_subsys.h"
+#include "storage/buf_resize.h"
 #include "storage/bufmgr.h"
 #include "storage/dsm.h"
 #include "storage/dsm_registry.h"
@@ -103,6 +104,7 @@ CalculateShmemSize(void)
 	size = add_size(size, dsm_estimate_size());
 	size = add_size(size, DSMRegistryShmemSize());
 	size = add_size(size, BufferManagerShmemSize());
+	size = add_size(size, BufPoolResizeShmemSize());
 	size = add_size(size, LockManagerShmemSize());
 	size = add_size(size, PredicateLockShmemSize());
 	size = add_size(size, ProcGlobalShmemSize());
@@ -201,6 +203,14 @@ CreateSharedMemoryAndSemaphores(void)
 	elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
 
 	/*
+	 * If max_shared_buffers is configured, reserve virtual address space
+	 * for the buffer pool arrays before creating the main shmem segment.
+	 * This sets up the global pointers (BufferDescriptors, BufferBlocks,
+	 * etc.) pointing to separately-mapped memory regions that can grow.
+	 */
+	BufferPoolReserveMemory();
+
+	/*
 	 * Create the shmem segment
 	 */
 	seghdr = PGSharedMemoryCreate(size, &shim);
@@ -276,6 +286,7 @@ CreateOrAttachShmemStructs(void)
 	SUBTRANSShmemInit();
 	MultiXactShmemInit();
 	BufferManagerShmemInit();
+	BufPoolResizeShmemInit();
 
 	/*
 	 * Set up lock manager
