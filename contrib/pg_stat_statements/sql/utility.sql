@@ -116,6 +116,23 @@ COMMIT;
 SELECT calls, rows, query FROM pg_stat_statements ORDER BY query COLLATE "C";
 SELECT pg_stat_statements_reset() IS NOT NULL AS t;
 
+-- Leading comments should not affect query normalization.
+-- Queries that differ only in leading comment content must be grouped
+-- into a single pg_stat_statements entry, with the comment stripped
+-- from the displayed query text.
+/* trace_id=aaa */ BEGIN;
+/* trace_id=aaa */ COMMIT;
+/* trace_id=bbb */ BEGIN;
+/* trace_id=bbb */ COMMIT;
+-- leading SQL comment
+BEGIN;
+-- leading SQL comment
+COMMIT;
+/* nested /* comment */ here */ BEGIN;
+/* nested /* comment */ here */ COMMIT;
+SELECT calls, rows, query FROM pg_stat_statements ORDER BY query COLLATE "C";
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
 -- Two-phase transactions
 BEGIN;
 PREPARE TRANSACTION 'stat_trans1';

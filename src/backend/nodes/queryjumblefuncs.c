@@ -115,9 +115,64 @@ CleanQuerytext(const char *query, int *location, int *len)
 	 * unusual case that the location didn't propagate to here.  But the
 	 * statement length will extend to the end-of-string or terminating
 	 * semicolon, so the second loop often does something useful.
+	 *
+	 * In addition to whitespace, we also skip over leading SQL comments
+	 * here, to match the lexer's behavior of treating comments as whitespace.
+	 * This ensures query text normalization is not affected by leading
+	 * comments such as trace metadata injected by application frameworks.
 	 */
-	while (query_len > 0 && scanner_isspace(query[0]))
-		query++, query_location++, query_len--;
+	while (query_len > 0)
+	{
+		if (scanner_isspace(query[0]))
+		{
+			query++, query_location++, query_len--;
+		}
+		else if (query_len >= 2 && query[0] == '/' && query[1] == '*')
+		{
+			/* skip C-style comment; nesting is supported */
+			int			depth = 1;
+			int			i = 2;
+
+			while (i < query_len && depth > 0)
+			{
+				if (i < query_len - 1 && query[i] == '/' && query[i + 1] == '*')
+				{
+					depth++;
+					i += 2;
+				}
+				else if (i < query_len - 1 && query[i] == '*' && query[i + 1] == '/')
+				{
+					depth--;
+					i += 2;
+				}
+				else
+					i++;
+			}
+			if (depth == 0)
+			{
+				query += i;
+				query_location += i;
+				query_len -= i;
+			}
+			else
+				break;		/* unterminated comment; give up */
+		}
+		else if (query_len >= 2 && query[0] == '-' && query[1] == '-')
+		{
+			/* skip SQL-style comment (to end of line) */
+			int			i = 2;
+
+			while (i < query_len && query[i] != '\n')
+				i++;
+			if (i < query_len)
+				i++;		/* skip the newline too */
+			query += i;
+			query_location += i;
+			query_len -= i;
+		}
+		else
+			break;
+	}
 	while (query_len > 0 && scanner_isspace(query[query_len - 1]))
 		query_len--;
 
