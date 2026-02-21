@@ -118,6 +118,28 @@ COPY_TO_PROGRAM_WRITE    "Waiting to write data to external program"
 
 ---
 
+### 1.5 Server Logging Operations / Observer Effect (HIGH) - [x] RESOLVED
+
+**File:** [`src/backend/utils/error/elog.c`](https://github.com/NikolayS/postgres/blob/master/src/backend/utils/error/elog.c)
+
+**Issue:** Under heavy logging scenarios (e.g., `log_statement='all'`, `logging_collector=on`), backends experience significant I/O bottlenecks when writing to the syslogger pipe or stderr. These uninstrumented `write()` calls cause `pg_stat_activity` to show `wait_event IS NULL`, misleading monitoring tools to report them as active CPU time (The Observer Effect).
+
+| File | Line | Operation | Impact |
+|------|------|-----------|--------|
+| elog.c | [2653](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/error/elog.c#L2653) | `write()` to `stderr` in `write_console()` | Writing to standard error appears as "CPU" load |
+| elog.c | [3494](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/error/elog.c#L3494), [3504](https://github.com/NikolayS/postgres/blob/b9bcd155d9f7c5112ca51eb74194e30f0bdc0b44/src/backend/utils/error/elog.c#L3504) | `write()` to pipe in `write_pipe_chunks()` | Writing to syslogger pipe appears as "CPU" load |
+
+**Proposed Wait Events:**
+```text
+# In WaitEventIO category:
+LOG_FILE_WRITE       "Waiting for a write to the server log file."
+```
+
+**Priority**: HIGH - Creates "Observer Effect" where monitoring tools misattribute wait time as CPU time.
+> Note: PoC patch instrumenting these functions has been submitted to the pgsql-hackers mailing list.
+
+---
+
 ## Category 2: Authentication Operations Missing Wait Events (CRITICAL)
 
 ### 2.1 LDAP Authentication (CRITICAL)
