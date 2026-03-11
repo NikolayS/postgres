@@ -30,6 +30,8 @@ typedef struct QueryCompletion
 {
 	CommandTag	commandTag;
 	uint64		nprocessed;
+	const char *relname;		/* relation name for verbose command tags */
+	const char *nspname;		/* schema name for FQN command tags */
 } QueryCompletion;
 
 
@@ -56,6 +58,14 @@ extern bool command_tag_display_rowcount(CommandTag commandTag);
 extern bool command_tag_event_trigger_ok(CommandTag commandTag);
 extern bool command_tag_table_rewrite_ok(CommandTag commandTag);
 extern CommandTag GetCommandTagEnum(const char *commandname);
+
+/* GUC: command tag format style */
+#define COMMAND_TAG_FORMAT_LEGACY   0   /* INSERT 0 N (default, backward compat) */
+#define COMMAND_TAG_FORMAT_MODERN   1   /* INSERT N (no OID) */
+#define COMMAND_TAG_FORMAT_VERBOSE  2   /* INSERT tablename N */
+#define COMMAND_TAG_FORMAT_FQN      3   /* INSERT schema.tablename N */
+
+extern int command_tag_format;
 extern Size BuildQueryCompletionString(char *buff, const QueryCompletion *qc,
 									   bool nameonly);
 

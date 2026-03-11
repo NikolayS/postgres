@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include "tcop/cmdtag.h"
+#include "utils/guc.h"
 #include "utils/builtins.h"
 
 
@@ -36,11 +37,16 @@ static const CommandTagBehavior tag_behavior[] = {
 
 #undef PG_CMDTAG
 
+/* GUC variable: command tag format style */
+int		command_tag_format = COMMAND_TAG_FORMAT_LEGACY;
+
 void
 InitializeQueryCompletion(QueryCompletion *qc)
 {
 	qc->commandTag = CMDTAG_UNKNOWN;
 	qc->nprocessed = 0;
+	qc->relname = NULL;
+	qc->nspname = NULL;
 }
 
 const char *
@@ -147,8 +153,33 @@ BuildQueryCompletionString(char *buff, const QueryCompletion *qc,
 	{
 		if (tag == CMDTAG_INSERT)
 		{
-			*bufp++ = ' ';
-			*bufp++ = '0';
+			if (command_tag_format == COMMAND_TAG_FORMAT_LEGACY)
+			{
+				/* Legacy: INSERT 0 N */
+				*bufp++ = ' ';
+				*bufp++ = '0';
+			}
+			else if ((command_tag_format == COMMAND_TAG_FORMAT_VERBOSE ||
+					  command_tag_format == COMMAND_TAG_FORMAT_FQN) &&
+					 qc->relname != NULL)
+			{
+				/* Verbose/FQN: INSERT [schema.]table N */
+				*bufp++ = ' ';
+				if (command_tag_format == COMMAND_TAG_FORMAT_FQN &&
+					qc->nspname != NULL)
+				{
+					Size nsplen = strlen(qc->nspname);
+					memcpy(bufp, qc->nspname, nsplen);
+					bufp += nsplen;
+					*bufp++ = '.';
+				}
+				{
+					Size rellen = strlen(qc->relname);
+					memcpy(bufp, qc->relname, rellen);
+					bufp += rellen;
+				}
+			}
+			/* Modern: INSERT N (nothing extra before count) */
 		}
 		*bufp++ = ' ';
 		bufp += pg_ulltoa_n(qc->nprocessed, bufp);

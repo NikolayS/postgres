@@ -474,6 +474,7 @@
   options => 'client_message_level_options',
 },
 
+
 { name => 'cluster_name', type => 'string', context => 'PGC_POSTMASTER', group => 'PROCESS_TITLE',
   short_desc => 'Sets the name of the cluster, which is included in the process title.',
   flags => 'GUC_IS_NAME',
@@ -483,6 +484,15 @@
 },
 
 # we have no microseconds designation, so can't supply units here
+
+{ name => 'command_tag_format', type => 'enum', context => 'PGC_USERSET', group => 'CLIENT_CONN_STATEMENT',
+  short_desc => 'Controls the format of INSERT command completion tags.',
+  long_desc => 'legacy: INSERT 0 N (default, backward compatible). modern: INSERT N (no OID). verbose: INSERT tablename N. fqn: INSERT schema.tablename N.',
+  variable => 'command_tag_format',
+  boot_val => 'COMMAND_TAG_FORMAT_LEGACY',
+  options => 'command_tag_format_options',
+  includes => 'tcop/cmdtag.h',
+},
 { name => 'commit_delay', type => 'int', context => 'PGC_SUSET', group => 'WAL_SETTINGS',
   short_desc => 'Sets the delay in microseconds between transaction commit and flushing WAL to disk.',
   variable => 'CommitDelay',
