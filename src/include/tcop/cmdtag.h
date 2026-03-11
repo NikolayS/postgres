@@ -61,9 +61,8 @@ extern CommandTag GetCommandTagEnum(const char *commandname);
 
 /* GUC: command tag format style */
 #define COMMAND_TAG_FORMAT_LEGACY   0   /* INSERT 0 N (default, backward compat) */
-#define COMMAND_TAG_FORMAT_MODERN   1   /* INSERT N (no OID) */
-#define COMMAND_TAG_FORMAT_VERBOSE  2   /* INSERT tablename N */
-#define COMMAND_TAG_FORMAT_FQN      3   /* INSERT schema.tablename N */
+#define COMMAND_TAG_FORMAT_VERBOSE  1   /* INSERT tablename N */
+#define COMMAND_TAG_FORMAT_FQN      2   /* INSERT schema.tablename N */
 
 extern int command_tag_format;
 extern Size BuildQueryCompletionString(char *buff, const QueryCompletion *qc,

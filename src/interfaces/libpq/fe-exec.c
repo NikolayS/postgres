@@ -3847,18 +3847,12 @@ PQcmdTuples(PGresult *res)
 	if (strncmp(res->cmdStatus, "INSERT ", 7) == 0)
 	{
 		p = res->cmdStatus + 7;
-		/* INSERT: handle both "INSERT oid count" and "INSERT count" */
-		{
-			char *q = p;
-			while (*q && *q != ' ')
-				q++;
-			if (*q == ' ')
-			{
-				/* Old format: "INSERT oid count" - skip oid and space */
-				p = q + 1;
-			}
-			/* else: new format "INSERT count" - p already points to count */
-		}
+		/* INSERT: skip oid and space */
+		while (*p && *p != ' ')
+			p++;
+		if (*p == 0)
+			goto interpret_error;	/* no space? */
+		p++;
 	}
 	else if (strncmp(res->cmdStatus, "SELECT ", 7) == 0 ||
 			 strncmp(res->cmdStatus, "DELETE ", 7) == 0 ||

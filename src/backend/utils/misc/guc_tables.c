@@ -152,9 +152,8 @@ static const struct config_enum_entry client_message_level_options[] = {
 
 static const struct config_enum_entry command_tag_format_options[] = {
 	{"legacy", 0, false},
-	{"modern", 1, false},
-	{"verbose", 2, false},
-	{"fqn", 3, false},
+	{"verbose", 1, false},
+	{"fqn", 2, false},
 	{NULL, 0, false}
 };
 

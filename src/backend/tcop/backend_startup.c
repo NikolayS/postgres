@@ -783,11 +783,13 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 				 */
 				if (strcmp(nameptr, "_pq_.command_tag_format") == 0)
 				{
-					/* Map protocol option to GUC */
-					port->guc_options = lappend(port->guc_options,
-												pstrdup("command_tag_format"));
-					port->guc_options = lappend(port->guc_options,
-												pstrdup(valptr));
+					/*
+					 * Protocol-level option: store for deferred application
+					 * in process_startup_options() after GUC init.  This
+					 * is NOT added to guc_options so that old-style
+					 * options=-c cannot set it (GUC is PGC_INTERNAL).
+					 */
+					port->pq_command_tag_format = pstrdup(valptr);
 				}
 				else
 				{
