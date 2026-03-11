@@ -778,12 +778,22 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 			else if (strncmp(nameptr, "_pq_.", 5) == 0)
 			{
 				/*
-				 * Any option beginning with _pq_. is reserved for use as a
-				 * protocol-level option, but at present no such options are
-				 * defined.
+				 * Options beginning with _pq_. are protocol-level options.
+				 * Recognized options are mapped to their corresponding GUCs.
 				 */
-				unrecognized_protocol_options =
-					lappend(unrecognized_protocol_options, pstrdup(nameptr));
+				if (strcmp(nameptr, "_pq_.command_tag_format") == 0)
+				{
+					/* Map protocol option to GUC */
+					port->guc_options = lappend(port->guc_options,
+												pstrdup("command_tag_format"));
+					port->guc_options = lappend(port->guc_options,
+												pstrdup(valptr));
+				}
+				else
+				{
+					unrecognized_protocol_options =
+						lappend(unrecognized_protocol_options, pstrdup(nameptr));
+				}
 			}
 			else
 			{

@@ -487,7 +487,8 @@
 
 { name => 'command_tag_format', type => 'enum', context => 'PGC_USERSET', group => 'CLIENT_CONN_STATEMENT',
   short_desc => 'Controls the format of INSERT command completion tags.',
-  long_desc => 'legacy: INSERT 0 N (default, backward compatible). modern: INSERT N (no OID). verbose: INSERT tablename N. fqn: INSERT schema.tablename N.',
+  long_desc => 'legacy: INSERT 0 N (default, backward compatible). modern: INSERT N (no OID). verbose: INSERT tablename N. fqn: INSERT schema.tablename N. Can be set via _pq_.command_tag_format startup parameter for protocol-level negotiation.',
+  flags => 'GUC_REPORT',
   variable => 'command_tag_format',
   boot_val => 'COMMAND_TAG_FORMAT_LEGACY',
   options => 'command_tag_format_options',
