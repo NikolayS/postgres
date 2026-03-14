@@ -111,6 +111,10 @@ After extensive searching of pgsql-hackers archives, the PostgreSQL wiki, commit
 - People have thought about it but self-censored knowing the community's conservatism
 - The idea has been floated informally but never reached a formal RFC
 
+The closest thread on postgresql.org mentioning "psql plugin" is a [2012 discussion](https://www.postgresql.org/message-id/CA+OCxoyfTFeAgsLzKruq_TL2F-UtAKVSHk0bLZCo5Jb=JPNAtA@mail.gmail.com) about embedding a psql terminal *inside pgAdmin3* as a plugin — not about making psql itself extensible. Dave Page clarified: "The SQL window isn't intended to replicate the features of psql — it has its own feature set."
+
+The **PostgreSQL TODO wiki** has no extensibility items for psql. All 9 current psql TODOs are incremental improvements (whitespace wrapping, tab completion speed, Unicode grapheme clusters).
+
 ### 3.2 The `\if` Saga — How Hard It Is to Add Anything to psql
 
 The most instructive precedent is the addition of `\if`/`\elif`/`\else`/`\endif` in PostgreSQL 10 (2017). This relatively simple feature:
@@ -130,17 +134,29 @@ This shows that even adding conditional branching — a standard scripting featu
 
 ### 3.3 `\crosstabview` — Adding a Single Display Mode
 
-Added in PostgreSQL 9.6, this was a significant effort tracked across two commitfest entries ([CF 8/372](https://commitfest.postgresql.org/8/372/) and [CF 9/521](https://commitfest.postgresql.org/9/521/)). Adding one display mode required a new file (`crosstabview.c`) and integration with the query result pipeline. It's a concrete example of how even a self-contained feature requires deep knowledge of psql internals.
+Added in PostgreSQL 9.6 by Daniel Verite, tracked across two commitfest entries ([CF 8/372](https://commitfest.postgresql.org/8/372/) and [CF 9/521](https://commitfest.postgresql.org/9/521/)). Pavel Stehule noted Daniel "accepted and fixed all his objections." The patch modified `command.c`, `common.c`, and added entirely new files `crosstabview.c` and `crosstabview.h`. Demonstrates tight coupling: adding one display mode required touching the command dispatcher, the execution layer, documentation, and creating new source files compiled into the binary.
 
 ### 3.4 `\watch` Enhancements — Incremental Improvements Take Years
 
-`\watch` was added in PostgreSQL 9.3, enhanced in PostgreSQL 16 (stop after N iterations), and further enhanced in PostgreSQL 17 (minimum row count). Each improvement was a separate multi-month review cycle. The incremental pace is striking.
+`\watch` was added in PostgreSQL 9.3 (Tom Lane, patch by Will Leinweber, reviewed by Peter Eisentraut and Daniel Farina), enhanced in PostgreSQL 16 (stop after N iterations), PostgreSQL 17 (minimum row count), and PostgreSQL 18 (default interval setting). Each improvement was a separate multi-month review cycle spanning **5 major releases over 12 years**.
 
-### 3.5 Embedded Scripting Language — Never Seriously Proposed
+### 3.5 Pipeline Mode — 4 Years from libpq API to psql Commands
+
+PostgreSQL 18 (2025) added `\startpipeline`, `\endpipeline`, `\syncpipeline`, and `\getresults`. The libpq pipeline API existed since PostgreSQL 14 (2021). It took **4 years** for it to surface as psql commands — illustrating the gap between what libpq can do programmatically and what psql exposes.
+
+### 3.6 psql Variable Hooks (2017) — Internal Only
+
+The [most relevant thread about "hooks" in psql](https://postgrespro.com/list/thread-id/2157116) (Tom Lane, Daniel Verite, Stephen Frost, Rahila Syed) was about internal C function-pointer hooks for variable assignment validation — **not** an extensibility mechanism for external code. Tom Lane discovered the change broke RedisFDW's test script, noting: "If it's just that script I would be okay with saying 'well, it's a bug in that script' ... but I'm a bit worried that this may be the tip of the iceberg."
+
+### 3.7 Embedded Scripting Language — Never Seriously Proposed
 
 No thread was found proposing to embed Lua, Python, or any scripting language into psql. The community's approach has been purely incremental: `\set` variables, `\if` conditionals, backtick shell expansion. The philosophy is "do the heavy lifting on the server side."
 
-### 3.6 Robert Haas on Difficulty of Contributing (2024)
+### 3.8 `.psqlrc` — The Extent of Client Customization
+
+A [2008 thread](http://postgresqlorg.blogspot.com/2008/07/re-hackers-psqlrc-output-for-pset.html) (Bruce Momjian, Gregory Stark) about `.psqlrc` output behavior illustrates the limited customization surface. `.psqlrc` can only run existing backslash commands sequentially — there is no way to define new commands, register callbacks, or load modules. This is all that's ever been sanctioned for psql customization.
+
+### 3.9 Robert Haas on Difficulty of Contributing (2024)
 
 Robert Haas's blog post "[Hacking on PostgreSQL is Really Hard](http://rhaas.blogspot.com/2024/05/hacking-on-postgresql-is-really-hard.html)" (May 2024) describes the structural challenge:
 
@@ -271,7 +287,10 @@ Given the 3-5 year minimum timeline for upstream acceptance, the pragmatic path 
 ### PostgreSQL Mailing List Threads
 - [\if/\elif/\else/\endif commit](https://www.postgresql.org/message-id/E1ctdQB-0007J0-VU@gemulon.postgresql.org) (March 2017)
 - [\if discussion thread](https://postgrespro.com/list/thread-id/2301542) (2016-2017)
-- [Extending PostgreSQL Protocol with Command Metadata](https://www.mail-archive.com/pgsql-hackers@lists.postgresql.org/msg204501.html)
+- [psql variable hooks discussion](https://postgrespro.com/list/thread-id/2157116) (2017)
+- ["Plugin For Console" thread](https://www.postgresql.org/message-id/CA+OCxoyfTFeAgsLzKruq_TL2F-UtAKVSHk0bLZCo5Jb=JPNAtA@mail.gmail.com) (2012, about embedding psql in pgAdmin, not psql extensibility)
+- [Extending PostgreSQL Protocol with Command Metadata](https://www.mail-archive.com/pgsql-hackers@lists.postgresql.org/msg204501.html) (2024)
+- [.psqlrc output behavior](http://postgresqlorg.blogspot.com/2008/07/re-hackers-psqlrc-output-for-pset.html) (2008, Bruce Momjian)
 
 ### Blog Posts
 - [Robert Haas: Hacking on PostgreSQL is Really Hard](http://rhaas.blogspot.com/2024/05/hacking-on-postgresql-is-really-hard.html) (May 2024)
@@ -293,8 +312,28 @@ Given the 3-5 year minimum timeline for upstream acceptance, the pragmatic path 
 - `src/bin/psql/variables.c:384` — SetVariableHooks() (internal-only hook mechanism)
 - `src/bin/psql/startup.c:852` — Variable hook functions (20+ internal hooks, none external)
 
+### Conference Talks and Presentations
+- [FOSDEM '21: Getting on a Hook — PostgreSQL Extensibility](https://archive.fosdem.org/2021/schedule/event/postgresql_extensibility/) — covers server hooks, notes community resistance to ad-hoc extension points
+- [Hooks in PostgreSQL (wiki PDF)](https://wiki.postgresql.org/images/e/e3/Hooks_in_postgresql.pdf)
+
 ### Alternative Tools
 - [pgcli](https://github.com/dbcli/pgcli) — 12K+ stars, Python, modern CLI
 - [pgcli vs psql comparison](https://github.com/dbcli/pgcli/issues/110)
 - [Timescale: 13 Tools That Aren't psql](https://www.timescale.com/blog/state-of-postgresql-2022-13-tools-that-arent-psql)
+- [PostgreSQL Clients wiki page](https://wiki.postgresql.org/wiki/PostgreSQL_Clients)
 - [taminomara/psql-hooks](https://github.com/taminomara/psql-hooks) — Unofficial docs for server-side hooks (note: server hooks, not client hooks)
+- [Psqlrc wiki page](https://wiki.postgresql.org/wiki/Psqlrc) — the only sanctioned customization mechanism
+- [ExtensionPackaging wiki](https://wiki.postgresql.org/wiki/ExtensionPackaging) — server-side extension design discussion (no client equivalent exists)
+
+### psql Feature Commit History
+- `\watch` (PG 9.3, 2013): Tom Lane / Will Leinweber — [blog](https://paquier.xyz/postgresql-2/postgres-9-3-feature-highlight-watch-in-psql/)
+- `\crosstabview` (PG 9.6, 2016): Daniel Verite — [wiki](https://wiki.postgresql.org/wiki/Crosstabview)
+- `\if`/`\elif`/`\else`/`\endif` (PG 10, 2017): Corey Huinker / Tom Lane — [commit](https://www.postgresql.org/message-id/E1ctdQB-0007J0-VU@gemulon.postgresql.org)
+- Pipeline mode (PG 18, 2025): `\startpipeline`, `\endpipeline`, etc. — [blog](https://postgresql.verite.pro/blog/2025/10/01/psql-pipeline.html)
+
+### Key Community Members for psql
+- **Tom Lane**: Primary committer for psql features, did "further hacking" on `\if`
+- **Fabien Coelho**: Key psql reviewer, [describes interest in "client-side applications"](https://postgresql.life/post/fabien_coelho/)
+- **Corey Huinker**: Author of `\if` conditional scripting
+- **Daniel Verite**: Author of `\crosstabview`
+- **Pavel Stehule**: Frequent psql patch reviewer
