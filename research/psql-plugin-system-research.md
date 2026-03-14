@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-After 25+ years, PostgreSQL's `psql` client remains a monolithic, non-extensible C application. Despite the PostgreSQL server having 26+ hook points and a mature extension system (`CREATE EXTENSION` since 9.1), the client has zero plugin infrastructure. No formal proposal for a psql plugin/extension system has ever been submitted to pgsql-hackers. This document analyzes the technical, cultural, and strategic reasons why, and what it would take to change that.
+After 25+ years, PostgreSQL's `psql` client remains a monolithic, non-extensible C application. Despite the PostgreSQL server having 26+ hook points and a mature extension system (`CREATE EXTENSION` since 9.1), the client has zero plugin infrastructure. No formal RFC, patch, or commitfest entry for a psql plugin/extension system has been found on pgsql-hackers — though related client-side extensibility ideas surfaced in 2008 (libpq object hooks by Merlin Moncure) and people have worked around the limitation via `\set`-based aliasing hacks, the pspg pager pattern, and by building entirely separate tools (pgcli, rpg). The absence of a formal proposal likely reflects community self-censorship given PostgreSQL's conservative culture more than lack of interest. This document analyzes the technical, cultural, and strategic reasons why, and what it would take to change that.
 
 ---
 
@@ -271,13 +271,15 @@ At PostgreSQL's pace, this is a **2-4 release cycle effort** (PG 20-22, ~2027-20
 
 ## 7. Strategic Assessment
 
-### 7.1 Why It's Never Been Proposed
+### 7.1 Why No Formal Proposal Has Appeared
 
-1. **No champion**: No PostgreSQL committer has personal motivation to sponsor this
-2. **High cost, diffuse benefit**: The plugin system benefits third parties (pgcli, rpg) more than PostgreSQL core
-3. **"Not broken" perception**: psql works fine for its intended purpose (interactive SQL)
-4. **Security objections are easy**: "Loading arbitrary .so files" is a conversation-stopper
-5. **Incremental approach preferred**: The community would rather add one feature at a time (\if, \watch, \crosstabview) than create a framework
+1. **Self-censorship**: People who want extensibility build separate tools (pgcli, rpg, pspg) rather than fight the uphill battle on pgsql-hackers. Multiple community members have noted that "getting stuff into forks/plugins of PG is orders of magnitude easier than the kernel itself"
+2. **No champion**: No PostgreSQL committer has personal motivation to sponsor this
+3. **High cost, diffuse benefit**: The plugin system benefits third parties (pgcli, rpg) more than PostgreSQL core
+4. **"Not broken" perception**: psql works fine for its intended purpose (interactive SQL)
+5. **Security objections are easy**: "Loading arbitrary .so files" is a conversation-stopper
+6. **Incremental approach preferred**: The community would rather add one feature at a time (\if, \watch, \crosstabview) than create a framework
+7. **The 2008 libpq hooks precedent**: Even narrow client-side extensibility proposals (Moncure's libpq object hooks) were not adopted — discouraging broader proposals
 
 ### 7.2 What Would Make It Succeed
 
