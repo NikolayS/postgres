@@ -113,7 +113,17 @@ After extensive searching of pgsql-hackers archives, the PostgreSQL wiki, commit
 
 The closest thread on postgresql.org mentioning "psql plugin" is a [2012 discussion](https://www.postgresql.org/message-id/CA+OCxoyfTFeAgsLzKruq_TL2F-UtAKVSHk0bLZCo5Jb=JPNAtA@mail.gmail.com) about embedding a psql terminal *inside pgAdmin3* as a plugin — not about making psql itself extensible. Dave Page clarified: "The SQL window isn't intended to replicate the features of psql — it has its own feature set."
 
-The **PostgreSQL TODO wiki** has no extensibility items for psql. All 9 current psql TODOs are incremental improvements (whitespace wrapping, tab completion speed, Unicode grapheme clusters).
+The **PostgreSQL TODO wiki** has no extensibility items for psql. All 9 current psql TODOs are incremental improvements (whitespace wrapping, tab completion speed, Unicode grapheme clusters). The closest item — "Move psql backslash database information into the backend" — would actually *reduce* psql's responsibilities rather than extend them.
+
+### 3.2a libpq Object Hooks (2008) — The Closest Client-Side Extensibility Proposal
+
+In May 2008, **Merlin Moncure** proposed [`PQhookData(conn, hookname)`](https://www.postgresql.org/message-id/482C77E5.1060500@esilo.com) and `PQresultHookData(result, hookName)` functions for libpq — letting third-party libraries attach private state to connection and result objects. This is the closest thing to a "client-side plugin" proposal in PostgreSQL's history.
+
+**Tom Lane responded** that the hook-name-based approach was "broken-by-design" because independent libraries could choose conflicting names. He proposed using the address of the hook callback function as a key instead.
+
+In the same year, **Andrew Chernow** proposed [changes to libpq adding Object Hook registration](https://postgrespro.com/list/thread-id/2015631) and custom PGresult creation. Neither proposal was adopted into core.
+
+These were about libpq (used by all clients), not psql specifically, and both were narrow in scope. But they show that client-side extensibility was at least *considered* in 2008 and went nowhere.
 
 ### 3.2 The `\if` Saga — How Hard It Is to Add Anything to psql
 
@@ -205,10 +215,16 @@ Loading arbitrary shared libraries in a client tool raises supply chain security
 | **pgAdmin** | Python/JS | Full GUI because psql can't render visual query plans, ERDs, dashboards |
 | **DBeaver** | Java | Universal database client because psql is Postgres-only and non-extensible |
 | **rpg** | Rust | AI integration, DBA diagnostics, skill connectors — features that require lifecycle hooks psql doesn't have |
-| **psql wrappers** (pspg, etc.) | Various | Pager enhancements, output formatting — work around psql's limited output pipeline |
+| **pspg** | C | Pavel Stehule's pager (2017) — frozen rows/columns, color themes, searching, clipboard. The most successful example of extending psql *externally* via `PSQL_PAGER` env var |
 | **usql** | Go | Universal SQL client for multiple databases |
 
 Each of these tools represents unmet demand for psql extensibility. pgcli alone has 12K+ GitHub stars.
+
+The **pspg** case is especially instructive: it exemplifies the only real "plugin" pattern available for psql — external tools connected via Unix pipes and environment variables (`PSQL_PAGER`, `PSQL_WATCH_PAGER`, `\o |command`, `\! command`). Pavel Stehule [announced it in 2017](http://okbob.blogspot.com/2017/07/i-hope-so-every-who-uses-psql-uses-less.html).
+
+### 5.1 MySQL Has a Client Plugin System — PostgreSQL Does Not
+
+For contrast: MySQL has a formal client plugin architecture supporting authentication plugins, protocol trace plugins, and connection attribute plugins via `dlopen`-style loading. PostgreSQL's psql has no equivalent. The PostgreSQL project chose to invest exclusively in server-side extensibility.
 
 ---
 
@@ -285,11 +301,15 @@ Given the 3-5 year minimum timeline for upstream acceptance, the pragmatic path 
 ## References
 
 ### PostgreSQL Mailing List Threads
+- [libpq Object Hooks proposal](https://www.postgresql.org/message-id/482C77E5.1060500@esilo.com) (May 2008, Merlin Moncure / Tom Lane — closest to client-side extensibility)
+- [libpq pqtypes Hook API](https://postgrespro.com/list/thread-id/2015631) (2008, Andrew Chernow)
 - [\if/\elif/\else/\endif commit](https://www.postgresql.org/message-id/E1ctdQB-0007J0-VU@gemulon.postgresql.org) (March 2017)
 - [\if discussion thread](https://postgrespro.com/list/thread-id/2301542) (2016-2017)
 - [psql variable hooks discussion](https://postgrespro.com/list/thread-id/2157116) (2017)
+- [\gexec proposal](https://www.postgresql.org/message-id/CADkLM=exRzVQu31kjaBPzpbu_rGUTtWDTNELNysg1ChEPSpDMQ@mail.gmail.com) (2016, Corey Huinker)
 - ["Plugin For Console" thread](https://www.postgresql.org/message-id/CA+OCxoyfTFeAgsLzKruq_TL2F-UtAKVSHk0bLZCo5Jb=JPNAtA@mail.gmail.com) (2012, about embedding psql in pgAdmin, not psql extensibility)
 - [Extending PostgreSQL Protocol with Command Metadata](https://www.mail-archive.com/pgsql-hackers@lists.postgresql.org/msg204501.html) (2024)
+- [Per-connection auth hooks in libpq](http://www.mail-archive.com/pgsql-hackers@lists.postgresql.org/msg221307.html) (Feb 2026, Andreas Karlsson / Jacob Champion — "global is bad, per-connection is what we would ideally allow")
 - [.psqlrc output behavior](http://postgresqlorg.blogspot.com/2008/07/re-hackers-psqlrc-output-for-pset.html) (2008, Bruce Momjian)
 
 ### Blog Posts
@@ -315,6 +335,8 @@ Given the 3-5 year minimum timeline for upstream acceptance, the pragmatic path 
 ### Conference Talks and Presentations
 - [FOSDEM '21: Getting on a Hook — PostgreSQL Extensibility](https://archive.fosdem.org/2021/schedule/event/postgresql_extensibility/) — covers server hooks, notes community resistance to ad-hoc extension points
 - [Hooks in PostgreSQL (wiki PDF)](https://wiki.postgresql.org/images/e/e3/Hooks_in_postgresql.pdf)
+- [Corey Huinker: "Getting By With Just psql" — PGConf EU 2017](https://www.postgresql.eu/events/pgconfeu2017/sessions/session/1592/slides/11/Getting%20By%20With%20Just%20psql.pdf) — demonstrated \gexec and \if but did not propose a plugin system
+- [Stephen Frost: "Hacking PostgreSQL" — PGConf EU 2018](https://www.postgresql.eu/events/pgconfeu2018/sessions/session/2058/slides/96/hackingpg-present.pdf) — reinforced that adding psql functionality requires modifying and recompiling C source
 
 ### Alternative Tools
 - [pgcli](https://github.com/dbcli/pgcli) — 12K+ stars, Python, modern CLI
@@ -336,4 +358,5 @@ Given the 3-5 year minimum timeline for upstream acceptance, the pragmatic path 
 - **Fabien Coelho**: Key psql reviewer, [describes interest in "client-side applications"](https://postgresql.life/post/fabien_coelho/)
 - **Corey Huinker**: Author of `\if` conditional scripting
 - **Daniel Verite**: Author of `\crosstabview`
-- **Pavel Stehule**: Frequent psql patch reviewer
+- **Pavel Stehule**: Frequent psql patch reviewer, author of pspg pager
+- **Merlin Moncure**: Proposed libpq object hooks (2008) — the closest client-side extensibility proposal
