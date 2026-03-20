@@ -5748,9 +5748,9 @@ match_previous_words(int pattern_id,
 	else if (TailMatchesCS("\\pset", MatchAny))
 	{
 		if (TailMatchesCS("format"))
-			COMPLETE_WITH_CS("aligned", "asciidoc", "csv", "html", "latex",
-							 "latex-longtable", "troff-ms", "unaligned",
-							 "wrapped");
+			COMPLETE_WITH_CS("aligned", "asciidoc", "csv", "html", "json",
+							 "latex", "latex-longtable", "troff-ms",
+							 "unaligned", "wrapped");
 		else if (TailMatchesCS("xheader_width"))
 			COMPLETE_WITH_CS("full", "column", "page");
 		else if (TailMatchesCS("linestyle"))
