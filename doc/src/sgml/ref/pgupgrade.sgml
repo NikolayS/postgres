@@ -833,14 +833,15 @@ psql --username=postgres --file=script.sql postgres
     <para>
      Unless the <option>--no-statistics</option> option is specified,
      <command>pg_upgrade</command> will transfer most optimizer statistics
-     from the old cluster to the new cluster.  Because the new cluster's
+     from the old cluster to the new cluster.  This works regardless of
+     the old cluster's major version, because the new cluster's
      <command>pg_dump</command> reads statistics from standard catalog views
-     (e.g., <structname>pg_stats</structname>) in the old cluster, this
-     works regardless of the old cluster's major version.
-     This does not transfer
-     all statistics, such as those created explicitly with
-     <xref linkend="sql-createstatistics"/>, custom statistics added by
-     an extension, or statistics collected by the cumulative statistics system.
+     (<structname>pg_class</structname> and <structname>pg_stats</structname>)
+     that exist in all supported <productname>PostgreSQL</productname>
+     versions.  However, some statistics are not transferred: those created
+     with <xref linkend="sql-createstatistics"/>, custom statistics added by
+     an extension, and statistics collected by the cumulative statistics
+     system.
     </para>
 
     <para>
