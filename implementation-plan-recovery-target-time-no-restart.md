@@ -3,6 +3,39 @@
 **Version**: 2
 **Last updated**: 2026-03-26
 
+## Implementation Progress
+
+### Patch 1: GUC Safety Cleanup
+- [x] 1.1 Change GUC context to PGC_SIGHUP in guc_parameters.dat
+- [x] 1.2 Add target_type_conflict_exists() helper function
+- [x] 1.3 Add parse_recovery_target_time_safe() shared helper
+- [x] 1.4 Rewrite check_recovery_target_time() with safe parsing and conflict check
+- [x] 1.5 Simplify assign_recovery_target_time() (remove error_throwing)
+- [x] 1.6 Update validateRecoveryParameters() to use shared parser
+
+### Patch 2: Paused-Target-Forward-Resume Semantics
+- [x] 2.1 Add RecoveryPauseReason enum to xlogrecovery.h
+- [x] 2.2 Add pause reason state management functions
+- [x] 2.3 Modify recoveryPausesHere() for target-change detection
+- [x] 2.4 Add redo label and goto for replay loop re-entry
+- [x] 2.5 Add logging for target-change resume events
+
+### Documentation
+- [x] Update config.sgml (SIGHUP context, reload behavior, timezone note)
+
+### Testing
+- [x] Write TAP test (9 assertions covering 5 core scenarios)
+- [x] Build and compile successfully (Docker debian:bookworm)
+- [x] Run TAP tests in Docker container — ALL PASS
+- [x] Verified: pause at target, advance target, resume, re-pause
+- [x] Verified: same/earlier target reload is no-op
+- [x] Verified: pg_wal_replay_resume() promotes (not re-enter replay)
+- [x] Verified: mutual exclusion of recovery target types
+
+### Integration
+- [x] Post testing evidence to PR #22
+- [x] Update spec doc with final status
+
 ## Changelog
 
 ### v2 (2026-03-26) — Post-review revision

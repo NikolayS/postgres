@@ -4422,7 +4422,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
       <varname>recovery_target_time</varname>, or <varname>recovery_target_xid</varname>
       can be used; if more than one of these is specified in the configuration
       file, an error will be raised.
-      These parameters can only be set at server start.
+      These parameters can only be set at server start, except for
+      <varname>recovery_target_time</varname> which can also be changed by
+      reloading the configuration.
      </para>
 
      <variablelist>
@@ -4482,6 +4484,30 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         earlier in the configuration file).  Preferred style is to use a
         numeric offset from UTC, or you can write a full time zone name,
         e.g., <literal>Europe/Helsinki</literal> not <literal>EEST</literal>.
+       </para>
+
+       <para>
+        Unlike the other recovery target parameters, this parameter can be
+        changed by reloading the server configuration (for example, via
+        <function>pg_reload_conf()</function>) without requiring a server
+        restart.
+       </para>
+
+       <para>
+        The value is re-parsed under the current
+        <xref linkend="guc-timezone"/> setting on each reload.  To avoid
+        ambiguity, use an explicit time zone offset, e.g.,
+        <literal>'2024-01-15 10:30:00+00'</literal>, to ensure deterministic
+        behavior regardless of the server's timezone configuration.
+       </para>
+
+       <para>
+        When <xref linkend="guc-recovery-target-action"/> is set to
+        <literal>pause</literal> and recovery is paused at the target,
+        changing <varname>recovery_target_time</varname> to a later value
+        and reloading the configuration will automatically resume WAL replay
+        toward the new target.  Setting it to an equal or earlier value while
+        paused is a no-op.
        </para>
       </listitem>
      </varlistentry>
