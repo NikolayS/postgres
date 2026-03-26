@@ -2487,7 +2487,7 @@
   assign_hook => 'assign_recovery_target_name',
 },
 
-{ name => 'recovery_target_time', type => 'string', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_time', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets the time stamp up to which recovery will proceed.',
   variable => 'recovery_target_time_string',
   boot_val => '""',

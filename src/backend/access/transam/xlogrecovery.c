@@ -364,6 +364,8 @@ static char *getRecoveryStopReason(void);
 static void recoveryPausesHere(bool endOfRecovery);
 static bool recoveryApplyDelay(XLogReaderState *record);
 static void ConfirmRecoveryPaused(void);
+static bool parse_recovery_target_time_safe(const char *str,
+											TimestampTz *result);
 
 static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
 							  int emode, bool fetching_ckpt,
@@ -1105,10 +1107,12 @@ validateRecoveryParameters(void)
 	 */
 	if (recoveryTarget == RECOVERY_TARGET_TIME)
 	{
-		recoveryTargetTime = DatumGetTimestampTz(DirectFunctionCall3(timestamptz_in,
-																	 CStringGetDatum(recovery_target_time_string),
-																	 ObjectIdGetDatum(InvalidOid),
-																	 Int32GetDatum(-1)));
+		if (!parse_recovery_target_time_safe(recovery_target_time_string,
+											 &recoveryTargetTime))
+			ereport(FATAL,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("could not parse recovery target time \"%s\"",
+							recovery_target_time_string)));
 	}
 
 	/*
@@ -1638,6 +1642,7 @@ PerformWalRecovery(void)
 	XLogRecoveryCtl->recoveryLastXTime = 0;
 	XLogRecoveryCtl->currentChunkStartTime = 0;
 	XLogRecoveryCtl->recoveryPauseState = RECOVERY_NOT_PAUSED;
+	XLogRecoveryCtl->recoveryPauseReason = RECOVERY_PAUSE_NONE;
 	SpinLockRelease(&XLogRecoveryCtl->info_lck);
 
 	/* Also ensure XLogReceiptTime has a sane value */
@@ -1707,6 +1712,7 @@ PerformWalRecovery(void)
 		/*
 		 * main redo apply loop
 		 */
+redo:
 		do
 		{
 			if (!StandbyMode)
@@ -1830,9 +1836,23 @@ PerformWalRecovery(void)
 
 				case RECOVERY_TARGET_ACTION_PAUSE:
 					SetRecoveryPause(true);
+					SetRecoveryPauseReason(RECOVERY_PAUSE_AT_TARGET);
 					recoveryPausesHere(true);
 
-					/* drop into promote */
+					/*
+					 * If we unpaused because recovery_target_time was
+					 * advanced, continue WAL replay toward the new target
+					 * rather than proceeding to promotion.
+					 */
+					if (GetRecoveryPauseReason() == RECOVERY_PAUSE_AT_TARGET)
+					{
+						ereport(LOG,
+								(errmsg("resuming WAL replay toward new recovery target time %s",
+										timestamptz_to_str(recoveryTargetTime))));
+						reachedRecoveryTarget = false;
+						goto redo;
+					}
+					/* pg_wal_replay_resume() was called -- proceed to promote */
 					pg_fallthrough;
 
 				case RECOVERY_TARGET_ACTION_PROMOTE:
@@ -2898,6 +2918,8 @@ getRecoveryStopReason(void)
 static void
 recoveryPausesHere(bool endOfRecovery)
 {
+	TimestampTz pausedAtTime = recoveryStopTime;
+
 	/* Don't pause unless users can connect! */
 	if (!LocalHotStandbyActive)
 		return;
@@ -2921,6 +2943,23 @@ recoveryPausesHere(bool endOfRecovery)
 		ProcessStartupProcInterrupts();
 		if (CheckForStandbyTrigger())
 			return;
+
+		/*
+		 * If recovery_target_time was changed via SIGHUP to a value strictly
+		 * later than where we paused, resume replay toward the new target.
+		 */
+		if (endOfRecovery &&
+			recoveryTarget == RECOVERY_TARGET_TIME &&
+			timestamptz_cmp_internal(recoveryTargetTime, pausedAtTime) > 0)
+		{
+			SetRecoveryPause(false);
+			SetRecoveryPauseReason(RECOVERY_PAUSE_AT_TARGET);
+			ereport(LOG,
+					(errmsg("recovery target time advanced from %s to %s, resuming WAL replay",
+							timestamptz_to_str(pausedAtTime),
+							timestamptz_to_str(recoveryTargetTime))));
+			break;
+		}
 
 		/*
 		 * If recovery pause is requested then set it paused.  While we are in
@@ -3066,7 +3105,10 @@ SetRecoveryPause(bool recoveryPause)
 	SpinLockAcquire(&XLogRecoveryCtl->info_lck);
 
 	if (!recoveryPause)
+	{
 		XLogRecoveryCtl->recoveryPauseState = RECOVERY_NOT_PAUSED;
+		XLogRecoveryCtl->recoveryPauseReason = RECOVERY_PAUSE_NONE;
+	}
 	else if (XLogRecoveryCtl->recoveryPauseState == RECOVERY_NOT_PAUSED)
 		XLogRecoveryCtl->recoveryPauseState = RECOVERY_PAUSE_REQUESTED;
 
@@ -3087,6 +3129,32 @@ ConfirmRecoveryPaused(void)
 	SpinLockAcquire(&XLogRecoveryCtl->info_lck);
 	if (XLogRecoveryCtl->recoveryPauseState == RECOVERY_PAUSE_REQUESTED)
 		XLogRecoveryCtl->recoveryPauseState = RECOVERY_PAUSED;
+	SpinLockRelease(&XLogRecoveryCtl->info_lck);
+}
+
+/*
+ * Get the reason for the current recovery pause.
+ */
+RecoveryPauseReason
+GetRecoveryPauseReason(void)
+{
+	RecoveryPauseReason reason;
+
+	SpinLockAcquire(&XLogRecoveryCtl->info_lck);
+	reason = XLogRecoveryCtl->recoveryPauseReason;
+	SpinLockRelease(&XLogRecoveryCtl->info_lck);
+
+	return reason;
+}
+
+/*
+ * Set the reason for the current recovery pause.
+ */
+void
+SetRecoveryPauseReason(RecoveryPauseReason reason)
+{
+	SpinLockAcquire(&XLogRecoveryCtl->info_lck);
+	XLogRecoveryCtl->recoveryPauseReason = reason;
 	SpinLockRelease(&XLogRecoveryCtl->info_lck);
 }
 
@@ -4900,19 +4968,86 @@ assign_recovery_target_name(const char *newval, void *extra)
 }
 
 /*
- * GUC check_hook for recovery_target_time
+ * parse_recovery_target_time_safe
  *
- * The interpretation of the recovery_target_time string can depend on the
- * time zone setting, so we need to wait until after all GUC processing is
- * done before we can do the final parsing of the string.  This check function
- * only does a parsing pass to catch syntax errors, but we store the string
- * and parse it again when we need to use it.
+ * Safely parse a timestamp string into a TimestampTz without throwing
+ * errors. Returns true on success, false on failure.
+ * Used by both check_recovery_target_time() and validateRecoveryParameters().
+ */
+static bool
+parse_recovery_target_time_safe(const char *str, TimestampTz *result)
+{
+	fsec_t		fsec;
+	struct pg_tm tt,
+			   *tm = &tt;
+	int			tz;
+	int			dtype;
+	int			nf;
+	int			dterr;
+	char	   *field[MAXDATEFIELDS];
+	int			ftype[MAXDATEFIELDS];
+	char		workbuf[MAXDATELEN + MAXDATEFIELDS];
+	DateTimeErrorExtra dtextra;
+	TimestampTz timestamp;
+
+	dterr = ParseDateTime(str, workbuf, sizeof(workbuf),
+						  field, ftype, MAXDATEFIELDS, &nf);
+	if (dterr == 0)
+		dterr = DecodeDateTime(field, ftype, nf,
+							   &dtype, tm, &fsec, &tz, &dtextra);
+	if (dterr != 0)
+		return false;
+	if (dtype != DTK_DATE)
+		return false;
+	if (tm2timestamp(tm, fsec, &tz, &timestamp) != 0)
+		return false;
+
+	*result = timestamp;
+	return true;
+}
+
+/*
+ * target_type_conflict_exists
+ *
+ * Check if another recovery target type is already configured by inspecting
+ * raw GUC string variables. This avoids dependency on the derived
+ * recoveryTarget enum, which may be in an intermediate state during SIGHUP
+ * processing when multiple GUC variables are being updated.
+ *
+ * Returns true if a conflict exists (another target type is set).
+ */
+static bool
+target_type_conflict_exists(RecoveryTargetType this_target)
+{
+	if (this_target != RECOVERY_TARGET_IMMEDIATE &&
+		recovery_target_string && strcmp(recovery_target_string, "") != 0)
+		return true;
+	if (this_target != RECOVERY_TARGET_LSN &&
+		recovery_target_lsn_string && strcmp(recovery_target_lsn_string, "") != 0)
+		return true;
+	if (this_target != RECOVERY_TARGET_NAME &&
+		recovery_target_name_string && strcmp(recovery_target_name_string, "") != 0)
+		return true;
+	if (this_target != RECOVERY_TARGET_TIME &&
+		recovery_target_time_string && strcmp(recovery_target_time_string, "") != 0)
+		return true;
+	if (this_target != RECOVERY_TARGET_XID &&
+		recovery_target_xid_string && strcmp(recovery_target_xid_string, "") != 0)
+		return true;
+	return false;
+}
+
+/*
+ * GUC check_hook for recovery_target_time
  */
 bool
 check_recovery_target_time(char **newval, void **extra, GucSource source)
 {
 	if (strcmp(*newval, "") != 0)
 	{
+		TimestampTz		timestamp;
+		TimestampTz	   *parsed_ts;
+
 		/* reject some special values */
 		if (strcmp(*newval, "now") == 0 ||
 			strcmp(*newval, "today") == 0 ||
@@ -4923,39 +5058,29 @@ check_recovery_target_time(char **newval, void **extra, GucSource source)
 		}
 
 		/*
-		 * parse timestamp value (see also timestamptz_in())
+		 * Reject if a different recovery target type is already configured.
+		 * Check raw GUC strings, not the derived recoveryTarget enum, to
+		 * avoid sensitivity to GUC processing order during SIGHUP.
 		 */
+		if (target_type_conflict_exists(RECOVERY_TARGET_TIME))
 		{
-			char	   *str = *newval;
-			fsec_t		fsec;
-			struct pg_tm tt,
-					   *tm = &tt;
-			int			tz;
-			int			dtype;
-			int			nf;
-			int			dterr;
-			char	   *field[MAXDATEFIELDS];
-			int			ftype[MAXDATEFIELDS];
-			char		workbuf[MAXDATELEN + MAXDATEFIELDS];
-			DateTimeErrorExtra dtextra;
-			TimestampTz timestamp;
-
-			dterr = ParseDateTime(str, workbuf, sizeof(workbuf),
-								  field, ftype, MAXDATEFIELDS, &nf);
-			if (dterr == 0)
-				dterr = DecodeDateTime(field, ftype, nf,
-									   &dtype, tm, &fsec, &tz, &dtextra);
-			if (dterr != 0)
-				return false;
-			if (dtype != DTK_DATE)
-				return false;
-
-			if (tm2timestamp(tm, fsec, &tz, &timestamp) != 0)
-			{
-				GUC_check_errdetail("Timestamp out of range: \"%s\".", str);
-				return false;
-			}
+			GUC_check_errdetail("Cannot set recovery_target_time when another recovery target type is already set.");
+			return false;
 		}
+
+		/* Safe timestamp parsing — no ereport(ERROR) on bad input */
+		if (!parse_recovery_target_time_safe(*newval, &timestamp))
+		{
+			GUC_check_errdetail("Invalid value for recovery_target_time: \"%s\".", *newval);
+			return false;
+		}
+
+		/* Stash parsed value for the assign hook via GUC extra mechanism */
+		parsed_ts = (TimestampTz *) guc_malloc(LOG, sizeof(TimestampTz));
+		if (!parsed_ts)
+			return false;
+		*parsed_ts = timestamp;
+		*extra = parsed_ts;
 	}
 	return true;
 }
@@ -4966,12 +5091,11 @@ check_recovery_target_time(char **newval, void **extra, GucSource source)
 void
 assign_recovery_target_time(const char *newval, void *extra)
 {
-	if (recoveryTarget != RECOVERY_TARGET_UNSET &&
-		recoveryTarget != RECOVERY_TARGET_TIME)
-		error_multiple_recovery_targets();
-
 	if (newval && strcmp(newval, "") != 0)
+	{
 		recoveryTarget = RECOVERY_TARGET_TIME;
+		recoveryTargetTime = *((TimestampTz *) extra);
+	}
 	else
 		recoveryTarget = RECOVERY_TARGET_UNSET;
 }

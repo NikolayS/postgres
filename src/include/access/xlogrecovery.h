@@ -61,6 +61,19 @@ typedef enum RecoveryPauseState
 } RecoveryPauseState;
 
 /*
+ * RecoveryPauseReason tracks WHY recovery is paused, to distinguish between
+ * "paused at target with action=pause" and "paused via pg_wal_replay_pause()".
+ * This lets us correctly handle the case where the recovery target time is
+ * changed during a pause: we resume replay toward the new target, rather than
+ * treating it as a pg_wal_replay_resume() (which would proceed to promotion).
+ */
+typedef enum RecoveryPauseReason
+{
+	RECOVERY_PAUSE_NONE,			/* not paused, or paused by pg_wal_replay_pause() */
+	RECOVERY_PAUSE_AT_TARGET		/* paused because recovery_target reached with action=pause */
+} RecoveryPauseReason;
+
+/*
  * Shared-memory state for WAL recovery.
  */
 typedef struct XLogRecoveryCtlData
@@ -116,8 +129,9 @@ typedef struct XLogRecoveryCtlData
 	 * only relevant for replication or archive recovery
 	 */
 	TimestampTz currentChunkStartTime;
-	/* Recovery pause state */
+	/* Recovery pause state and reason */
 	RecoveryPauseState recoveryPauseState;
+	RecoveryPauseReason recoveryPauseReason;
 	ConditionVariable recoveryNotPausedCV;
 
 	slock_t		info_lck;		/* locks shared variables shown above */
@@ -139,6 +153,12 @@ extern PGDLLIMPORT char *archiveCleanupCommand;
 extern PGDLLIMPORT TransactionId recoveryTargetXid;
 extern PGDLLIMPORT char *recovery_target_time_string;
 extern PGDLLIMPORT TimestampTz recoveryTargetTime;
+
+/* GUC string variables for recovery targets, defined in guc_tables.c */
+extern char *recovery_target_string;
+extern char *recovery_target_xid_string;
+extern char *recovery_target_name_string;
+extern char *recovery_target_lsn_string;
 extern PGDLLIMPORT const char *recoveryTargetName;
 extern PGDLLIMPORT XLogRecPtr recoveryTargetLSN;
 extern PGDLLIMPORT RecoveryTargetType recoveryTarget;
@@ -213,6 +233,8 @@ extern bool HotStandbyActive(void);
 extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID *replayTLI);
 extern RecoveryPauseState GetRecoveryPauseState(void);
 extern void SetRecoveryPause(bool recoveryPause);
+extern RecoveryPauseReason GetRecoveryPauseReason(void);
+extern void SetRecoveryPauseReason(RecoveryPauseReason reason);
 extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
 extern TimestampTz GetLatestXTime(void);
 extern TimestampTz GetCurrentChunkReplayStartTime(void);
