@@ -366,6 +366,7 @@ static bool recoveryApplyDelay(XLogReaderState *record);
 static void ConfirmRecoveryPaused(void);
 static bool parse_recovery_target_time_safe(const char *str,
 											TimestampTz *result);
+static bool target_type_conflict_exists(RecoveryTargetType this_target);
 
 static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
 							  int emode, bool fetching_ckpt,
@@ -1840,19 +1841,28 @@ redo:
 					recoveryPausesHere(true);
 
 					/*
-					 * If we unpaused because recovery_target_time was
-					 * advanced, continue WAL replay toward the new target
-					 * rather than proceeding to promotion.
+					 * Check why we unpaused:
+					 * - RECOVERY_PAUSE_AT_TARGET: target was advanced,
+					 *   resume replay
+					 * - RECOVERY_PAUSE_NONE: pg_wal_replay_resume() or
+					 *   action change
 					 */
 					if (GetRecoveryPauseReason() == RECOVERY_PAUSE_AT_TARGET)
 					{
 						ereport(LOG,
-								(errmsg("resuming WAL replay toward new recovery target time %s",
-										timestamptz_to_str(recoveryTargetTime))));
+								(errmsg("resuming WAL replay toward new recovery target")));
 						reachedRecoveryTarget = false;
 						goto redo;
 					}
-					/* pg_wal_replay_resume() was called -- proceed to promote */
+
+					/*
+					 * If recovery_target_action was changed to 'shutdown'
+					 * while we were paused, honor the new action.
+					 */
+					if (recoveryTargetAction == RECOVERY_TARGET_ACTION_SHUTDOWN)
+						proc_exit(3);
+
+					/* pg_wal_replay_resume() or action changed to promote */
 					pg_fallthrough;
 
 				case RECOVERY_TARGET_ACTION_PROMOTE:
@@ -2918,7 +2928,13 @@ getRecoveryStopReason(void)
 static void
 recoveryPausesHere(bool endOfRecovery)
 {
+	/* Capture the paused-at state for later comparison */
 	TimestampTz pausedAtTime = recoveryStopTime;
+	XLogRecPtr	pausedAtLSN = recoveryStopLSN;
+	TransactionId pausedAtXid = recoveryStopXid;
+	char		pausedAtName[MAXFNAMELEN];
+
+	strlcpy(pausedAtName, recoveryStopName, MAXFNAMELEN);
 
 	/* Don't pause unless users can connect! */
 	if (!LocalHotStandbyActive)
@@ -2945,20 +2961,58 @@ recoveryPausesHere(bool endOfRecovery)
 			return;
 
 		/*
-		 * If recovery_target_time was changed via SIGHUP to a value strictly
-		 * later than where we paused, resume replay toward the new target.
+		 * If a recovery target parameter was changed via SIGHUP while
+		 * paused at the target, check if we should resume replay.
 		 */
-		if (endOfRecovery &&
-			recoveryTarget == RECOVERY_TARGET_TIME &&
-			timestamptz_cmp_internal(recoveryTargetTime, pausedAtTime) > 0)
+		if (endOfRecovery)
 		{
-			SetRecoveryPause(false);
-			SetRecoveryPauseReason(RECOVERY_PAUSE_AT_TARGET);
-			ereport(LOG,
-					(errmsg("recovery target time advanced from %s to %s, resuming WAL replay",
-							timestamptz_to_str(pausedAtTime),
-							timestamptz_to_str(recoveryTargetTime))));
-			break;
+			bool		should_resume = false;
+
+			/*
+			 * Check if recovery_target_action was changed away from
+			 * 'pause'.  If so, we should unpause and let the post-target
+			 * action logic handle the new action (promote or shutdown).
+			 */
+			if (recoveryTargetAction != RECOVERY_TARGET_ACTION_PAUSE)
+			{
+				SetRecoveryPause(false);
+				/* Don't set RECOVERY_PAUSE_AT_TARGET -- let caller handle action change */
+				ereport(LOG,
+						(errmsg("recovery_target_action changed, unpausing recovery")));
+				break;
+			}
+
+			/* Check if the recovery target itself was advanced */
+			switch (recoveryTarget)
+			{
+				case RECOVERY_TARGET_TIME:
+					if (timestamptz_cmp_internal(recoveryTargetTime, pausedAtTime) > 0)
+						should_resume = true;
+					break;
+				case RECOVERY_TARGET_LSN:
+					if (recoveryTargetLSN > pausedAtLSN)
+						should_resume = true;
+					break;
+				case RECOVERY_TARGET_XID:
+					if (recoveryTargetXid != pausedAtXid)
+						should_resume = true;
+					break;
+				case RECOVERY_TARGET_NAME:
+					if (strcmp(recoveryTargetName, pausedAtName) != 0)
+						should_resume = true;
+					break;
+				default:
+					break;
+			}
+
+			if (should_resume)
+			{
+				SetRecoveryPause(false);
+				SetRecoveryPauseReason(RECOVERY_PAUSE_AT_TARGET);
+				ereport(LOG,
+						(errmsg("recovery target changed, resuming WAL replay")));
+				break;
+			}
 		}
 
 		/*
@@ -4836,27 +4890,15 @@ check_primary_slot_name(char **newval, void **extra, GucSource source)
  * may be set.  Setting a second one results in an error.  The global variable
  * recoveryTarget tracks which kind of recovery target was chosen.  Other
  * variables store the actual target value (for example a string or a xid).
- * The assign functions of the parameters check whether a competing parameter
- * was already set.  But we want to allow setting the same parameter multiple
- * times.  We also want to allow unsetting a parameter and setting a different
- * one, so we unset recoveryTarget when the parameter is set to an empty
- * string.
- *
- * XXX this code is broken by design.  Throwing an error from a GUC assign
- * hook breaks fundamental assumptions of guc.c.  So long as all the variables
- * for which this can happen are PGC_POSTMASTER, the consequences are limited,
- * since we'd just abort postmaster startup anyway.  Nonetheless it's likely
- * that we have odd behaviors such as unexpected GUC ordering dependencies.
+ * The check hooks use target_type_conflict_exists() to detect conflicts by
+ * inspecting raw GUC string variables, which is safe during SIGHUP
+ * processing when multiple GUC variables may be updated in any order.
+ * The assign hooks are purely mechanical: they set the derived variables
+ * from the validated values.  We allow setting the same parameter multiple
+ * times, and unsetting a parameter (by setting it to an empty string) resets
+ * recoveryTarget to RECOVERY_TARGET_UNSET, allowing a different target type
+ * to be set.
  */
-
-pg_noreturn static void
-error_multiple_recovery_targets(void)
-{
-	ereport(ERROR,
-			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-			 errmsg("multiple recovery targets specified"),
-			 errdetail("At most one of \"recovery_target\", \"recovery_target_lsn\", \"recovery_target_name\", \"recovery_target_time\", \"recovery_target_xid\" may be set.")));
-}
 
 /*
  * GUC check_hook for recovery_target
@@ -4869,6 +4911,14 @@ check_recovery_target(char **newval, void **extra, GucSource source)
 		GUC_check_errdetail("The only allowed value is \"immediate\".");
 		return false;
 	}
+	if (strcmp(*newval, "") != 0)
+	{
+		if (target_type_conflict_exists(RECOVERY_TARGET_IMMEDIATE))
+		{
+			GUC_check_errdetail("Cannot set recovery_target when another recovery target type is already set.");
+			return false;
+		}
+	}
 	return true;
 }
 
@@ -4878,10 +4928,6 @@ check_recovery_target(char **newval, void **extra, GucSource source)
 void
 assign_recovery_target(const char *newval, void *extra)
 {
-	if (recoveryTarget != RECOVERY_TARGET_UNSET &&
-		recoveryTarget != RECOVERY_TARGET_IMMEDIATE)
-		error_multiple_recovery_targets();
-
 	if (newval && strcmp(newval, "") != 0)
 		recoveryTarget = RECOVERY_TARGET_IMMEDIATE;
 	else
@@ -4899,6 +4945,12 @@ check_recovery_target_lsn(char **newval, void **extra, GucSource source)
 		XLogRecPtr	lsn;
 		XLogRecPtr *myextra;
 		ErrorSaveContext escontext = {T_ErrorSaveContext};
+
+		if (target_type_conflict_exists(RECOVERY_TARGET_LSN))
+		{
+			GUC_check_errdetail("Cannot set recovery_target_lsn when another recovery target type is already set.");
+			return false;
+		}
 
 		lsn = pg_lsn_in_safe(*newval, (Node *) &escontext);
 		if (escontext.error_occurred)
@@ -4919,10 +4971,6 @@ check_recovery_target_lsn(char **newval, void **extra, GucSource source)
 void
 assign_recovery_target_lsn(const char *newval, void *extra)
 {
-	if (recoveryTarget != RECOVERY_TARGET_UNSET &&
-		recoveryTarget != RECOVERY_TARGET_LSN)
-		error_multiple_recovery_targets();
-
 	if (newval && strcmp(newval, "") != 0)
 	{
 		recoveryTarget = RECOVERY_TARGET_LSN;
@@ -4945,6 +4993,14 @@ check_recovery_target_name(char **newval, void **extra, GucSource source)
 							"recovery_target_name", MAXFNAMELEN - 1);
 		return false;
 	}
+	if (strcmp(*newval, "") != 0)
+	{
+		if (target_type_conflict_exists(RECOVERY_TARGET_NAME))
+		{
+			GUC_check_errdetail("Cannot set recovery_target_name when another recovery target type is already set.");
+			return false;
+		}
+	}
 	return true;
 }
 
@@ -4954,10 +5010,6 @@ check_recovery_target_name(char **newval, void **extra, GucSource source)
 void
 assign_recovery_target_name(const char *newval, void *extra)
 {
-	if (recoveryTarget != RECOVERY_TARGET_UNSET &&
-		recoveryTarget != RECOVERY_TARGET_NAME)
-		error_multiple_recovery_targets();
-
 	if (newval && strcmp(newval, "") != 0)
 	{
 		recoveryTarget = RECOVERY_TARGET_NAME;
@@ -5173,6 +5225,12 @@ check_recovery_target_xid(char **newval, void **extra, GucSource source)
 		char	   *endp;
 		char	   *val;
 
+		if (target_type_conflict_exists(RECOVERY_TARGET_XID))
+		{
+			GUC_check_errdetail("Cannot set recovery_target_xid when another recovery target type is already set.");
+			return false;
+		}
+
 		errno = 0;
 
 		/*
@@ -5218,10 +5276,6 @@ check_recovery_target_xid(char **newval, void **extra, GucSource source)
 void
 assign_recovery_target_xid(const char *newval, void *extra)
 {
-	if (recoveryTarget != RECOVERY_TARGET_UNSET &&
-		recoveryTarget != RECOVERY_TARGET_XID)
-		error_multiple_recovery_targets();
-
 	if (newval && strcmp(newval, "") != 0)
 	{
 		recoveryTarget = RECOVERY_TARGET_XID;

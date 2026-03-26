@@ -1,40 +1,51 @@
-# Implementation Plan: Make `recovery_target_time` Reloadable Without Restart
+# Implementation Plan: Make `recovery_target_*` Parameters Reloadable Without Restart
 
-**Version**: 2
+**Version**: 3
 **Last updated**: 2026-03-26
 
 ## Implementation Progress
 
-### Patch 1: GUC Safety Cleanup
-- [x] 1.1 Change GUC context to PGC_SIGHUP in guc_parameters.dat
+### Phase 1: recovery_target_time (Complete)
+- [x] 1.1 Change recovery_target_time GUC context to PGC_SIGHUP
 - [x] 1.2 Add target_type_conflict_exists() helper function
 - [x] 1.3 Add parse_recovery_target_time_safe() shared helper
 - [x] 1.4 Rewrite check_recovery_target_time() with safe parsing and conflict check
 - [x] 1.5 Simplify assign_recovery_target_time() (remove error_throwing)
 - [x] 1.6 Update validateRecoveryParameters() to use shared parser
+- [x] 1.7 Add RecoveryPauseReason enum for target-advance detection
+- [x] 1.8 Add redo label and goto for replay loop re-entry
 
-### Patch 2: Paused-Target-Forward-Resume Semantics
-- [x] 2.1 Add RecoveryPauseReason enum to xlogrecovery.h
-- [x] 2.2 Add pause reason state management functions
-- [x] 2.3 Modify recoveryPausesHere() for target-change detection
-- [x] 2.4 Add redo label and goto for replay loop re-entry
-- [x] 2.5 Add logging for target-change resume events
+### Phase 2: All other recovery_target_* parameters (Complete)
+- [x] 2.1 Change recovery_target to PGC_SIGHUP, fix hooks
+- [x] 2.2 Change recovery_target_lsn to PGC_SIGHUP, fix hooks
+- [x] 2.3 Change recovery_target_xid to PGC_SIGHUP, fix hooks
+- [x] 2.4 Change recovery_target_name to PGC_SIGHUP, fix hooks
+- [x] 2.5 Change recovery_target_inclusive to PGC_SIGHUP (no hooks needed)
+- [x] 2.6 Change recovery_target_action to PGC_SIGHUP (no hooks needed)
+- [x] 2.7 Remove error_multiple_recovery_targets() (replaced by check hooks)
+- [x] 2.8 Generalize resume logic: LSN, XID, NAME target changes
+- [x] 2.9 Handle recovery_target_action change (pause→promote/shutdown)
 
 ### Documentation
-- [x] Update config.sgml (SIGHUP context, reload behavior, timezone note)
+- [x] Update config.sgml for all reloadable parameters
 
-### Testing
-- [x] Write TAP test (9 assertions covering 5 core scenarios)
-- [x] Build and compile successfully (Docker debian:bookworm)
-- [x] Run TAP tests in Docker container — ALL PASS
-- [x] Verified: pause at target, advance target, resume, re-pause
-- [x] Verified: same/earlier target reload is no-op
-- [x] Verified: pg_wal_replay_resume() promotes (not re-enter replay)
-- [x] Verified: mutual exclusion of recovery target types
+### Testing (14 assertions, 8 scenarios — ALL PASS)
+- [x] TEST 1: Pause at T1, advance to T2, verify resume and re-pause
+- [x] TEST 2: Same target reload is no-op
+- [x] TEST 3: Earlier target reload is no-op
+- [x] TEST 4: pg_wal_replay_resume() promotes (not re-enter replay)
+- [x] TEST 5: Mutual exclusion of recovery target types
+- [x] TEST 6: LSN target advance — pause, advance LSN, verify resume
+- [x] TEST 7: Action change pause→promote while paused
+- [x] TEST 8: recovery_target_inclusive toggle accepted on reload
+
+### Parameters NOT made reloadable (by design)
+- recovery_target_timeline — changing timeline mid-recovery is unsafe
 
 ### Integration
+- [x] Build and compile successfully (Docker debian:bookworm)
+- [x] All 14 TAP tests pass in Docker container
 - [x] Post testing evidence to PR #22
-- [x] Update spec doc with final status
 
 ## Changelog
 

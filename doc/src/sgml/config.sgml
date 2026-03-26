@@ -4422,9 +4422,10 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
       <varname>recovery_target_time</varname>, or <varname>recovery_target_xid</varname>
       can be used; if more than one of these is specified in the configuration
       file, an error will be raised.
-      These parameters can only be set at server start, except for
-      <varname>recovery_target_time</varname> which can also be changed by
-      reloading the configuration.
+      These parameters can be changed by reloading the server configuration
+      without requiring a restart, except for
+      <varname>recovery_target_timeline</varname> which can only be set at
+      server start.
      </para>
 
      <variablelist>
@@ -4445,6 +4446,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         Technically, this is a string parameter, but <literal>'immediate'</literal>
         is currently the only allowed value.
        </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
+       </para>
       </listitem>
      </varlistentry>
 
@@ -4458,6 +4462,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
        <para>
         This parameter specifies the named restore point (created with
         <function>pg_create_restore_point()</function>) to which recovery will proceed.
+       </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
        </para>
       </listitem>
      </varlistentry>
@@ -4487,10 +4494,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
        </para>
 
        <para>
-        Unlike the other recovery target parameters, this parameter can be
-        changed by reloading the server configuration (for example, via
-        <function>pg_reload_conf()</function>) without requiring a server
-        restart.
+        This parameter can be changed by reloading the server configuration
+        (for example, via <function>pg_reload_conf()</function>) without
+        requiring a server restart.
        </para>
 
        <para>
@@ -4544,6 +4550,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         The effective transaction ID (the 32-bit portion) must be greater than
         or equal to 3.
        </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
+       </para>
       </listitem>
      </varlistentry>
 
@@ -4560,6 +4569,13 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         influenced by <xref linkend="guc-recovery-target-inclusive"/>. This
         parameter is parsed using the system data type
         <link linkend="datatype-pg-lsn"><type>pg_lsn</type></link>.
+       </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
+        When <xref linkend="guc-recovery-target-action"/> is set to
+        <literal>pause</literal> and recovery is paused at the target,
+        advancing the LSN to a later value and reloading the configuration
+        will automatically resume WAL replay toward the new target.
        </para>
       </listitem>
      </varlistentry>
@@ -4589,6 +4605,10 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         This setting controls whether transactions
         having exactly the target WAL location (LSN), commit time, or transaction ID, respectively, will
         be included in the recovery.  Default is <literal>on</literal>.
+       </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
+        The new value takes effect on the next recovery stop evaluation.
        </para>
       </listitem>
      </varlistentry>
@@ -4625,6 +4645,9 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         a state that itself was reached after a point-in-time recovery.
         See <xref linkend="backup-timelines"/> for discussion.
        </para>
+       <para>
+        This parameter can only be set at server start.
+       </para>
       </listitem>
      </varlistentry>
 
@@ -4652,9 +4675,8 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         using <function>pg_wal_replay_resume()</function> (see
         <xref linkend="functions-recovery-control-table"/>), which then
         causes recovery to end. If this recovery target is not the
-        desired stopping point, then shut down the server, change the
-        recovery target settings to a later target and restart to
-        continue recovery.
+        desired stopping point, change the recovery target settings to a
+        later target and reload the configuration to continue recovery.
        </para>
        <para>
         The <literal>shutdown</literal> setting is useful to have the instance ready
@@ -4676,6 +4698,12 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         If the recovery target is reached while a promotion is ongoing,
         a setting of <literal>pause</literal> will act the same as
         <literal>promote</literal>.
+       </para>
+       <para>
+        This parameter can be changed by reloading the server configuration.
+        For example, changing from <literal>pause</literal> to
+        <literal>promote</literal> while recovery is paused at the target
+        will trigger promotion.
        </para>
        <para>
         In any case, if a recovery target is configured but the archive

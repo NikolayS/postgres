@@ -2450,7 +2450,7 @@
   assign_hook => 'assign_recovery_prefetch',
 },
 
-{ name => 'recovery_target', type => 'string', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Set to "immediate" to end recovery as soon as a consistent state is reached.',
   variable => 'recovery_target_string',
   boot_val => '""',
@@ -2458,20 +2458,20 @@
   assign_hook => 'assign_recovery_target',
 },
 
-{ name => 'recovery_target_action', type => 'enum', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_action', type => 'enum', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets the action to perform upon reaching the recovery target.',
   variable => 'recoveryTargetAction',
   boot_val => 'RECOVERY_TARGET_ACTION_PAUSE',
   options => 'recovery_target_action_options',
 },
 
-{ name => 'recovery_target_inclusive', type => 'bool', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_inclusive', type => 'bool', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets whether to include or exclude transaction with recovery target.',
   variable => 'recoveryTargetInclusive',
   boot_val => 'true',
 },
 
-{ name => 'recovery_target_lsn', type => 'string', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_lsn', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets the LSN of the write-ahead log location up to which recovery will proceed.',
   variable => 'recovery_target_lsn_string',
   boot_val => '""',
@@ -2479,7 +2479,7 @@
   assign_hook => 'assign_recovery_target_lsn',
 },
 
-{ name => 'recovery_target_name', type => 'string', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_name', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets the named restore point up to which recovery will proceed.',
   variable => 'recovery_target_name_string',
   boot_val => '""',
@@ -2503,7 +2503,7 @@
   assign_hook => 'assign_recovery_target_timeline',
 },
 
-{ name => 'recovery_target_xid', type => 'string', context => 'PGC_POSTMASTER', group => 'WAL_RECOVERY_TARGET',
+{ name => 'recovery_target_xid', type => 'string', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY_TARGET',
   short_desc => 'Sets the transaction ID up to which recovery will proceed.',
   variable => 'recovery_target_xid_string',
   boot_val => '""',
