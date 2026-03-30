@@ -61,6 +61,8 @@
 #include "parser/analyze.h"
 #include "parser/scanner.h"
 #include "pgstat.h"
+#include "lib/dshash.h"
+#include "storage/dsm_registry.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
@@ -279,6 +281,28 @@ static ProcessUtility_hook_type prev_ProcessUtility = NULL;
 static pgssSharedState *pgss = NULL;
 static HTAB *pgss_hash = NULL;
 
+/*
+ * DSM Registry support for dynamic loading (without shared_preload_libraries).
+ * When use_dsm_registry is true, we use dshash_table instead of HTAB.
+ */
+static bool use_dsm_registry = false;
+static dshash_table *pgss_dsh = NULL;
+static bool pgss_dsh_initialized = false;
+
+/* DSM Registry names */
+#define PGSS_DSM_STATE_NAME		"pg_stat_statements_state"
+#define PGSS_DSM_HASH_NAME		"pg_stat_statements_hash"
+
+/* dshash parameters for DSM Registry mode */
+static const dshash_parameters pgss_dsh_params = {
+	sizeof(pgssHashKey),
+	sizeof(pgssEntry),
+	dshash_memcmp,
+	dshash_memhash,
+	dshash_memcpy,
+	0						/* tranche_id assigned by DSM registry */
+};
+
 /*---- GUC variables ----*/
 
 typedef enum
@@ -384,6 +408,11 @@ static void fill_in_constant_lengths(JumbleState *jstate, const char *query,
 									 int query_loc);
 static int	comp_location(const void *a, const void *b);
 
+/* DSM Registry support functions */
+static void pgss_dsm_init_state(void *ptr, void *arg);
+static void pgss_dsm_startup(void);
+static bool pgss_ensure_initialized(void);
+
 
 /*
  * Module load callback
@@ -392,38 +421,66 @@ void
 _PG_init(void)
 {
 	/*
-	 * In order to create our shared memory area, we have to be loaded via
-	 * shared_preload_libraries.  If not, fall out without hooking into any of
-	 * the main system.  (We don't throw error here because it seems useful to
-	 * allow the pg_stat_statements functions to be created even when the
-	 * module isn't active.  The functions must protect themselves against
-	 * being called then, however.)
+	 * Determine which mode we're operating in.  If loaded via
+	 * shared_preload_libraries, we use pre-allocated shared memory.
+	 * Otherwise, we use the DSM Registry for dynamic allocation.
 	 */
-	if (!process_shared_preload_libraries_in_progress)
-		return;
+	if (process_shared_preload_libraries_in_progress)
+	{
+		use_dsm_registry = false;
+
+		/*
+		 * Inform the postmaster that we want to enable query_id calculation
+		 * if compute_query_id is set to auto.
+		 */
+		EnableQueryId();
+	}
+	else
+	{
+		/*
+		 * Loaded dynamically (via LOAD or session_preload_libraries).
+		 * Use DSM Registry for shared state.
+		 */
+		use_dsm_registry = true;
+
+		ereport(LOG,
+				(errmsg("pg_stat_statements: loaded dynamically, using DSM registry"),
+				 errhint("Statistics will not persist across server restarts. "
+						 "Ensure compute_query_id is enabled.")));
+	}
 
 	/*
-	 * Inform the postmaster that we want to enable query_id calculation if
-	 * compute_query_id is set to auto.
+	 * Define GUC variables.  PGC_POSTMASTER and PGC_SIGHUP variables can
+	 * only be defined when loaded via shared_preload_libraries.
 	 */
-	EnableQueryId();
+	if (!use_dsm_registry)
+	{
+		DefineCustomIntVariable("pg_stat_statements.max",
+								"Sets the maximum number of statements tracked by pg_stat_statements.",
+								NULL,
+								&pgss_max,
+								5000,
+								100,
+								INT_MAX / 2,
+								PGC_POSTMASTER,
+								0,
+								NULL,
+								NULL,
+								NULL);
 
-	/*
-	 * Define (or redefine) custom GUC variables.
-	 */
-	DefineCustomIntVariable("pg_stat_statements.max",
-							"Sets the maximum number of statements tracked by pg_stat_statements.",
-							NULL,
-							&pgss_max,
-							5000,
-							100,
-							INT_MAX / 2,
-							PGC_POSTMASTER,
-							0,
-							NULL,
-							NULL,
-							NULL);
+		DefineCustomBoolVariable("pg_stat_statements.save",
+								 "Save pg_stat_statements statistics across server shutdowns.",
+								 NULL,
+								 &pgss_save,
+								 true,
+								 PGC_SIGHUP,
+								 0,
+								 NULL,
+								 NULL,
+								 NULL);
+	}
 
+	/* These GUCs work in both modes */
 	DefineCustomEnumVariable("pg_stat_statements.track",
 							 "Selects which statements are tracked by pg_stat_statements.",
 							 NULL,
@@ -458,26 +515,19 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomBoolVariable("pg_stat_statements.save",
-							 "Save pg_stat_statements statistics across server shutdowns.",
-							 NULL,
-							 &pgss_save,
-							 true,
-							 PGC_SIGHUP,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
-
 	MarkGUCPrefixReserved("pg_stat_statements");
 
 	/*
-	 * Install hooks.
+	 * Install hooks.  Shmem hooks only needed in shared_preload mode.
 	 */
-	prev_shmem_request_hook = shmem_request_hook;
-	shmem_request_hook = pgss_shmem_request;
-	prev_shmem_startup_hook = shmem_startup_hook;
-	shmem_startup_hook = pgss_shmem_startup;
+	if (!use_dsm_registry)
+	{
+		prev_shmem_request_hook = shmem_request_hook;
+		shmem_request_hook = pgss_shmem_request;
+		prev_shmem_startup_hook = shmem_startup_hook;
+		shmem_startup_hook = pgss_shmem_startup;
+	}
+
 	prev_post_parse_analyze_hook = post_parse_analyze_hook;
 	post_parse_analyze_hook = pgss_post_parse_analyze;
 	prev_planner_hook = planner_hook;
@@ -837,6 +887,82 @@ error:
 }
 
 /*
+ * Initialize shared state structure for DSM Registry mode.
+ */
+static void
+pgss_dsm_init_state(void *ptr, void *arg)
+{
+	pgssSharedState *state = (pgssSharedState *) ptr;
+
+	state->lock = NULL;			/* Not used in DSM Registry mode */
+	state->cur_median_usage = ASSUMED_MEDIAN_INIT;
+	state->mean_query_len = ASSUMED_LENGTH_INIT;
+	SpinLockInit(&state->mutex);
+	state->extent = 0;
+	state->n_writers = 0;
+	state->gc_count = 0;
+	state->stats.dealloc = 0;
+	state->stats.stats_reset = GetCurrentTimestamp();
+}
+
+/*
+ * Initialize shared state using DSM Registry.
+ * Called lazily when first needed in DSM Registry mode.
+ */
+static void
+pgss_dsm_startup(void)
+{
+	bool		found_state;
+	bool		found_hash;
+
+	if (pgss_dsh_initialized)
+		return;
+
+	/*
+	 * Get or create the shared state structure via DSM Registry.
+	 */
+	pgss = GetNamedDSMSegment(PGSS_DSM_STATE_NAME,
+							  sizeof(pgssSharedState),
+							  pgss_dsm_init_state,
+							  &found_state,
+							  NULL);
+
+	/*
+	 * Get or create the shared hash table via DSM Registry.
+	 */
+	pgss_dsh = GetNamedDSHash(PGSS_DSM_HASH_NAME,
+							  &pgss_dsh_params,
+							  &found_hash);
+
+	pgss_dsh_initialized = true;
+
+	if (!found_state)
+		ereport(LOG,
+				(errmsg("pg_stat_statements: created DSM registry shared state")));
+}
+
+/*
+ * Ensure shared state is initialized.
+ * In shared_preload mode, returns true if pgss and pgss_hash are set up.
+ * In DSM Registry mode, lazily initializes the shared state.
+ */
+static bool
+pgss_ensure_initialized(void)
+{
+	if (use_dsm_registry)
+	{
+		if (!pgss_dsh_initialized)
+			pgss_dsm_startup();
+
+		return (pgss != NULL && pgss_dsh != NULL);
+	}
+	else
+	{
+		return (pgss != NULL && pgss_hash != NULL);
+	}
+}
+
+/*
  * Post-parse-analysis hook: mark query with a queryId
  */
 static void
@@ -845,8 +971,8 @@ pgss_post_parse_analyze(ParseState *pstate, Query *query, JumbleState *jstate)
 	if (prev_post_parse_analyze_hook)
 		prev_post_parse_analyze_hook(pstate, query, jstate);
 
-	/* Safety check... */
-	if (!pgss || !pgss_hash || !pgss_enabled(nesting_level))
+	/* Ensure initialized and check if enabled */
+	if (!pgss_ensure_initialized() || !pgss_enabled(nesting_level))
 		return;
 
 	/*
@@ -1309,8 +1435,8 @@ pgss_store(const char *query, int64 queryId,
 
 	Assert(query != NULL);
 
-	/* Safety check... */
-	if (!pgss || !pgss_hash)
+	/* Ensure initialized */
+	if (!pgss_ensure_initialized())
 		return;
 
 	/*
@@ -1319,6 +1445,146 @@ pgss_store(const char *query, int64 queryId,
 	 */
 	if (queryId == INT64CONST(0))
 		return;
+
+	/*
+	 * DSM Registry mode: use simpler dshash-based storage.
+	 * No query text storage, no garbage collection.
+	 */
+	if (use_dsm_registry)
+	{
+		bool	found;
+
+		/* Set up key */
+		memset(&key, 0, sizeof(pgssHashKey));
+		key.userid = GetUserId();
+		key.dbid = MyDatabaseId;
+		key.queryid = queryId;
+		key.toplevel = (nesting_level == 0);
+
+		/* Find or create entry in dshash */
+		entry = dshash_find_or_insert(pgss_dsh, &key, &found);
+
+		if (!found)
+		{
+			/* Initialize new entry */
+			SpinLockInit(&entry->mutex);
+			memset(&entry->counters, 0, sizeof(Counters));
+			entry->counters.usage = USAGE_INIT;
+			entry->query_offset = 0;
+			entry->query_len = -1;		/* No query text in DSM mode */
+			entry->encoding = encoding;
+			entry->stats_since = GetCurrentTimestamp();
+			entry->minmax_stats_since = entry->stats_since;
+		}
+
+		/* Increment counters if not just creating for normalized query */
+		if (!jstate)
+		{
+			Assert(kind == PGSS_PLAN || kind == PGSS_EXEC);
+
+			SpinLockAcquire(&entry->mutex);
+
+			if (IS_STICKY(entry->counters))
+				entry->counters.usage = USAGE_INIT;
+
+			entry->counters.calls[kind] += 1;
+			entry->counters.total_time[kind] += total_time;
+
+			if (entry->counters.calls[kind] == 1)
+			{
+				entry->counters.min_time[kind] = total_time;
+				entry->counters.max_time[kind] = total_time;
+				entry->counters.mean_time[kind] = total_time;
+			}
+			else
+			{
+				double old_mean = entry->counters.mean_time[kind];
+
+				entry->counters.mean_time[kind] +=
+					(total_time - old_mean) / entry->counters.calls[kind];
+				entry->counters.sum_var_time[kind] +=
+					(total_time - old_mean) * (total_time - entry->counters.mean_time[kind]);
+
+				if (entry->counters.min_time[kind] == 0 && entry->counters.max_time[kind] == 0)
+				{
+					entry->counters.min_time[kind] = total_time;
+					entry->counters.max_time[kind] = total_time;
+				}
+				else
+				{
+					if (entry->counters.min_time[kind] > total_time)
+						entry->counters.min_time[kind] = total_time;
+					if (entry->counters.max_time[kind] < total_time)
+						entry->counters.max_time[kind] = total_time;
+				}
+			}
+
+			entry->counters.rows += rows;
+
+			if (bufusage)
+			{
+				entry->counters.shared_blks_hit += bufusage->shared_blks_hit;
+				entry->counters.shared_blks_read += bufusage->shared_blks_read;
+				entry->counters.shared_blks_dirtied += bufusage->shared_blks_dirtied;
+				entry->counters.shared_blks_written += bufusage->shared_blks_written;
+				entry->counters.local_blks_hit += bufusage->local_blks_hit;
+				entry->counters.local_blks_read += bufusage->local_blks_read;
+				entry->counters.local_blks_dirtied += bufusage->local_blks_dirtied;
+				entry->counters.local_blks_written += bufusage->local_blks_written;
+				entry->counters.temp_blks_read += bufusage->temp_blks_read;
+				entry->counters.temp_blks_written += bufusage->temp_blks_written;
+				entry->counters.shared_blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->shared_blk_read_time);
+				entry->counters.shared_blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->shared_blk_write_time);
+				entry->counters.local_blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->local_blk_read_time);
+				entry->counters.local_blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->local_blk_write_time);
+				entry->counters.temp_blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_read_time);
+				entry->counters.temp_blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_write_time);
+			}
+
+			entry->counters.usage += USAGE_EXEC(total_time);
+
+			if (walusage)
+			{
+				entry->counters.wal_records += walusage->wal_records;
+				entry->counters.wal_fpi += walusage->wal_fpi;
+				entry->counters.wal_bytes += walusage->wal_bytes;
+				entry->counters.wal_buffers_full += walusage->wal_buffers_full;
+			}
+
+			if (jitusage)
+			{
+				entry->counters.jit_functions += jitusage->created_functions;
+				entry->counters.jit_generation_time += INSTR_TIME_GET_MILLISEC(jitusage->generation_counter);
+				if (INSTR_TIME_GET_MILLISEC(jitusage->deform_counter))
+					entry->counters.jit_deform_count++;
+				entry->counters.jit_deform_time += INSTR_TIME_GET_MILLISEC(jitusage->deform_counter);
+				if (INSTR_TIME_GET_MILLISEC(jitusage->inlining_counter))
+					entry->counters.jit_inlining_count++;
+				entry->counters.jit_inlining_time += INSTR_TIME_GET_MILLISEC(jitusage->inlining_counter);
+				if (INSTR_TIME_GET_MILLISEC(jitusage->optimization_counter))
+					entry->counters.jit_optimization_count++;
+				entry->counters.jit_optimization_time += INSTR_TIME_GET_MILLISEC(jitusage->optimization_counter);
+				if (INSTR_TIME_GET_MILLISEC(jitusage->emission_counter))
+					entry->counters.jit_emission_count++;
+				entry->counters.jit_emission_time += INSTR_TIME_GET_MILLISEC(jitusage->emission_counter);
+			}
+
+			entry->counters.parallel_workers_to_launch += parallel_workers_to_launch;
+			entry->counters.parallel_workers_launched += parallel_workers_launched;
+
+			if (planOrigin == PLAN_STMT_CACHE_GENERIC)
+				entry->counters.generic_plan_calls++;
+			else if (planOrigin == PLAN_STMT_CACHE_CUSTOM)
+				entry->counters.custom_plan_calls++;
+
+			SpinLockRelease(&entry->mutex);
+		}
+
+		dshash_release_lock(pgss_dsh, entry);
+		return;
+	}
+
+	/* Traditional shared_preload_libraries mode continues below */
 
 	/*
 	 * Confine our attention to the relevant part of the string, if the query
@@ -1701,6 +1967,7 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 	Size		extent = 0;
 	int			gc_count = 0;
 	HASH_SEQ_STATUS hash_seq;
+	dshash_seq_status dsh_seq;
 	pgssEntry  *entry;
 
 	/*
@@ -1709,11 +1976,11 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 	 */
 	is_allowed_role = has_privs_of_role(userid, ROLE_PG_READ_ALL_STATS);
 
-	/* hash table must exist already */
-	if (!pgss || !pgss_hash)
+	/* Ensure shared state is initialized */
+	if (!pgss_ensure_initialized())
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("pg_stat_statements must be loaded via \"shared_preload_libraries\"")));
+				 errmsg("pg_stat_statements must be loaded via LOAD or \"shared_preload_libraries\"")));
 
 	InitMaterializedSRF(fcinfo, 0);
 
@@ -1771,79 +2038,105 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 	}
 
 	/*
-	 * We'd like to load the query text file (if needed) while not holding any
-	 * lock on pgss->lock.  In the worst case we'll have to do this again
-	 * after we have the lock, but it's unlikely enough to make this a win
-	 * despite occasional duplicated work.  We need to reload if anybody
-	 * writes to the file (either a retail qtext_store(), or a garbage
-	 * collection) between this point and where we've gotten shared lock.  If
-	 * a qtext_store is actually in progress when we look, we might as well
-	 * skip the speculative load entirely.
+	 * DSM Registry mode doesn't support query text storage, so skip
+	 * query text loading in that case.
 	 */
-	if (showtext)
+	if (!use_dsm_registry)
 	{
-		int			n_writers;
+		/*
+		 * We'd like to load the query text file (if needed) while not holding any
+		 * lock on pgss->lock.  In the worst case we'll have to do this again
+		 * after we have the lock, but it's unlikely enough to make this a win
+		 * despite occasional duplicated work.  We need to reload if anybody
+		 * writes to the file (either a retail qtext_store(), or a garbage
+		 * collection) between this point and where we've gotten shared lock.  If
+		 * a qtext_store is actually in progress when we look, we might as well
+		 * skip the speculative load entirely.
+		 */
+		if (showtext)
+		{
+			int			n_writers;
 
-		/* Take the mutex so we can examine variables */
-		SpinLockAcquire(&pgss->mutex);
-		extent = pgss->extent;
-		n_writers = pgss->n_writers;
-		gc_count = pgss->gc_count;
-		SpinLockRelease(&pgss->mutex);
+			/* Take the mutex so we can examine variables */
+			SpinLockAcquire(&pgss->mutex);
+			extent = pgss->extent;
+			n_writers = pgss->n_writers;
+			gc_count = pgss->gc_count;
+			SpinLockRelease(&pgss->mutex);
 
-		/* No point in loading file now if there are active writers */
-		if (n_writers == 0)
-			qbuffer = qtext_load_file(&qbuffer_size);
+			/* No point in loading file now if there are active writers */
+			if (n_writers == 0)
+				qbuffer = qtext_load_file(&qbuffer_size);
+		}
+
+		/*
+		 * Get shared lock, load or reload the query text file if we must, and
+		 * iterate over the hashtable entries.
+		 *
+		 * With a large hash table, we might be holding the lock rather longer
+		 * than one could wish.  However, this only blocks creation of new hash
+		 * table entries, and the larger the hash table the less likely that is to
+		 * be needed.  So we can hope this is okay.  Perhaps someday we'll decide
+		 * we need to partition the hash table to limit the time spent holding any
+		 * one lock.
+		 */
+		LWLockAcquire(pgss->lock, LW_SHARED);
+
+		if (showtext)
+		{
+			/*
+			 * Here it is safe to examine extent and gc_count without taking the
+			 * mutex.  Note that although other processes might change
+			 * pgss->extent just after we look at it, the strings they then write
+			 * into the file cannot yet be referenced in the hashtable, so we
+			 * don't care whether we see them or not.
+			 *
+			 * If qtext_load_file fails, we just press on; we'll return NULL for
+			 * every query text.
+			 */
+			if (qbuffer == NULL ||
+				pgss->extent != extent ||
+				pgss->gc_count != gc_count)
+			{
+				free(qbuffer);
+				qbuffer = qtext_load_file(&qbuffer_size);
+			}
+		}
+
+		hash_seq_init(&hash_seq, pgss_hash);
+	}
+	else
+	{
+		/* DSM Registry mode: use dshash sequential scan */
+		dshash_seq_init(&dsh_seq, pgss_dsh, false);
 	}
 
 	/*
-	 * Get shared lock, load or reload the query text file if we must, and
-	 * iterate over the hashtable entries.
-	 *
-	 * With a large hash table, we might be holding the lock rather longer
-	 * than one could wish.  However, this only blocks creation of new hash
-	 * table entries, and the larger the hash table the less likely that is to
-	 * be needed.  So we can hope this is okay.  Perhaps someday we'll decide
-	 * we need to partition the hash table to limit the time spent holding any
-	 * one lock.
+	 * Iterate over hash entries and build result tuples.
 	 */
-	LWLockAcquire(pgss->lock, LW_SHARED);
-
-	if (showtext)
+	for (;;)
 	{
-		/*
-		 * Here it is safe to examine extent and gc_count without taking the
-		 * mutex.  Note that although other processes might change
-		 * pgss->extent just after we look at it, the strings they then write
-		 * into the file cannot yet be referenced in the hashtable, so we
-		 * don't care whether we see them or not.
-		 *
-		 * If qtext_load_file fails, we just press on; we'll return NULL for
-		 * every query text.
-		 */
-		if (qbuffer == NULL ||
-			pgss->extent != extent ||
-			pgss->gc_count != gc_count)
+		/* Get next entry based on mode */
+		if (use_dsm_registry)
+			entry = dshash_seq_next(&dsh_seq);
+		else
+			entry = hash_seq_search(&hash_seq);
+
+		if (entry == NULL)
+			break;
+
 		{
-			free(qbuffer);
-			qbuffer = qtext_load_file(&qbuffer_size);
-		}
-	}
+			Datum		values[PG_STAT_STATEMENTS_COLS];
+			bool		nulls[PG_STAT_STATEMENTS_COLS];
+			int			i = 0;
+			Counters	tmp;
+			double		stddev;
+			int64		queryid = entry->key.queryid;
+			TimestampTz stats_since;
+			TimestampTz minmax_stats_since;
 
-	hash_seq_init(&hash_seq, pgss_hash);
-	while ((entry = hash_seq_search(&hash_seq)) != NULL)
-	{
-		Datum		values[PG_STAT_STATEMENTS_COLS];
-		bool		nulls[PG_STAT_STATEMENTS_COLS];
-		int			i = 0;
-		Counters	tmp;
-		double		stddev;
-		int64		queryid = entry->key.queryid;
-		TimestampTz stats_since;
-		TimestampTz minmax_stats_since;
-
-		memset(values, 0, sizeof(values));
-		memset(nulls, 0, sizeof(nulls));
+			memset(values, 0, sizeof(values));
+			memset(nulls, 0, sizeof(nulls));
 
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
@@ -2041,10 +2334,15 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 					 api_version == PGSS_V1_13 ? PG_STAT_STATEMENTS_COLS_V1_13 :
 					 -1 /* fail if you forget to update this assert */ ));
 
-		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+			tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+		}
 	}
 
-	LWLockRelease(pgss->lock);
+	/* Clean up based on mode */
+	if (use_dsm_registry)
+		dshash_seq_term(&dsh_seq);
+	else
+		LWLockRelease(pgss->lock);
 
 	free(qbuffer);
 }
@@ -2063,10 +2361,10 @@ pg_stat_statements_info(PG_FUNCTION_ARGS)
 	Datum		values[PG_STAT_STATEMENTS_INFO_COLS] = {0};
 	bool		nulls[PG_STAT_STATEMENTS_INFO_COLS] = {0};
 
-	if (!pgss || !pgss_hash)
+	if (!pgss_ensure_initialized())
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("pg_stat_statements must be loaded via \"shared_preload_libraries\"")));
+				 errmsg("pg_stat_statements must be loaded via LOAD or \"shared_preload_libraries\"")));
 
 	/* Build a tuple descriptor for our result type */
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
@@ -2714,6 +3012,7 @@ static TimestampTz
 entry_reset(Oid userid, Oid dbid, int64 queryid, bool minmax_only)
 {
 	HASH_SEQ_STATUS hash_seq;
+	dshash_seq_status dsh_seq;
 	pgssEntry  *entry;
 	FILE	   *qfile;
 	int64		num_entries;
@@ -2721,15 +3020,116 @@ entry_reset(Oid userid, Oid dbid, int64 queryid, bool minmax_only)
 	pgssHashKey key;
 	TimestampTz stats_reset;
 
-	if (!pgss || !pgss_hash)
+	if (!pgss_ensure_initialized())
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("pg_stat_statements must be loaded via \"shared_preload_libraries\"")));
-
-	LWLockAcquire(pgss->lock, LW_EXCLUSIVE);
-	num_entries = hash_get_num_entries(pgss_hash);
+				 errmsg("pg_stat_statements must be loaded via LOAD or \"shared_preload_libraries\"")));
 
 	stats_reset = GetCurrentTimestamp();
+
+	/*
+	 * DSM Registry mode: use dshash operations.
+	 * Note: We can't use SINGLE_ENTRY_RESET macro here because it uses
+	 * hash_search() which is for the traditional HTAB.
+	 */
+	if (use_dsm_registry)
+	{
+		if (userid != 0 && dbid != 0 && queryid != INT64CONST(0))
+		{
+			/* If all the parameters are available, use the fast path. */
+			memset(&key, 0, sizeof(pgssHashKey));
+			key.userid = userid;
+			key.dbid = dbid;
+			key.queryid = queryid;
+
+			/*
+			 * Reset the entry if it exists, starting with the non-top-level
+			 * entry.
+			 */
+			key.toplevel = false;
+			entry = dshash_find(pgss_dsh, &key, true);  /* exclusive for delete */
+			if (entry)
+			{
+				if (minmax_only)
+				{
+					for (int kind = 0; kind < PGSS_NUMKIND; kind++)
+					{
+						entry->counters.max_time[kind] = 0;
+						entry->counters.min_time[kind] = 0;
+					}
+					entry->minmax_stats_since = stats_reset;
+					dshash_release_lock(pgss_dsh, entry);
+				}
+				else
+				{
+					dshash_delete_entry(pgss_dsh, entry);
+				}
+			}
+
+			/* Also reset the top-level entry if it exists. */
+			key.toplevel = true;
+			entry = dshash_find(pgss_dsh, &key, true);  /* exclusive for delete */
+			if (entry)
+			{
+				if (minmax_only)
+				{
+					for (int kind = 0; kind < PGSS_NUMKIND; kind++)
+					{
+						entry->counters.max_time[kind] = 0;
+						entry->counters.min_time[kind] = 0;
+					}
+					entry->minmax_stats_since = stats_reset;
+					dshash_release_lock(pgss_dsh, entry);
+				}
+				else
+				{
+					dshash_delete_entry(pgss_dsh, entry);
+				}
+			}
+		}
+		else
+		{
+			/*
+			 * Reset entries corresponding to valid parameters (or all).
+			 * Use exclusive mode so we can delete entries.
+			 */
+			dshash_seq_init(&dsh_seq, pgss_dsh, true);
+			while ((entry = dshash_seq_next(&dsh_seq)) != NULL)
+			{
+				if ((!userid || entry->key.userid == userid) &&
+					(!dbid || entry->key.dbid == dbid) &&
+					(!queryid || entry->key.queryid == queryid))
+				{
+					if (minmax_only)
+					{
+						for (int kind = 0; kind < PGSS_NUMKIND; kind++)
+						{
+							entry->counters.max_time[kind] = 0;
+							entry->counters.min_time[kind] = 0;
+						}
+						entry->minmax_stats_since = stats_reset;
+					}
+					else
+					{
+						dshash_delete_current(&dsh_seq);
+					}
+				}
+			}
+			dshash_seq_term(&dsh_seq);
+		}
+
+		/* Reset global statistics */
+		SpinLockAcquire(&pgss->mutex);
+		pgss->stats.dealloc = 0;
+		pgss->stats.stats_reset = stats_reset;
+		SpinLockRelease(&pgss->mutex);
+
+		return stats_reset;
+	}
+
+	/* Traditional shared_preload_libraries mode */
+	LWLockAcquire(pgss->lock, LW_EXCLUSIVE);
+	num_entries = hash_get_num_entries(pgss_hash);
 
 	if (userid != 0 && dbid != 0 && queryid != INT64CONST(0))
 	{
