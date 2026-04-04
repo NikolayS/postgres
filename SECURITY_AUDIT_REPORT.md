@@ -2,471 +2,327 @@
 
 - **Date:** 2026-04-04
 - **Scope:** PostgreSQL server and libpq client source code
-- **Methodology:** Manual source code review of security-critical subsystems
-- **Auditors:** 3-person team covering Authentication/Crypto, Network/Input, and Memory Safety/Privilege Escalation
+- **Methodology:** Manual source code review of security-critical subsystems, multi-pass with independent peer review
+- **Auditors:** Multi-team audit covering Authentication/Crypto, Network/Input, Memory Safety/Privilege Escalation, plus independent deep-dive review
 
 ---
 
 ## Executive Summary
 
-This audit identified **31 security findings** across the PostgreSQL codebase, ranging from informational observations to high-severity design issues. The codebase demonstrates mature security engineering overall -- message parsing is well-bounded, memory contexts prevent many common C vulnerabilities, and privilege checks are consistently applied. However, several classes of issues persist:
+This audit combined a broad initial pass with a focused deep-dive into complex code paths. The PostgreSQL codebase is mature and well-engineered -- wire protocol parsing is robust, memory contexts prevent many common C bugs, and privilege checks are consistently applied.
 
-- **Timing side-channels** in authentication code (4 findings)
-- **Sensitive data not cleared from memory** (3 findings)
-- **Weak/legacy cryptographic primitives** still supported (3 findings)
-- **Insufficient input validation** in binary protocol receivers (2 findings)
-- **Privilege escalation surfaces** through extensions and large objects (3 findings)
+The initial pass identified mostly **well-known design trade-offs** (timing attacks, MD5 deprecation, lo_import/lo_export). The deep-dive review found **genuinely novel, actionable bugs** including an uninterruptible DoS in COPY BINARY, a client SCRAM parser bug, and a RADIUS bounds check error.
 
-### Severity Distribution
+### Novel Findings (Deep-Dive)
 
-| Severity | Count |
-|----------|-------|
-| High | 1 |
-| Medium | 16 |
-| Low | 8 |
-| Informational | 6 |
+| ID | Finding | Severity | Exploitability |
+|----|---------|----------|----------------|
+| N-1 | COPY BINARY header loop: uninterruptible DoS | Medium | Any authenticated user |
+| N-2 | SCRAM client accepts trailing garbage in server messages | Medium | Malicious server / MITM |
+| N-3 | RADIUS response source IP not validated | Medium | Network attacker |
+| N-4 | RADIUS attribute bounds check off-by-two | Low-Medium | Latent bug |
+| N-5 | Missing `check_stack_depth()` in binary recv functions | Low-Medium | Authenticated user |
+| N-6 | TOAST decompression memory bomb | Low | Requires disk corruption |
+| N-7 | Deferred triggers lack `RestrictSearchPath()` | Low | Authenticated user |
+
+### Known Issues (Initial Pass, Reassessed)
+
+| ID | Finding | Severity | Notes |
+|----|---------|----------|-------|
+| K-1 | SCRAM iteration count GUC minimum is 1 | Medium | Trivial one-line fix |
+| K-2 | XML Billion Laughs via `XML_PARSE_NOENT` | Medium | Most exploitable known issue |
+| K-3 | `system()` without shell escaping in archive commands | Medium | Low effort fix |
+| K-4 | `numeric_recv()` unbounded allocation | Medium | Authenticated DoS |
+| K-5 | Client doesn't enforce SCRAM iteration minimum | Medium | Downgrade attack |
+| K-6 | SCRAM `scram_verify_plain_password()` timing | Low-Medium | Network jitter limits exploitability |
+| K-7 | SCRAM `verify_client_proof()` timing | Low | Nonce prevents exploitation |
+| K-8 | MD5 `strcmp()` timing | Low | MD5 already deprecated |
+| K-9 | RADIUS `memcmp()` timing | Low | Requires MITM position |
+| K-10 | Trusted extension privilege escalation surface | Medium | Requires OS-level filesystem compromise |
+| K-11 | No memory clearing for SCRAM key material | Low | Memory forensics scenario |
+| K-12 | PAM password not zeroed | Low | Memory forensics scenario |
+| K-13 | LDAP plaintext bind | Low | Configuration-dependent |
+| K-14 | MD5 auth still supported | Low | On deprecation path |
+| K-15 | Unbounded `sprintf()` systemic pattern | Low | Long-term migration |
 
 ---
 
-## Table of Contents
+## Part 1: Novel Findings
 
-1. [Authentication & Cryptography](#1-authentication--cryptography)
-2. [Network Protocol & Input Validation](#2-network-protocol--input-validation)
-3. [Memory Safety & Privilege Escalation](#3-memory-safety--privilege-escalation)
-
----
-
-## 1. Authentication & Cryptography
-
-### 1.1 Timing Attack in MD5 Password Verification
+### N-1: COPY BINARY Header Extension -- Uninterruptible DoS Loop
 
 - **Severity:** Medium
-- **File:** `src/backend/libpq/crypt.c`, lines 296 and 375
+- **File:** `src/backend/commands/copyfromparse.c`, lines 219-232
+- **Privileges required:** Any authenticated user with COPY privilege (default for table owners)
 
-**Description:** Both `md5_crypt_verify()` and `plain_crypt_verify()` use `strcmp()` for comparing password hashes. `strcmp()` is not constant-time -- it returns as soon as it finds a mismatching byte. An attacker with precise network timing measurements could progressively determine bytes of the correct password hash.
-
-**Vulnerable code:**
-```c
-// Line 296 (md5_crypt_verify)
-if (strcmp(client_pass, crypt_pwd) == 0)
-
-// Line 375 (plain_crypt_verify)
-if (strcmp(crypt_client_pass, shadow_pass) == 0)
-```
-
-**Exploitation scenario:** Repeated password guesses with timing measurements to leak hash bytes.
-
-**Remediation:** Replace `strcmp()` with a constant-time comparison function (e.g., `CRYPTO_memcmp` from OpenSSL).
-
----
-
-### 1.2 Timing Attack in SCRAM `scram_verify_plain_password()`
-
-- **Severity:** Medium
-- **File:** `src/backend/libpq/auth-scram.c`, line 582
-
-**Description:** Uses `memcmp()` to compare the computed ServerKey against the stored ServerKey. Called during plaintext password authentication when a user has a SCRAM-SHA-256 stored secret.
+**Description:** When parsing a COPY BINARY header, the extension length is read as an `int32`. The code then reads the extension data one byte at a time in a tight loop with **no `CHECK_FOR_INTERRUPTS()` call**. The entire `copyfromparse.c` header parsing path contains zero interrupt checks -- the only one is in the per-row loop in `copyfrom.c:1119`, which runs *after* header parsing completes.
 
 **Vulnerable code:**
 ```c
-return memcmp(computed_key, server_key, key_length) == 0;
+/* Header extension length */
+if (!CopyGetInt32(cstate, &tmp) || tmp < 0)
+    ereport(ERROR, ...);
+/* Skip extension header, if present */
+while (tmp-- > 0)
+{
+    if (CopyReadBinaryData(cstate, readSig, 1) != 1)
+        ereport(ERROR, ...);
+}
 ```
 
-**Remediation:** Replace with constant-time comparison.
+**Exploitation scenario:** An attacker executes `COPY table FROM STDIN (FORMAT binary)`, sends a valid header with `extension_length = INT_MAX` (2,147,483,647), then slowly feeds bytes. The backend is pinned in this tight loop and **cannot be cancelled** by `pg_cancel_backend()` or `statement_timeout`. Only `pg_terminate_backend()` (SIGKILL) can stop it. This can be used to exhaust backend connection slots.
+
+**Remediation:** Add `CHECK_FOR_INTERRUPTS()` inside the `while` loop, or read the extension in bulk via a single `CopyReadBinaryData(cstate, buf, tmp)` call.
 
 ---
 
-### 1.3 Timing Attack in SCRAM `verify_client_proof()`
+### N-2: Client SCRAM Parser Accepts Trailing Garbage in Server Messages
 
-- **Severity:** Low
-- **File:** `src/backend/libpq/auth-scram.c`, line 1189
+- **Severity:** Medium (protocol conformance bug)
+- **File:** `src/interfaces/libpq/fe-auth-scram.c`, lines 683-686 and 732-733
 
-**Description:** The SCRAM client proof verification uses non-constant-time `memcmp()`. Lower practical impact because the proof changes every attempt due to the nonce, but deviates from cryptographic best practice.
+**Description:** In both `read_server_first_message()` and `read_server_final_message()`, the client detects trailing garbage in the server's SCRAM response, appends an error message, but **does not return `false`**. Authentication proceeds as if the message were valid. This is clearly an intended-to-be-fatal check where someone forgot the `return false`.
 
 **Vulnerable code:**
 ```c
-if (memcmp(client_StoredKey, state->StoredKey, state->key_length) != 0)
-    return false;
+// In read_server_first_message(), line 683:
+if (*input != '\0')
+    libpq_append_conn_error(conn,
+        "malformed SCRAM message (garbage at end of server-first-message)");
+return true;  // BUG: continues authentication despite detecting garbage
+
+// In read_server_final_message(), line 732:
+if (*input != '\0')
+    libpq_append_conn_error(conn,
+        "malformed SCRAM message (garbage at end of server-final-message)");
+// falls through to return true
 ```
 
-**Remediation:** Replace with constant-time comparison.
+**Exploitation scenario:** A malicious server or MITM can inject arbitrary trailing data in SCRAM messages and the client silently accepts it. While it doesn't affect the cryptographic proof (fields are already parsed), it violates strict protocol parsing and could mask injection of future protocol extensions.
+
+**Remediation:** Add `return false;` after each `libpq_append_conn_error` call in both locations.
 
 ---
 
-### 1.4 Timing Attack in RADIUS Response Authenticator Verification
+### N-3: RADIUS Response Source IP Address Not Validated
 
-- **Severity:** Medium
-- **File:** `src/backend/libpq/auth.c`, line 3244
+- **Severity:** Medium (defense-in-depth gap)
+- **File:** `src/backend/libpq/auth.c`, lines 3173-3190
 
-**Description:** RADIUS response authenticator verified using `memcmp()`. A man-in-the-middle between PostgreSQL and the RADIUS server could forge response packets and use timing information to discover the shared secret.
+**Description:** The RADIUS UDP socket is unconnected (`sendto()` at line 3092 instead of `connect()` + `send()`), so `recvfrom()` accepts packets from **any source IP**. The MD5 response authenticator check (line 3232-3244) provides cryptographic verification, but if the shared secret is weak, an attacker on the local network can send spoofed `ACCESS_ACCEPT` packets to bypass authentication.
+
+**Remediation:** Use `connect()` on the UDP socket to restrict incoming packets to the configured RADIUS server address.
+
+---
+
+### N-4: RADIUS Attribute Bounds Check Off-by-Two
+
+- **Severity:** Low-Medium (latent buffer overwrite)
+- **File:** `src/backend/libpq/auth.c`, line 2832
+
+**Description:** The bounds check in `radius_add_attribute()` accounts for `len` data bytes but **not the 2-byte attribute header** (type + length fields). Each attribute actually consumes `len + 2` bytes.
 
 **Vulnerable code:**
 ```c
-if (memcmp(receivepacket->vector, encryptedpassword, RADIUS_VECTOR_LENGTH) != 0)
+static void
+radius_add_attribute(radius_packet *packet, uint8 type,
+                     const unsigned char *data, int len)
+{
+    if (packet->length + len > RADIUS_BUFFER_SIZE)  // BUG: should be len + 2
+    {
+        elog(WARNING, ...);
+        return;
+    }
+    attr->attribute = type;
+    attr->length = len + 2;   /* type (1) + length (1) + data (len) */
+    memcpy(attr->data, data, len);
+    packet->length += attr->length;  // adds len + 2, not len
+}
 ```
 
-**Remediation:** Use a constant-time comparison function.
+**Current mitigation:** The `radius_packet` struct has a `pad` field providing ~4 bytes of slack beyond what the check guards. The off-by-2 cannot currently exceed this margin, but this is fragile -- any future struct layout change could make it exploitable as a stack buffer overwrite.
+
+**Remediation:** Change the check to `packet->length + len + 2 > RADIUS_BUFFER_SIZE`.
 
 ---
 
-### 1.5 SCRAM Iteration Count Minimum is 1 (Server-Side)
+### N-5: Missing `check_stack_depth()` in Binary Receive Functions
+
+- **Severity:** Low-Medium
+- **Files:**
+  - `src/backend/utils/adt/arrayfuncs.c` -- `array_recv()` (line 1275)
+  - `src/backend/utils/adt/multirangetypes.c` -- `multirange_recv()` (line 337)
+  - `src/backend/utils/adt/domains.c` -- `domain_recv()` (line 287)
+
+**Description:** These binary receive functions can recurse through composite types (e.g., `array_recv -> record_recv -> array_recv -> ...`) but lack `check_stack_depth()` calls. Peer functions like `record_recv()` and `range_recv()` correctly include them.
+
+`domain_recv()` is particularly concerning: domains can chain arbitrarily deep (domain over domain over domain...) with no system-level limit on nesting depth. A deeply nested domain chain exercised via binary protocol could overflow the stack before any check fires.
+
+**Remediation:** Add `check_stack_depth()` at the top of `array_recv()`, `multirange_recv()`, and `domain_recv()`.
+
+---
+
+### N-6: TOAST Decompression Memory Bomb
+
+- **Severity:** Low (requires on-disk corruption or superuser)
+- **File:** `src/backend/access/common/toast_compression.c`, lines 82 and 182
+
+**Description:** The claimed decompressed size is read from the datum's header (30-bit field, max ~1GB). A tiny compressed datum with a corrupted header claiming 1GB decompressed size causes a 1GB `palloc` before decompression begins. The decompressors themselves (`LZ4_decompress_safe`, `pglz_decompress`) are safe, so this is memory exhaustion only, not a buffer overflow.
+
+**Remediation:** Validate that the claimed decompressed size is reasonable relative to the compressed size before allocating.
+
+---
+
+### N-7: Deferred Triggers Lack `RestrictSearchPath()`
+
+- **Severity:** Low (defense-in-depth gap)
+- **File:** `src/backend/commands/trigger.c`, lines 4551-4572
+
+**Description:** Deferred constraint triggers fire at commit time using the triggering role's identity (`SetUserIdAndSecContext`), but there is **no `RestrictSearchPath()` call**. This is inconsistent with index builds (`catalog/index.c:3055`), materialized view refresh (`commands/matview.c:194`), and VACUUM/ANALYZE, which all call `RestrictSearchPath()`.
+
+If a deferred trigger function uses unqualified names and `search_path` is modified between the triggering statement and commit, the trigger could resolve names differently than intended.
+
+**Remediation:** Add `RestrictSearchPath()` call before deferred trigger execution, consistent with other protected contexts.
+
+---
+
+## Part 2: Known Issues (Reassessed Severity)
+
+### K-1: SCRAM Iteration Count GUC Minimum is 1
 
 - **Severity:** Medium
 - **File:** `src/backend/utils/misc/guc_parameters.dat`
 
-**Description:** The `scram_iterations` GUC allows setting the PBKDF2 iteration count as low as 1. RFC 7677 specifies a minimum of 4096. An administrator could misconfigure this, making SCRAM secrets trivially brute-forceable. Additionally, `parse_scram_secret()` in `auth-scram.c` performs no minimum iteration count validation when parsing stored secrets.
+**Description:** The `scram_iterations` GUC allows values as low as 1. RFC 7677 mandates minimum 4096. Additionally, `parse_scram_secret()` in `auth-scram.c` (line 640-643) accepts iterations=0 or negative values from stored secrets. With `iterations=0`, `scram_SaltedPassword()` reduces PBKDF2 to a single HMAC pass.
 
-**Exploitation scenario:** DBA sets `scram_iterations = 1` to reduce CPU load; attacker who obtains `pg_authid` cracks passwords with negligible effort.
-
-**Remediation:** Set the GUC minimum to 4096 per RFC 7677. Add validation in `parse_scram_secret()`.
+**Remediation:** Set GUC minimum to 4096. Add validation in `parse_scram_secret()` to reject `iterations < 1`.
 
 ---
 
-### 1.6 Client Does Not Enforce Minimum SCRAM Iteration Count
+### K-2: XML Billion Laughs via `XML_PARSE_NOENT` (Enhanced Analysis)
 
 - **Severity:** Medium
-- **File:** `src/interfaces/libpq/fe-auth-scram.c`, lines 676-681
+- **File:** `src/backend/utils/adt/xml.c`, lines 1851-1888
 
-**Description:** The client (libpq) accepts any iteration count >= 1 from the server. A malicious server or MITM attacker can set `i=1`, causing the client to compute a SCRAM proof with minimal key stretching, enabling password recovery. No maximum is enforced either, enabling CPU DoS on the client.
+**Description:** Beyond the basic `XML_PARSE_NOENT` issue, there is a **DOCTYPE promotion mechanism**: when `xmloption = CONTENT` (the default), PostgreSQL's `xml_parse()` silently promotes any input containing a DOCTYPE declaration to DOCUMENT-mode parsing, which enables `XML_PARSE_NOENT`. This means DBAs who believe CONTENT-mode is safer get no protection -- any authenticated user can force entity expansion by including `<!DOCTYPE ...>` in their XML.
 
-**Vulnerable code:**
-```c
-state->iterations = strtol(iterations_str, &endptr, 10);
-if (*endptr != '\0' || state->iterations < 1)
-```
+**Exploitation scenario:** `SELECT '<xml/>'::xml` is safe, but `SELECT '<!DOCTYPE d [<!ENTITY x "...">]><d>&x;</d>'::xml` triggers DOCUMENT-mode with entity expansion even when `xmloption = CONTENT`.
 
-**Remediation:** Enforce minimum (e.g., 4096) and maximum (e.g., 100,000,000) iteration counts on the client.
+**Remediation:** Set `xmlCtxtSetMaxAmplification()` or equivalent libxml2 limits.
 
 ---
 
-### 1.7 MD5 Authentication Still Fully Supported
+### K-3: `system()` Without Shell Escaping in Archive Commands
 
-- **Severity:** Medium (Design-level)
-- **File:** `src/backend/libpq/auth.c`, lines 859-860; `src/backend/libpq/crypt.c`, lines 199-204
+- **Severity:** Medium (configuration-dependent)
+- **File:** `src/backend/archive/shell_archive.c`, line 81; `src/backend/access/transam/xlogarchive.c`, line 178
 
-**Description:** MD5 password hashing (`MD5(password + username)`) has no random salt and no key stretching. The `password` auth method sends passwords in cleartext without TLS. Deprecation warnings now exist but the mechanism remains functional.
+**Description:** Archive/restore commands interpolate `%p` (path) without shell escaping. A data directory path containing shell metacharacters could cause command injection. Requires superuser to configure, but the escaping gap is a bad pattern.
 
-**Remediation:** Continue deprecation process; establish a firm removal timeline.
-
----
-
-### 1.8 PAM Password Stored in Static Global, Not Zeroed
-
-- **Severity:** Low
-- **File:** `src/backend/libpq/auth.c`, lines 114, 2048
-
-**Description:** The PAM auth path stores the plaintext password in a static global `pam_passwd`. After authentication, the pointer is set to NULL but the actual memory contents are not zeroed -- the password remains in the palloc'd buffer until reused.
-
-**Remediation:** Use `explicit_bzero()` on password buffers before freeing.
+**Remediation:** Apply shell escaping to substitution values.
 
 ---
 
-### 1.9 LDAP Sends Password Over Potentially Unencrypted Connection
-
-- **Severity:** Medium (Configuration-dependent)
-- **File:** `src/backend/libpq/auth.c`, line 2643
-
-**Description:** LDAP authentication uses `ldap_simple_bind_s()` which performs a plaintext LDAP bind. If neither LDAPS nor StartTLS is configured, the password traverses two unencrypted hops: client-to-PostgreSQL and PostgreSQL-to-LDAP.
-
-**Remediation:** Issue warnings at HBA parse time when `ldapscheme` and `ldaptls` are both unset.
-
----
-
-### 1.10 No Memory Clearing for SCRAM Key Material
-
-- **Severity:** Low
-- **File:** `src/interfaces/libpq/fe-auth-scram.c`, lines 181-203
-
-**Description:** `scram_free()` frees the SCRAM state including `password` and `SaltedPassword` without zeroing first. Server-side code similarly does not zero `ClientKey`, `StoredKey`, `ServerKey` fields.
-
-**Remediation:** Call `explicit_bzero()` on sensitive fields before freeing.
-
----
-
-### 1.11 RADIUS Password Length Limit
-
-- **Severity:** Low (Informational)
-- **File:** `src/backend/libpq/auth.c`, lines 2787-2892
-
-**Description:** RADIUS rejects passwords > 128 bytes (RFC 2865 protocol limit). Error is only logged server-side; the client receives a generic auth failure.
-
-**Remediation:** Document the limitation in pg_hba.conf documentation.
-
----
-
-### 1.12 RADIUS Uses MD5 for Password Encryption
-
-- **Severity:** Medium (Protocol Limitation)
-- **File:** `src/backend/libpq/auth.c`, lines 3016-3057
-
-**Description:** RADIUS protocol uses MD5 to encrypt user passwords in transit (per RFC 2865). Vulnerable if the shared secret is weak. RADSEC (RADIUS over TLS) is not supported.
-
-**Remediation:** Document that RADIUS should only be used over trusted networks.
-
----
-
-## 2. Network Protocol & Input Validation
-
-### 2.1 XML Entity Expansion (Billion Laughs / Internal XXE)
-
-- **Severity:** Medium
-- **File:** `src/backend/utils/adt/xml.c`, lines 1882-1888
-
-**Description:** `xml_parse()` uses `XML_PARSE_NOENT` when parsing XML as DOCUMENT, enabling internal entity expansion attacks. While the external entity loader blocks external entities, internal entity definitions are still processed, enabling exponential expansion.
-
-**Vulnerable code:**
-```c
-options = XML_PARSE_NOENT | XML_PARSE_DTDATTR
-    | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS);
-```
-
-**Exploitation scenario:** Authenticated user submits XML with nested entity definitions expanding exponentially (Billion Laughs), consuming CPU and memory.
-
-**Remediation:** Set explicit libxml2 entity expansion limits. Consider making entity substitution optional via a GUC.
-
----
-
-### 2.2 Integer Overflow in `be_loread()` Allocation
-
-- **Severity:** Low
-- **File:** `src/backend/libpq/be-fsstubs.c`, lines 364-372
-
-**Description:** `len` is `int32` (max ~2B). `palloc(VARHDRSZ + len)` computes `4 + len` in signed 32-bit arithmetic. Near `INT32_MAX`, this overflows -- technically undefined behavior.
-
-**Vulnerable code:**
-```c
-int32       len = PG_GETARG_INT32(1);
-retval = (bytea *) palloc(VARHDRSZ + len);
-```
-
-**Remediation:** Cast to `Size` before addition: `palloc((Size) VARHDRSZ + (Size) len)`.
-
----
-
-### 2.3 Large Object Import/Export -- Arbitrary Server File Read/Write
-
-- **Severity:** High (Design-level)
-- **File:** `src/backend/libpq/be-fsstubs.c`, lines 424-551
-
-**Description:** `lo_import()` and `lo_export()` read from and write to arbitrary server filesystem paths. Gated by `pg_read_server_files` / `pg_write_server_files` roles, but no path sanitization, chroot, or directory restrictions exist. `lo_export` creates files with permissions 0644 (world-readable).
-
-**Exploitation scenario:** A user with `pg_read_server_files` (or via SQL injection into a superuser context) reads `/etc/shadow`, PG config files, or writes to crontabs/web directories.
-
-**Remediation:** Consider adding a GUC to restrict allowed directories for lo_import/lo_export.
-
----
-
-### 2.4 `lo_compat_privileges` Bypasses ACL Checks on Large Objects
-
-- **Severity:** Medium (Configuration-dependent)
-- **File:** `src/backend/storage/large_object/inv_api.c`, lines 252-264
-
-**Description:** When `lo_compat_privileges = on`, all ACL checks on large objects are skipped. Any authenticated user can read/write any large object.
-
-**Remediation:** Consider deprecating this GUC or adding a startup warning when enabled.
-
----
-
-### 2.5 Denial of Service via Unbounded `numeric_recv()` Allocation
+### K-4: `numeric_recv()` Unbounded Allocation
 
 - **Severity:** Medium
 - **File:** `src/backend/utils/adt/numeric.c`, lines 1076-1078
 
-**Description:** The binary receive function reads a `uint16` digit count (0-65535) and immediately allocates memory proportional to it. Via COPY BINARY or binary-format parameterized queries, an attacker can send many such values to exhaust backend memory.
+**Description:** Binary receive reads `uint16` digit count and allocates proportionally. Via COPY BINARY, a client can send many 65535-digit values to exhaust backend memory.
 
-**Remediation:** Add a reasonableness check on `ndigits` (e.g., limit to a few thousand digits).
-
----
-
-### 2.6 Client-Side Integer Overflow Risk in `getAnotherTuple()`
-
-- **Severity:** Low (Client-side)
-- **File:** `src/interfaces/libpq/fe-protocol3.c`, lines 803-806
-
-**Description:** Row buffer resizing computes `nfields * sizeof(PGdataValue)` without explicit overflow checking. Currently safe due to 16-bit protocol field bounds, but lacks defense-in-depth.
-
-**Remediation:** Add explicit upper-bound checks on field counts.
+**Remediation:** Add reasonableness check on `ndigits`.
 
 ---
 
-### 2.7 `XML_PARSE_DTDATTR` Enables Internal DTD Processing
-
-- **Severity:** Low
-- **File:** `src/backend/utils/adt/xml.c`, line 1882
-
-**Description:** Intentional per SQL/XML:2008, but internal DTD processing enables entity-based attacks and can consume significant CPU for complex DTDs.
-
----
-
-### 2.8 Fastpath Function Calls Bypass SQL-Level Security Policies
-
-- **Severity:** Medium (Design-level)
-- **File:** `src/backend/tcop/fastpath.c`, lines 187-299
-
-**Description:** The fastpath (PQfn) interface calls functions by OID, bypassing Row-Level Security policies, event triggers, and query-level auditing. It does check schema USAGE and function EXECUTE ACLs.
-
-**Remediation:** Add security hooks to the fastpath path, or fully deprecate the protocol.
-
----
-
-### 2.9 SSL Buffered Data MITM Detection
-
-- **Severity:** Informational (Positive finding)
-- **File:** `src/backend/tcop/backend_startup.c`, lines 626-630
-
-**Description:** After SSL negotiation, the code correctly checks for buffered unencrypted data that arrived before the handshake, detecting potential MITM injection. Good security practice.
-
----
-
-### 2.10 Extended Query Protocol Error Handling
-
-- **Severity:** Informational
-- **File:** `src/backend/tcop/postgres.c`, lines 4789-4790
-
-**Description:** The `ignore_till_sync` mechanism correctly handles protocol desynchronization during extended query errors. Well-implemented.
-
----
-
-## 3. Memory Safety & Privilege Escalation
-
-### 3.1 TOCTOU Race Condition in `pg_signal_backend()`
+### K-5: Client Doesn't Enforce SCRAM Iteration Minimum
 
 - **Severity:** Medium
-- **File:** `src/backend/storage/ipc/signalfuncs.c`, lines 52-124
+- **File:** `src/interfaces/libpq/fe-auth-scram.c`, lines 676-681
 
-**Description:** Race between privilege check (which looks up the target process's role) and the `kill()` call. Between these points, the PID could be recycled by a more privileged process. The code acknowledges this risk in a comment.
+**Description:** libpq accepts `i=1` from server, enabling password recovery by a rogue server. No maximum is enforced either, enabling CPU DoS.
 
-**Exploitation scenario:** On systems with randomized PID assignment, an attacker with `pg_signal_backend` could race to terminate a superuser-owned backend.
-
-**Remediation:** Consider using `pidfd_send_signal()` on Linux, or compare process start timestamps.
+**Remediation:** Enforce minimum 4096, maximum ~100M.
 
 ---
 
-### 3.2 Trusted Extension Privilege Escalation Surface
+### K-6 through K-9: Timing Attacks in Authentication (Consolidated)
+
+- **Severity:** Low-Medium (K-6), Low (K-7, K-8, K-9)
+- **Files:** `src/backend/libpq/auth-scram.c` (lines 582, 1189), `src/backend/libpq/crypt.c` (lines 296, 375), `src/backend/libpq/auth.c` (line 3244)
+
+**Description:** Non-constant-time `memcmp()`/`strcmp()` in password and SCRAM verification. Real but low practical exploitability over network connections due to jitter, buffering, and TLS overhead. The MD5 timing attack (K-8) is on a deprecated mechanism. The RADIUS timing attack (K-9) requires MITM between PG and RADIUS server.
+
+**Remediation:** Replace with constant-time comparisons. Low effort, good defense-in-depth.
+
+---
+
+### K-10: Trusted Extension Privilege Escalation
 
 - **Severity:** Medium
 - **File:** `src/backend/commands/extension.c`, lines 1266-1304
 
-**Description:** When a trusted extension has `superuser = true` and `trusted = true`, a non-superuser with CREATE privilege triggers the backend to elevate to `BOOTSTRAP_SUPERUSERID` to execute the extension's SQL script. Security depends entirely on directory permissions.
-
-**Vulnerable code:**
-```c
-if (switch_to_superuser)
-{
-    SetUserIdAndSecContext(BOOTSTRAP_SUPERUSERID,
-                           save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
-}
-```
-
-**Exploitation scenario:** If `extension_control_path` includes a user-writable directory, a non-superuser places a malicious `.control` file with `trusted = true` and `superuser = true`, gaining superuser execution.
-
-**Remediation:** Validate directory permissions on `extension_control_path` entries.
+**Description:** Non-superuser with CREATE privilege can trigger superuser execution if `extension_control_path` includes a writable directory. `extension_control_path` is properly `PGC_SUSET` + `GUC_SUPERUSER_ONLY`, so exploitation requires OS-level filesystem compromise of a directory a superuser added to the path.
 
 ---
 
-### 3.3 Integer Truncation in `pg_terminate_backend()` Timeout
+### K-11 through K-15: Lower-Priority Known Issues
 
-- **Severity:** Low
-- **File:** `src/backend/storage/ipc/signalfuncs.c`, lines 239-242
-
-**Description:** `timeout` declared as `int` but read via `PG_GETARG_INT64()`. Values like 2^32 truncate to 0, causing the function to skip the wait entirely.
-
-**Remediation:** Use `int64` for the timeout variable or validate range before truncation.
-
----
-
-### 3.4 Trigger Argument Count Integer Overflow (int16)
-
-- **Severity:** Low
-- **File:** `src/backend/commands/trigger.c`, line 888
-
-**Description:** `nargs` stored as `int16` but `list_length()` returns `int`. If > 32767 arguments, the value silently wraps.
-
-**Remediation:** Add explicit bounds check: `if (nargs > PG_INT16_MAX) ereport(ERROR, ...)`.
+- **K-11 (Low):** SCRAM key material not zeroed before free -- `src/interfaces/libpq/fe-auth-scram.c:181-203`
+- **K-12 (Low):** PAM password in static global not zeroed -- `src/backend/libpq/auth.c:114`
+- **K-13 (Low):** LDAP plaintext bind when LDAPS/StartTLS not configured -- `src/backend/libpq/auth.c:2643`
+- **K-14 (Low):** MD5 authentication still supported, on deprecation path -- `src/backend/libpq/auth.c:859`
+- **K-15 (Low):** Systemic unbounded `sprintf()` usage -- `src/port/snprintf.c:213-227`
 
 ---
 
-### 3.5 Systemic Use of Unbounded `sprintf()`
+## Part 3: Areas Audited and Found Clean
 
-- **Severity:** Medium (Systemic risk)
-- **File:** `src/port/snprintf.c`, lines 213-227
+The following areas were thoroughly reviewed and found well-implemented:
 
-**Description:** `pg_vsprintf()` sets `bufend = NULL` (no bounds checking). Any caller using `sprintf()` into a fixed-size buffer has a potential buffer overflow. While individually audited instances appear safe, the pattern is fragile for future code.
-
-**Vulnerable code:**
-```c
-target.bufend = NULL;  /* no limit! */
-```
-
-**Remediation:** Systematically replace `sprintf()` with `snprintf()`. Add `-Wformat-overflow` compiler warnings.
-
----
-
-### 3.6 `system()` Calls with Command Injection Risk Surface
-
-- **Severity:** Medium (Configuration-dependent)
-- **File:** `src/backend/archive/shell_archive.c`, line 81; `src/backend/access/transam/xlogarchive.c`, line 178
-
-**Description:** Archive and restore commands pass superuser-configured GUC strings to `system()`. The `%p` placeholder (path) is interpolated without shell escaping. A data directory path containing shell metacharacters could cause command injection.
-
-**Remediation:** Apply shell escaping to substitution values before interpolation.
+- **Wire protocol message parsing** (`src/backend/tcop/postgres.c`): Robust length validation, proper bounds checking in all `pq_getmsg*` functions
+- **StringInfo API** (`src/common/stringinfo.c`): Overflow guards in `enlargeStringInfo()`, proper negative-value handling
+- **Extension system quoting** (`src/backend/commands/extension.c`): `quoting_relevant_chars` validation is sound for `@extschema@` and `@extowner@`
+- **SECURITY DEFINER cleanup** (`src/backend/utils/fmgr/fmgr.c`): Error-path cleanup correctly relies on transaction abort
+- **RLS enforcement**: Correctly applied to COPY, logical replication, CREATE MATERIALIZED VIEW AS
+- **LEAKPROOF checks**: Properly enforced for both CREATE and ALTER FUNCTION
+- **SSL buffered data MITM detection** (`src/backend/tcop/backend_startup.c:626-630`): Correctly rejects pre-handshake data
+- **Extended query error handling** (`src/backend/tcop/postgres.c:4789`): `ignore_till_sync` correctly prevents desync
+- **No `alloca()` or VLA usage** found in backend code; PostgreSQL consistently uses `palloc()`
 
 ---
 
-### 3.7 Superuser Cache Staleness Window
+## Part 4: Priority Recommendations
 
-- **Severity:** Informational
-- **File:** `src/backend/utils/misc/superuser.c`, lines 57-97
+### Fix Now (low effort, real impact)
 
-**Description:** `superuser_arg()` uses a single-entry cache that is invalidated asynchronously. Revoking superuser status does not take immediate effect in existing sessions. This is expected PostgreSQL behavior.
+1. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
+2. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
+3. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
+4. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
 
----
+### Fix Soon (moderate effort, defense-in-depth)
 
-### 3.8 `check_function_bodies` Disabled During Extension Scripts
+5. **RADIUS source IP validation** (N-3): Switch to `connect()` on UDP socket.
+6. **XML entity expansion limits** (K-2): Set `xmlCtxtSetMaxAmplification()` or equivalent.
+7. **Missing `check_stack_depth()`** (N-5): Add calls to `array_recv`, `multirange_recv`, `domain_recv`.
+8. **Server-side SCRAM iteration validation** (K-1 extension): Validate `iterations > 0` in `parse_scram_secret()`.
+9. **Client SCRAM iteration bounds** (K-5): Enforce min/max on client side.
 
-- **Severity:** Low
-- **File:** `src/backend/commands/extension.c`, lines 1334-1338
+### Backlog (known trade-offs, long-term)
 
-**Description:** SQL functions in extension scripts are not validated during creation. Combined with trusted extensions (Finding 3.2), a compromised script could define malicious functions bypassing creation-time validation.
+10. Shell escaping in archive commands (K-3)
+11. Memory zeroing for key material (K-11, K-12)
+12. Constant-time comparisons in auth (K-6 through K-9)
+13. MD5 deprecation completion (K-14)
+14. `numeric_recv()` bounds check (K-4)
+15. `sprintf` -> `snprintf` migration (K-15)
 
----
+### Not Worth Fixing
 
-### 3.9 `MODULE_PATHNAME` Substitution Without Quoting Validation
-
-- **Severity:** Low
-- **File:** `src/backend/commands/extension.c`, lines 1477-1484
-
-**Description:** `MODULE_PATHNAME` replacement in extension SQL scripts does not check for quoting-relevant characters (`"`, `$`, `'`, `\`), unlike `@extowner@` and `@extschema@`. A malicious `module_pathname` in a control file could inject SQL.
-
-**Remediation:** Apply the same `quoting_relevant_chars` validation to `module_pathname`.
-
----
-
-## Recommendations Summary
-
-### Immediate (High Priority)
-
-1. **Replace all non-constant-time comparisons** in auth code (`strcmp`/`memcmp` -> constant-time compare) -- Findings 1.1-1.4
-2. **Set SCRAM iteration minimum to 4096** (server GUC and client enforcement) -- Findings 1.5-1.6
-3. **Add directory permission validation** for `extension_control_path` -- Finding 3.2
-
-### Short-Term (Medium Priority)
-
-4. **Zero sensitive memory** (`explicit_bzero`) before freeing passwords and key material -- Findings 1.8, 1.10
-5. **Add bounds checking** to `numeric_recv()` digit count -- Finding 2.5
-6. **Migrate `sprintf()` -> `snprintf()`** systematically -- Finding 3.5
-7. **Apply shell escaping** in archive/restore command substitution -- Finding 3.6
-8. **Set entity expansion limits** for XML parsing -- Finding 2.1
-9. **Validate `module_pathname`** for quoting-relevant characters -- Finding 3.9
-
-### Long-Term (Design-Level)
-
-10. **Complete MD5 authentication deprecation** and removal -- Finding 1.7
-11. **Deprecate `lo_compat_privileges`** GUC -- Finding 2.4
-12. **Add directory restrictions** for `lo_import`/`lo_export` -- Finding 2.3
-13. **Add security hooks to fastpath** or fully deprecate it -- Finding 2.8
-14. **Use `pidfd_send_signal()`** on modern Linux to close TOCTOU window -- Finding 3.1
-15. **Require LDAPS/StartTLS** or warn when LDAP is configured without encryption -- Finding 1.9
+- **lo_import/lo_export directory restrictions**: Working as designed, role-gated behind near-superuser privileges
+- **Fastpath RLS bypass**: Fastpath is essentially deprecated
+- **Superuser cache staleness**: Documented, expected behavior
+- **TOCTOU in pg_signal_backend**: Theoretical on modern systems, acknowledged in code
 
 ---
 
