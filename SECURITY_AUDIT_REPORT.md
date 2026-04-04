@@ -67,6 +67,17 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 | A-1 | MERGE with RLS produces errors instead of silent filtering | Low | Information disclosure by design, acknowledged in code |
 | A-2 | `GUC_SAFE_SEARCH_PATH` includes `pg_temp` | Very Low | Mitigated by `SECURITY_RESTRICTED_OPERATION` |
 
+### Pattern Scan, New Features & Remaining Contrib (Wave 4)
+
+| ID | Finding | Severity | Exploitability |
+|----|---------|----------|----------------|
+| P-1 | ECPG strncpy buffer overflow from malicious server | Medium | Rogue server -> ECPG client |
+| P-2 | DecodeMultiInsert Assert-only bounds in WAL decoding | Medium | Compromised WAL stream |
+| P-3 | OAuth has no built-in JWT token validation | Medium | Buggy validator module |
+| P-4 | OAuth `PGOAUTHDEBUG=UNSAFE` downgrades HTTPS | Medium | Shared hosting env var manipulation |
+| P-5 | Temp files without O_EXCL (symlink attack) | Medium | Misconfigured data dir permissions |
+| P-6 | dblink loopback bypasses session-level RLS | Medium | User who knows their own password |
+
 ### Known Issues (Initial Pass, Reassessed)
 
 | ID | Finding | Severity | Notes |
@@ -338,7 +349,99 @@ appendPQExpBuffer(query, ", '%s');\n", subinfo->suboriginremotelsn);
 
 ---
 
-## Part 3: Novel Protocol & Implementation Bugs
+## Part 3: Wave 4 -- Pattern Scan, New Features & Remaining Contrib
+
+### P-1: ECPG Client Buffer Overflow via strncpy Without Null Termination
+
+- **Severity:** Medium
+- **File:** `src/interfaces/ecpg/ecpglib/descriptor.c`, line 201; `src/interfaces/ecpg/ecpglib/data.c`, lines 209, 614, 639
+- **Privileges required:** Malicious server sending long column values to ECPG client
+
+**Description:** ECPG's data retrieval uses `strncpy(var, value, varcharsize)` which does not null-terminate if `value` is longer than `varcharsize`. The buffer is then used as a C string. Worse, at `data.c` line 209, when `varcharsize == 0`, an unbounded `memcpy(variable->arr, value, strlen(value))` occurs.
+
+**Vulnerable code:**
+```c
+// descriptor.c:201
+strncpy(var, value, varcharsize);  // no null termination if value >= varcharsize
+
+// data.c:209
+if (varcharsize == 0)
+    memcpy(variable->arr, value, strlen(value));  // unbounded heap write
+```
+
+**Impact:** Stack/heap buffer overflow in ECPG client applications. Exploitable by a rogue server.
+
+**Remediation:** Use `strlcpy()` instead of `strncpy()`. Add bounds check before the `varcharsize == 0` memcpy.
+
+---
+
+### P-2: DecodeMultiInsert Assert-Only Bounds Check in WAL Decoding
+
+- **Severity:** Medium
+- **File:** `src/backend/replication/logical/decode.c`, lines 1142-1200 (`DecodeMultiInsert`)
+- **Privileges required:** Compromised upstream server or MITM on replication stream
+
+**Description:** The loop trusts `xlrec->ntuples` and each `xlhdr->datalen` from WAL records without runtime validation against the actual data block size. Only an `Assert(data == tupledata + tuplelen)` at line 1200 catches inconsistency -- compiled out in production.
+
+**Vulnerable code:**
+```c
+for (i = 0; i < xlrec->ntuples; i++)
+{
+    xlhdr = (xl_multi_insert_tuple *) SHORTALIGN(data);
+    datalen = xlhdr->datalen;    // No bounds check against tuplelen!
+    memcpy((char *) tuple->t_data + SizeofHeapTupleHeader, data, datalen);
+    data += datalen;
+}
+Assert(data == tupledata + tuplelen);  // Assert only!
+```
+
+**Impact:** Out-of-bounds read from WAL record buffer, crash or info disclosure in logical decoding worker. Same class of bug as X-1.
+
+---
+
+### P-3: OAuth Authentication Has No Built-in Token Validation
+
+- **Severity:** Medium (architectural)
+- **File:** `src/backend/libpq/auth-oauth.c`, lines 637-727 (`validate`)
+
+**Description:** The server-side OAuth implementation delegates ALL token validation to an external loadable module via `ValidatorCallbacks->validate_cb()`. There is zero built-in enforcement of JWT security properties: no signature verification, no expiration checking, no audience validation, no issuer verification. A buggy validator module could accept any string as a valid token.
+
+**Impact:** Security depends entirely on third-party validator correctness, with no safety net from the core server.
+
+---
+
+### P-4: OAuth Client `PGOAUTHDEBUG=UNSAFE` Downgrades HTTPS to HTTP
+
+- **Severity:** Medium
+- **File:** `src/interfaces/libpq/fe-auth-oauth.c`, lines 382-391
+
+**Description:** Setting the environment variable `PGOAUTHDEBUG=UNSAFE` causes the client to accept HTTP (non-TLS) OAuth discovery URIs. In shared hosting environments, another process running as the same user could set this, enabling MITM attacks on the OAuth token exchange.
+
+---
+
+### P-5: Temporary Files Created Without O_EXCL (Symlink Attack Surface)
+
+- **Severity:** Medium (defense-in-depth)
+- **File:** `src/backend/storage/file/fd.c`, lines 1807-1812 (`OpenTemporaryFileInTablespace`)
+
+**Description:** Temp files use `O_CREAT | O_TRUNC` without `O_EXCL`. The comment acknowledges this is intentional for orphaned file reuse. The temp file path `base/pgsql_tmp/pgsql_tmpPID.COUNTER` is predictable. An attacker who can write to `pgsql_tmp` could create a symlink causing truncation of arbitrary files (e.g., `pg_hba.conf`).
+
+**Mitigation:** The `pgsql_tmp` directory is inside the data directory (0700 permissions). Exploitable only if permissions are misconfigured.
+
+---
+
+### P-6: dblink Loopback Can Bypass Session-Level RLS Settings
+
+- **Severity:** Medium
+- **File:** `contrib/dblink/dblink.c`, lines 196-250
+
+**Description:** dblink connecting back to `localhost` creates a wholly new session where session-level `SET ROLE`, `ALTER ROLE ... SET row_security`, and other session settings don't apply. A user who knows their own password can connect back to bypass session-level RLS configuration.
+
+**Mitigation:** Non-superusers must provide a password explicitly in the connection string (line 2760-2779).
+
+---
+
+## Part 4: Protocol & Implementation Bugs (Waves 2-3)
 
 ### N-1: COPY BINARY Header Extension -- Uninterruptible DoS Loop
 
@@ -497,7 +600,7 @@ BEGIN v := $1; RETURN true; EXCEPTION WHEN OTHERS THEN RETURN true; END $$;
 
 ---
 
-## Part 4: Memory Safety & Data Structure Integrity
+## Part 5: Memory Safety & Data Structure Integrity
 
 **Key observation:** No exploitable code execution paths were found through normal SQL input. The binary protocol `_recv` functions are generally well-audited. However, integer overflow in array operations uses undefined behavior, and on-disk data structures trust their headers without runtime validation.
 
@@ -556,7 +659,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 5: Access Control Observations
+## Part 6: Access Control Observations
 
 ### A-1: MERGE with RLS Produces Errors Instead of Silent Filtering
 
@@ -578,7 +681,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 6: Known Issues (Reassessed Severity)
+## Part 7: Known Issues (Reassessed Severity)
 
 ### K-1: SCRAM Iteration Count GUC Minimum is 1
 
@@ -667,7 +770,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 7: Areas Audited and Found Clean
+## Part 8: Areas Audited and Found Clean
 
 The following areas were thoroughly reviewed and found well-implemented:
 
@@ -700,11 +803,20 @@ The following areas were thoroughly reviewed and found well-implemented:
 - **PL/Perl recursive structures**: `plperl_sv_to_datum` calls `check_stack_depth()` at entry
 - **SPI stack integrity**: Properly saves/restores `SPI_processed`, `SPI_tuptable`, `SPI_result` at each nesting level; `AtEOSubXact_SPI`/`AtEOXact_SPI` clean up properly
 - **PL/pgSQL FOREACH ARRAY**: Array properly copied, slice dimension validated, safe iteration via `array_create_iterator`
-- **PL/pgSQL expanded object transfer**: `plpgsql_param_eval_var_transfer` properly transfers ownership and NULLs the variable to prevent double-free
+- **PL/pgSQL expanded object transfer**
+- **No format string injection anywhere**: Entire codebase consistently uses `errmsg("...%s...", user_data)` never `errmsg(user_data)`
+- **dblink SQL builder functions**: `get_sql_insert/delete/update` properly use `quote_ident_cstr()` and `quote_literal_cstr()`
+- **dblink connection string escaping**: `escape_param_str` properly escapes backslash and single-quote
+- **pgcrypto key material zeroing**: Uses `px_memset()` (separate compilation unit) to prevent compiler optimization
+- **hstore binary format**: `hstore_recv` validates all bounds, key lengths, value lengths
+- **pg_trgm complexity limits**: `MAX_EXPANDED_STATES=128`, `MAX_TRGM_COUNT=256` prevent unbounded work
+- **Error message ACL gating**: `BuildIndexValueDescription` checks RLS + column SELECT before including key values; FK violations similarly gated
+- **postgres_fdw connection isolation**: Cache keyed by user mapping OID; no credential leakage between users
+- **file_fdw privilege checks**: `pg_read_server_files` / `pg_execute_server_program` enforced at validator time: `plpgsql_param_eval_var_transfer` properly transfers ownership and NULLs the variable to prevent double-free
 
 ---
 
-## Part 8: Priority Recommendations
+## Part 9: Priority Recommendations
 
 ### Fix Immediately (Critical/High severity)
 
@@ -724,7 +836,9 @@ The following areas were thoroughly reviewed and found well-implemented:
 
 ### Fix Soon (moderate effort, defense-in-depth)
 
-9. **`postgres_fdw` IMPORT FOREIGN SCHEMA** (S-5): Quote `typename` and sanitize `attdefault` from remote server.
+9. **ECPG strncpy buffer overflow** (P-1): Replace `strncpy` with `strlcpy`, add bounds check for `varcharsize == 0`.
+10. **DecodeMultiInsert bounds check** (P-2): Convert Assert to runtime validation of `ntuples`/`datalen` against `tuplelen`.
+11. **`postgres_fdw` IMPORT FOREIGN SCHEMA** (S-5): Quote `typename` and sanitize `attdefault` from remote server.
 10. **RADIUS source IP validation** (N-3): Switch to `connect()` on UDP socket.
 11. **XML entity expansion limits** (K-2): Set `xmlCtxtSetMaxAmplification()` or equivalent.
 12. **Missing `check_stack_depth()`** (N-5): Add calls to `array_recv`, `multirange_recv`, `domain_recv`.
