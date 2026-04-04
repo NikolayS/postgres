@@ -11,9 +11,19 @@
 
 This audit combined a broad initial pass with a focused deep-dive into complex code paths. The PostgreSQL codebase is mature and well-engineered -- wire protocol parsing is robust, memory contexts prevent many common C bugs, and privilege checks are consistently applied.
 
-The initial pass identified mostly **well-known design trade-offs** (timing attacks, MD5 deprecation, lo_import/lo_export). The deep-dive review found **genuinely novel, actionable bugs** including an uninterruptible DoS in COPY BINARY, a client SCRAM parser bug, and a RADIUS bounds check error.
+The initial pass identified mostly **well-known design trade-offs** (timing attacks, MD5 deprecation, lo_import/lo_export). The deep-dive review found **genuinely novel, actionable bugs** including SQL injection in contrib modules, an uninterruptible DoS in COPY BINARY, a client SCRAM parser bug, and a RADIUS bounds check error. The privilege escalation audit confirmed that **core backend access control is extremely well-hardened** -- no exploitable privesc was found in the core.
 
-### Novel Findings (Deep-Dive)
+### SQL Injection in Contrib Modules (Deep-Dive, Highest Severity)
+
+| ID | Finding | Severity | Exploitability |
+|----|---------|----------|----------------|
+| S-1 | `refint.c`: unquoted identifiers in trigger SQL | High | User with TRIGGER privilege + refint extension |
+| S-2 | `refint.c`: unescaped column values in cascade UPDATE SQL | **Critical** | Any user who can INSERT/UPDATE on a table with cascade trigger |
+| S-3 | `tablefunc.c`: `connectby()` unquoted function args in SQL | High | Any user with EXECUTE + tablefunc extension |
+| S-4 | `xml2/xpath.c`: `xpath_table()` unquoted params in SQL | High | Any user with EXECUTE + xml2 extension |
+| S-5 | `postgres_fdw`: `IMPORT FOREIGN SCHEMA` injects unquoted type names from remote | Medium | User connecting to malicious foreign server |
+
+### Novel Findings -- Protocol & Implementation Bugs (Deep-Dive)
 
 | ID | Finding | Severity | Exploitability |
 |----|---------|----------|----------------|
@@ -24,6 +34,13 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 | N-5 | Missing `check_stack_depth()` in binary recv functions | Low-Medium | Authenticated user |
 | N-6 | TOAST decompression memory bomb | Low | Requires disk corruption |
 | N-7 | Deferred triggers lack `RestrictSearchPath()` | Low | Authenticated user |
+
+### Access Control Observations (Deep-Dive)
+
+| ID | Finding | Severity | Notes |
+|----|---------|----------|-------|
+| A-1 | MERGE with RLS produces errors instead of silent filtering | Low | Information disclosure by design, acknowledged in code |
+| A-2 | `GUC_SAFE_SEARCH_PATH` includes `pg_temp` | Very Low | Mitigated by `SECURITY_RESTRICTED_OPERATION` |
 
 ### Known Issues (Initial Pass, Reassessed)
 
@@ -47,7 +64,135 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 
 ---
 
-## Part 1: Novel Findings
+## Part 1: SQL Injection in Contrib Modules
+
+**Key observation:** Core backend code (`ri_triggers.c`, replication, `xml.c`) consistently uses `quote_identifier()`, `quote_literal_cstr()`, and parameterized queries. Contrib modules have historically received less security scrutiny, and this is where the most severe bugs were found.
+
+### S-1: SQL Injection via Unquoted Identifiers in `refint.c`
+
+- **Severity:** High
+- **File:** `contrib/spi/refint.c`, lines 180-188 (`check_primary_key`), lines 448-521 (`check_foreign_key`)
+- **Privileges required:** TRIGGER privilege on a table + refint extension installed
+
+**Description:** `check_primary_key()` and `check_foreign_key()` build SQL queries using trigger arguments (table names, column names) via `snprintf` with `%s` -- no `quote_identifier()` quoting at all. These arguments are user-supplied in the `CREATE TRIGGER` statement.
+
+**Vulnerable code:**
+```c
+snprintf(sql, sizeof(sql), "select 1 from %s where ", relname);
+// ...
+snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), "%s = $%d %s",
+         args[i + nkeys + 1], i + 1, (i < nkeys - 1) ? "and " : "");
+```
+
+**Exploitation:**
+```sql
+CREATE TRIGGER test BEFORE INSERT ON mytable
+FOR EACH ROW EXECUTE PROCEDURE
+  check_primary_key('col1', 'pg_authid; DROP TABLE important--', 'col1');
+```
+
+The table name `pg_authid; DROP TABLE important--` is spliced directly into the SELECT.
+
+---
+
+### S-2: SQL Injection via Unescaped Column Values in `refint.c` Cascade
+
+- **Severity: Critical**
+- **File:** `contrib/spi/refint.c`, lines 501-504 (`check_foreign_key`)
+- **Privileges required:** INSERT/UPDATE on a table with a `check_foreign_key` cascade trigger
+
+**Description:** During cascade UPDATE operations, `check_foreign_key()` retrieves column values from the NEW tuple via `SPI_getvalue()` and interpolates them into SQL. For "char types", single quotes are wrapped around the value but **embedded single quotes are not escaped**. For non-char types, values are inserted completely raw.
+
+**Vulnerable code:**
+```c
+snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql),
+         " %s = %s%s%s %s ",
+         args2[k], (is_char_type > 0) ? "'" : "",
+         nv, (is_char_type > 0) ? "'" : "", (k < nkeys) ? ", " : "");
+```
+
+**Exploitation:** A user updates a text column that is part of a foreign key with cascade action:
+```sql
+UPDATE parent_table SET fk_col = $$'; DROP TABLE important; --$$
+  WHERE id = 1;
+```
+
+The value `'; DROP TABLE important; --` is injected directly into the cascade UPDATE SQL executed on the child table.
+
+**This is the most severe finding in the entire audit** -- it requires only INSERT/UPDATE privileges on data, not DDL privileges.
+
+---
+
+### S-3: SQL Injection via Unquoted Identifiers in `tablefunc.c` `connectby()`
+
+- **Severity:** High
+- **File:** `contrib/tablefunc/tablefunc.c`, lines 1226-1244 (`build_tuplestore_recursively`)
+- **Privileges required:** EXECUTE on `connectby()` + tablefunc extension installed
+
+**Description:** `connectby()` builds SQL from function arguments (`relname`, `key_fld`, `parent_key_fld`, `orderby_fld`) using raw `%s` substitution. Only `start_with` is properly quoted via `quote_literal_cstr()`.
+
+**Vulnerable code:**
+```c
+appendStringInfo(&sql, "SELECT %s, %s FROM %s WHERE %s = %s AND %s IS NOT NULL",
+                 key_fld,
+                 parent_key_fld,
+                 relname,            // <-- unquoted user input
+                 parent_key_fld,
+                 quote_literal_cstr(start_with),  // only this one is quoted!
+                 key_fld);
+```
+
+**Exploitation:**
+```sql
+SELECT * FROM connectby(
+  'pg_class; DROP TABLE important; --',
+  'oid', 'relnamespace', '1', 5
+) AS t(keyid text, parent_keyid text, level int, branch text);
+```
+
+---
+
+### S-4: SQL Injection via Unquoted Parameters in `xml2/xpath.c` `xpath_table()`
+
+- **Severity:** High
+- **File:** `contrib/xml2/xpath.c`, lines 682-690 (`xpath_table`)
+- **Privileges required:** EXECUTE on `xpath_table()` + xml2 extension installed
+
+**Description:** All four SQL-building parameters (`pkeyfield`, `xmlfield`, `relname`, `condition`) from `PG_GETARG_TEXT_PP()` are interpolated raw into SQL executed via `SPI_exec()`.
+
+**Vulnerable code:**
+```c
+appendStringInfo(&query_buf, "SELECT %s, %s FROM %s WHERE %s",
+                 pkeyfield,
+                 xmlfield,
+                 relname,
+                 condition);
+```
+
+---
+
+### S-5: SQL Injection via Malicious Foreign Server in `postgres_fdw` `IMPORT FOREIGN SCHEMA`
+
+- **Severity:** Medium
+- **File:** `contrib/postgres_fdw/postgres_fdw.c`, lines 5591-5621 (`postgresImportForeignSchema`)
+- **Privileges required:** CREATE in local schema + USAGE on foreign server pointing to malicious remote
+
+**Description:** When importing a foreign schema, `typename` (from remote `format_type()`) and `attdefault` (from remote `pg_get_expr()`) are interpolated directly into the `CREATE FOREIGN TABLE` DDL without quoting. Note that `attname` IS properly quoted via `quote_identifier()`, making the inconsistency evident.
+
+**Vulnerable code:**
+```c
+appendStringInfo(&buf, "  %s %s",
+                 quote_identifier(attname),  // attname is quoted
+                 typename);                   // typename is NOT quoted
+// ...
+appendStringInfo(&buf, " DEFAULT %s", attdefault);  // also NOT quoted
+```
+
+A malicious remote server can return `int; DROP TABLE important; --` as a type name.
+
+---
+
+## Part 2: Novel Protocol & Implementation Bugs
 
 ### N-1: COPY BINARY Header Extension -- Uninterruptible DoS Loop
 
@@ -186,7 +331,29 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 2: Known Issues (Reassessed Severity)
+## Part 3: Access Control Observations
+
+### A-1: MERGE with RLS Produces Errors Instead of Silent Filtering
+
+- **Severity:** Low (information disclosure by design)
+- **File:** `src/backend/rewrite/rowsecurity.c`, lines 407-418; `src/backend/executor/execMain.c`, lines 2357-2368
+
+**Description:** When a MERGE targets a row visible via SELECT RLS policy but blocked by UPDATE/DELETE RLS policy, the user gets an explicit error (naming the policy) instead of silent filtering. A normal UPDATE/DELETE would silently skip the row. The code has an `XXX` comment acknowledging this divergence.
+
+**Impact:** Can confirm whether specific rows exist that match a condition, but only for rows already visible via the SELECT policy.
+
+---
+
+### A-2: `GUC_SAFE_SEARCH_PATH` Includes `pg_temp`
+
+- **Severity:** Very Low
+- **File:** `src/backend/utils/misc/guc.c`, line 76
+
+**Description:** `RestrictSearchPath()` sets `search_path = 'pg_catalog, pg_temp'`. Pre-existing temp objects could be found for names not in `pg_catalog`. However, `SECURITY_RESTRICTED_OPERATION` blocks creating new temp objects during maintenance, and `pg_catalog` priority prevents shadowing standard functions.
+
+---
+
+## Part 4: Known Issues (Reassessed Severity)
 
 ### K-1: SCRAM Iteration Count GUC Minimum is 1
 
@@ -275,47 +442,60 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 3: Areas Audited and Found Clean
+## Part 5: Areas Audited and Found Clean
 
 The following areas were thoroughly reviewed and found well-implemented:
 
 - **Wire protocol message parsing** (`src/backend/tcop/postgres.c`): Robust length validation, proper bounds checking in all `pq_getmsg*` functions
 - **StringInfo API** (`src/common/stringinfo.c`): Overflow guards in `enlargeStringInfo()`, proper negative-value handling
+- **Core SQL construction** (`src/backend/utils/adt/ri_triggers.c`): Consistently uses `quoteOneName()`/`quoteRelationName()` -- **contrast with contrib modules**
 - **Extension system quoting** (`src/backend/commands/extension.c`): `quoting_relevant_chars` validation is sound for `@extschema@` and `@extowner@`
-- **SECURITY DEFINER cleanup** (`src/backend/utils/fmgr/fmgr.c`): Error-path cleanup correctly relies on transaction abort
-- **RLS enforcement**: Correctly applied to COPY, logical replication, CREATE MATERIALIZED VIEW AS
-- **LEAKPROOF checks**: Properly enforced for both CREATE and ALTER FUNCTION
+- **SECURITY DEFINER functions** (`src/backend/utils/fmgr/fmgr.c`): proconfig GUC validation at DDL-time is correct; error-path cleanup relies on transaction abort properly; no elevated context leaks
+- **RLS enforcement**: Correctly applied to COPY, logical replication, CREATE MATERIALIZED VIEW AS; `ExecBuildSlotValueDescription` returns NULL when RLS is enabled, preventing data leakage in error messages
+- **LEAKPROOF checks**: Properly enforced for both CREATE and ALTER FUNCTION; only superusers can set
+- **`SECURITY_RESTRICTED_OPERATION` enforcement**: Consistently blocks temp table creation, SET ROLE, GUC changes, and deferred trigger firing during maintenance operations
+- **`local_preload_libraries` path restriction** (`src/backend/utils/fmgr/dfmgr.c:520-529`): `check_restricted_library_name` correctly prevents directory traversal
+- **Logical replication privilege model** (`src/backend/replication/logical/worker.c`): `SwitchToUntrustedUser` properly limits privileges
+- **`validate_option_array_item`**: Correctly validates GUC permissions at DDL time, preventing non-superusers from storing SUSET values in proconfig
 - **SSL buffered data MITM detection** (`src/backend/tcop/backend_startup.c:626-630`): Correctly rejects pre-handshake data
 - **Extended query error handling** (`src/backend/tcop/postgres.c:4789`): `ignore_till_sync` correctly prevents desync
 - **No `alloca()` or VLA usage** found in backend code; PostgreSQL consistently uses `palloc()`
 
 ---
 
-## Part 4: Priority Recommendations
+## Part 6: Priority Recommendations
+
+### Fix Immediately (Critical/High severity)
+
+1. **`refint.c` cascade value injection** (S-2): Use `quote_literal_cstr()` for all interpolated values, `quote_identifier()` for identifiers. **Critical** -- exploitable by any user with INSERT/UPDATE.
+2. **`refint.c` identifier injection** (S-1): Use `quote_identifier()` for all table/column names from trigger args.
+3. **`tablefunc.c` `connectby()` injection** (S-3): Use `quote_identifier()` for relname, key_fld, parent_key_fld, orderby_fld.
+4. **`xml2/xpath.c` `xpath_table()` injection** (S-4): Use `quote_identifier()` for pkeyfield, xmlfield, relname; sanitize condition.
 
 ### Fix Now (low effort, real impact)
 
-1. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
-2. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
-3. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
-4. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
+5. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
+6. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
+7. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
+8. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
 
 ### Fix Soon (moderate effort, defense-in-depth)
 
-5. **RADIUS source IP validation** (N-3): Switch to `connect()` on UDP socket.
-6. **XML entity expansion limits** (K-2): Set `xmlCtxtSetMaxAmplification()` or equivalent.
-7. **Missing `check_stack_depth()`** (N-5): Add calls to `array_recv`, `multirange_recv`, `domain_recv`.
-8. **Server-side SCRAM iteration validation** (K-1 extension): Validate `iterations > 0` in `parse_scram_secret()`.
-9. **Client SCRAM iteration bounds** (K-5): Enforce min/max on client side.
+9. **`postgres_fdw` IMPORT FOREIGN SCHEMA** (S-5): Quote `typename` and sanitize `attdefault` from remote server.
+10. **RADIUS source IP validation** (N-3): Switch to `connect()` on UDP socket.
+11. **XML entity expansion limits** (K-2): Set `xmlCtxtSetMaxAmplification()` or equivalent.
+12. **Missing `check_stack_depth()`** (N-5): Add calls to `array_recv`, `multirange_recv`, `domain_recv`.
+13. **Server-side SCRAM iteration validation** (K-1 extension): Validate `iterations > 0` in `parse_scram_secret()`.
+14. **Client SCRAM iteration bounds** (K-5): Enforce min/max on client side.
 
 ### Backlog (known trade-offs, long-term)
 
-10. Shell escaping in archive commands (K-3)
-11. Memory zeroing for key material (K-11, K-12)
-12. Constant-time comparisons in auth (K-6 through K-9)
-13. MD5 deprecation completion (K-14)
-14. `numeric_recv()` bounds check (K-4)
-15. `sprintf` -> `snprintf` migration (K-15)
+15. Shell escaping in archive commands (K-3)
+16. Memory zeroing for key material (K-11, K-12)
+17. Constant-time comparisons in auth (K-6 through K-9)
+18. MD5 deprecation completion (K-14)
+19. `numeric_recv()` bounds check (K-4)
+20. `sprintf` -> `snprintf` migration (K-15)
 
 ### Not Worth Fixing
 
