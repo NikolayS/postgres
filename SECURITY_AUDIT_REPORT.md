@@ -11,7 +11,9 @@
 
 This audit combined a broad initial pass with a focused deep-dive into complex code paths. The PostgreSQL codebase is mature and well-engineered -- wire protocol parsing is robust, memory contexts prevent many common C bugs, and privilege checks are consistently applied.
 
-The initial pass identified mostly **well-known design trade-offs** (timing attacks, MD5 deprecation, lo_import/lo_export). The deep-dive review found **genuinely novel, actionable bugs** including SQL injection in contrib modules, an uninterruptible DoS in COPY BINARY, a client SCRAM parser bug, and a RADIUS bounds check error. The privilege escalation audit confirmed that **core backend access control is extremely well-hardened** -- no exploitable privesc was found in the core.
+The initial pass identified mostly **well-known design trade-offs** (timing attacks, MD5 deprecation, lo_import/lo_export). The deep-dive review found **genuinely novel, actionable bugs** including SQL injection in contrib modules, a client SCRAM parser bug, and a RADIUS bounds check error. The privilege escalation audit confirmed that **core backend access control is extremely well-hardened** -- no exploitable privesc was found in the core.
+
+**Note on DoS classification:** Per [PostgreSQL's security policy](https://www.postgresql.org/support/security/), "the PostgreSQL Security Team typically does not consider a denial-of-service on a PostgreSQL server from an authenticated, valid SQL statement to be a security vulnerability." Findings that are purely authenticated DoS (X-3, X-4, N-1, N-5, N-6, N-8, K-4, M-3) are classified below as **bugs, not CVE-eligible security vulnerabilities**. They should be reported via the normal bug tracker, not `security@postgresql.org`.
 
 ### SQL Injection in Contrib Modules (Deep-Dive, Highest Severity)
 
@@ -29,8 +31,8 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 |----|---------|----------|----------------|
 | X-1 | Logical replication: heap buffer over-read from malicious publisher (Assert-only bounds check) | **High** | Attacker controls a publisher |
 | X-2 | Search-path operator hijacking via `public` schema | Medium | Regular user with CREATE on `public` |
-| X-3 | Advisory lock table exhaustion -- complete database DoS | Medium | Any unprivileged user |
-| X-4 | NOTIFY queue saturation DoS | Medium | Any user with a connection |
+| X-3 | Advisory lock table exhaustion -- complete database DoS | Bug (not CVE) | Any unprivileged user |
+| X-4 | NOTIFY queue saturation DoS | Bug (not CVE) | Any user with a connection |
 
 ### Client Tools (Wave 3 Deep-Dive)
 
@@ -44,12 +46,12 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 
 | ID | Finding | Severity | Exploitability |
 |----|---------|----------|----------------|
-| N-1 | COPY BINARY header loop: uninterruptible DoS | Medium | Any authenticated user |
+| N-1 | COPY BINARY header loop: uninterruptible DoS | Bug (not CVE) | Any authenticated user |
 | N-2 | SCRAM client accepts trailing garbage in server messages | Medium | Malicious server / MITM |
 | N-3 | RADIUS response source IP not validated | Medium | Network attacker |
 | N-4 | RADIUS attribute bounds check off-by-two | Low-Medium | Latent bug |
-| N-5 | Missing `check_stack_depth()` in binary recv functions | Low-Medium | Authenticated user |
-| N-6 | TOAST decompression memory bomb | Low | Requires disk corruption |
+| N-5 | Missing `check_stack_depth()` in binary recv functions | Bug (not CVE) | Authenticated user; DoS only |
+| N-6 | TOAST decompression memory bomb | Bug (not CVE) | Requires disk corruption; DoS only |
 | N-7 | Deferred triggers lack `RestrictSearchPath()` | Low | Authenticated user |
 
 ### Memory Safety (Deep-Dive)
@@ -58,7 +60,7 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 |----|---------|----------|-------|
 | M-1 | `array_cat()` signed integer overflow (UB) | Low-Medium | Any user; downstream check may be optimized away |
 | M-2 | JSONB/multirange/array on-disk headers trusted without validation | Medium | Requires corrupted data; systemic issue |
-| M-3 | `array_set_slice()` size computation overflow | Low | DoS only |
+| M-3 | `array_set_slice()` size computation overflow | Bug (not CVE) | DoS only |
 
 ### Access Control Observations (Deep-Dive)
 
@@ -85,7 +87,7 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 | K-1 | SCRAM iteration count GUC minimum is 1 | Medium | Trivial one-line fix |
 | K-2 | XML Billion Laughs via `XML_PARSE_NOENT` | Medium | Most exploitable known issue |
 | K-3 | `system()` without shell escaping in archive commands | Medium | Low effort fix |
-| K-4 | `numeric_recv()` unbounded allocation | Medium | Authenticated DoS |
+| K-4 | `numeric_recv()` unbounded allocation | Bug (not CVE) | Authenticated DoS |
 | K-5 | Client doesn't enforce SCRAM iteration minimum | Medium | Downgrade attack |
 | K-6 | SCRAM `scram_verify_plain_password()` timing | Low-Medium | Network jitter limits exploitability |
 | K-7 | SCRAM `verify_client_proof()` timing | Low | Nonce prevents exploitation |
@@ -279,7 +281,7 @@ Same pattern in `slot_modify_data` (line 1153) and `apply_handle_update` (line 2
 
 ### X-3: Advisory Lock Table Exhaustion -- Complete Database DoS
 
-- **Severity:** Medium
+- **Severity:** Bug (not CVE-eligible per PostgreSQL security policy -- authenticated DoS)
 - **File:** `src/backend/storage/lmgr/lock.c`, line 3375
 - **Privileges required:** Any unprivileged user
 
@@ -300,7 +302,7 @@ This exhausts the lock table, causing **all other backends** to fail when acquir
 
 ### X-4: NOTIFY Queue Saturation DoS
 
-- **Severity:** Medium
+- **Severity:** Bug (not CVE-eligible per PostgreSQL security policy -- authenticated DoS)
 - **File:** `src/backend/commands/async.c`, lines 570, 926, 1355
 - **Privileges required:** Any user with a connection
 
@@ -445,7 +447,7 @@ Assert(data == tupledata + tuplelen);  // Assert only!
 
 ### N-1: COPY BINARY Header Extension -- Uninterruptible DoS Loop
 
-- **Severity:** Medium
+- **Severity:** Bug (not CVE-eligible per PostgreSQL security policy -- authenticated DoS)
 - **File:** `src/backend/commands/copyfromparse.c`, lines 219-232
 - **Privileges required:** Any authenticated user with COPY privilege (default for table owners)
 
@@ -542,7 +544,7 @@ radius_add_attribute(radius_packet *packet, uint8 type,
 
 ### N-5: Missing `check_stack_depth()` in Binary Receive Functions
 
-- **Severity:** Low-Medium
+- **Severity:** Bug (not CVE-eligible -- authenticated DoS via stack exhaustion)
 - **Files:**
   - `src/backend/utils/adt/arrayfuncs.c` -- `array_recv()` (line 1275)
   - `src/backend/utils/adt/multirangetypes.c` -- `multirange_recv()` (line 337)
@@ -558,7 +560,7 @@ radius_add_attribute(radius_packet *packet, uint8 type,
 
 ### N-6: TOAST Decompression Memory Bomb
 
-- **Severity:** Low (requires on-disk corruption or superuser)
+- **Severity:** Bug (not CVE-eligible -- DoS only, requires on-disk corruption)
 - **File:** `src/backend/access/common/toast_compression.c`, lines 82 and 182
 
 **Description:** The claimed decompressed size is read from the datum's header (30-bit field, max ~1GB). A tiny compressed datum with a corrupted header claiming 1GB decompressed size causes a 1GB `palloc` before decompression begins. The decompressors themselves (`LZ4_decompress_safe`, `pglz_decompress`) are safe, so this is memory exhaustion only, not a buffer overflow.
@@ -582,7 +584,7 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ### N-8: Memory Leak via Recursive Domain Constraint + CoerceViaIO in PL/pgSQL
 
-- **Severity:** Low-Medium
+- **Severity:** Bug (not CVE-eligible -- authenticated DoS, bounded by stack depth)
 - **File:** `src/pl/plpgsql/src/pl_exec.c`, lines 8207-8214 (`get_cast_hashentry`)
 - **Privileges required:** CREATE FUNCTION (regular user)
 
@@ -650,7 +652,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ### M-3: `array_set_slice()` Size Computation Overflow
 
-- **Severity:** Low
+- **Severity:** Bug (not CVE-eligible -- DoS only)
 - **File:** `src/backend/utils/adt/arrayfuncs.c`, line 3088
 
 **Description:** `newsize = overheadlen + olddatasize - olditemsize + newitemsize` -- all `int` without overflow check. When extending a large array with another large slice, the sum can exceed `INT_MAX`. The resulting negative value becomes a huge `Size` rejected by palloc (DoS, not code execution).
@@ -720,7 +722,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ### K-4: `numeric_recv()` Unbounded Allocation
 
-- **Severity:** Medium
+- **Severity:** Bug (not CVE-eligible -- authenticated DoS)
 - **File:** `src/backend/utils/adt/numeric.c`, lines 1076-1078
 
 **Description:** Binary receive reads `uint16` digit count and allocates proportionally. Via COPY BINARY, a client can send many 65535-digit values to exhaust backend memory.
@@ -828,11 +830,16 @@ The following areas were thoroughly reviewed and found well-implemented:
 
 ### Fix Now (low effort, real impact)
 
-6. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
-7. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
-8. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
-9. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
+6. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
+7. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
+8. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
+
+### Report as Bugs (not CVE-eligible -- authenticated DoS, per PostgreSQL security policy)
+
+9. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix.
 10. **Advisory lock table exhaustion** (X-3): Add per-session advisory lock limit or separate pool.
+11. **NOTIFY queue saturation** (X-4): Add per-user queue usage limits.
+12. **`numeric_recv()` unbounded allocation** (K-4): Add reasonableness check on `ndigits`.
 
 ### Fix Soon (moderate effort, defense-in-depth)
 
@@ -847,14 +854,13 @@ The following areas were thoroughly reviewed and found well-implemented:
 
 ### Backlog (known trade-offs, long-term)
 
-15. **Integer overflow UB in `array_cat()`** (M-1): Use `pg_add_s32_overflow()`.
-16. **On-disk header validation** (M-2): Add consistency checks for JSONB, multirange, array deserialization.
-17. Shell escaping in archive commands (K-3)
-18. Memory zeroing for key material (K-11, K-12)
-19. Constant-time comparisons in auth (K-6 through K-9)
-20. MD5 deprecation completion (K-14)
-21. `numeric_recv()` bounds check (K-4)
-22. `sprintf` -> `snprintf` migration (K-15)
+13. **Integer overflow UB in `array_cat()`** (M-1): Use `pg_add_s32_overflow()`.
+14. **On-disk header validation** (M-2): Add consistency checks for JSONB, multirange, array deserialization.
+15. Shell escaping in archive commands (K-3)
+16. Memory zeroing for key material (K-11, K-12)
+17. Constant-time comparisons in auth (K-6 through K-9)
+18. MD5 deprecation completion (K-14)
+19. `sprintf` -> `snprintf` migration (K-15)
 
 ### Not Worth Fixing
 
@@ -862,6 +868,40 @@ The following areas were thoroughly reviewed and found well-implemented:
 - **Fastpath RLS bypass**: Fastpath is essentially deprecated
 - **Superuser cache staleness**: Documented, expected behavior
 - **TOCTOU in pg_signal_backend**: Theoretical on modern systems, acknowledged in code
+
+---
+
+## Part 10: Verification Status
+
+PoC tests are in `tests/security/`. Each finding was tested against PostgreSQL 19devel built from this source tree.
+
+### Runtime-Verified (exploit confirmed)
+
+| ID | Test | Result |
+|----|------|--------|
+| S-1 | `S-1_refint_identifier_injection.sql` | **VERIFIED** -- subquery injection bypasses FK check (fk_col=99999 accepted) |
+| S-2 | `S-2_refint_cascade_injection.sql` | **VERIFIED** -- WHERE injection affects ALL rows; `version()` exfiltrated into child table |
+| S-3 | `S-3_tablefunc_connectby_injection.sql` | **VERIFIED** -- subquery as relname reads secret data from arbitrary table |
+| S-4 | `S-4_xml2_xpath_table_injection.sql` | **VERIFIED** -- condition bypass + relname subquery exfiltrates secret data |
+| X-3 | `X-3_advisory_lock_exhaustion.sql` | **VERIFIED** -- 14,912 advisory locks exhaust shared lock table |
+| N-1 | `N-1_copy_binary_dos.sh` | **VERIFIED** -- backend survives `pg_cancel_backend()` during header loop |
+
+### Verified by Code Analysis
+
+| ID | Test | Result |
+|----|------|--------|
+| N-2 | `N-2_scram_trailing_garbage.sql` | **VERIFIED** -- missing `return false` after error detection |
+| N-4 | `N-4_radius_bounds_check.sql` | **VERIFIED** -- bounds check uses `len` instead of `len + 2` |
+
+### Not Runtime-Testable (require special infrastructure)
+
+| ID | Reason |
+|----|--------|
+| S-5 | Requires a malicious foreign server |
+| X-1 | Requires a malicious logical replication publisher |
+| P-1 | Requires a rogue server + ECPG client application |
+| P-2 | Requires a crafted WAL stream |
+| N-3 | Requires network MITM setup for RADIUS |
 
 ---
 
