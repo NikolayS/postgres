@@ -81,11 +81,19 @@ sudo -u pgtest python3 tests/security/fuzz/fuzz_binary_recv.py \
 
 ## Results (2026-04-04)
 
-- **25,000 iterations** (5,000 + 20,000)
+- **20,000 iterations** across 9 targets
 - **0 ASAN crashes**
 - **0 server crashes**
-- All malformed input properly rejected with ERROR messages
+- ~15,000 ERROR-level rejections (expected -- malformed data is properly validated)
+- All malformed input properly rejected with descriptive ERROR messages
 
 This confirms the audit finding that PostgreSQL's binary receive functions
-are systematically well-validated. The `pq_getmsgint()` / `pq_getmsgbyte()` / 
+are systematically well-validated. The `pq_getmsgint()` / `pq_getmsgbyte()` /
 `pq_getmsgend()` infrastructure provides reliable bounds checking.
+
+**Conclusion:** The binary protocol input path is hardened against memory
+corruption. Finding bugs here would require either:
+1. Coverage-guided fuzzing (libFuzzer) with a standalone harness for much
+   higher throughput (~millions of iterations)
+2. Targeting specific code paths with structure-aware mutations
+3. Fuzzing logical replication protocol which has weaker validation (X-1 finding)
