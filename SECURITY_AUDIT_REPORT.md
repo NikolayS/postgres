@@ -477,7 +477,27 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 3: Memory Safety & Data Structure Integrity
+### N-8: Memory Leak via Recursive Domain Constraint + CoerceViaIO in PL/pgSQL
+
+- **Severity:** Low-Medium
+- **File:** `src/pl/plpgsql/src/pl_exec.c`, lines 8207-8214 (`get_cast_hashentry`)
+- **Privileges required:** CREATE FUNCTION (regular user)
+
+**Description:** PL/pgSQL's type coercion uses I/O coercion (CoerceViaIO) as fallback. When `cast_in_use` is true (reentrant cast), a new `ExprState` is allocated per recursion level in `es_query_cxt`. A domain with a CHECK constraint that triggers the same cast creates deep recursion. Each level allocates a new ExprState before `check_stack_depth()` fires.
+
+**PoC Concept:**
+```sql
+CREATE DOMAIN evil_domain AS text CHECK (check_func(VALUE));
+CREATE FUNCTION check_func(text) RETURNS boolean LANGUAGE plpgsql AS $$
+DECLARE v evil_domain;
+BEGIN v := $1; RETURN true; EXCEPTION WHEN OTHERS THEN RETURN true; END $$;
+```
+
+**Impact:** Transient memory consumption / DoS. Bounded by stack depth limit. Memory freed at transaction end.
+
+---
+
+## Part 4: Memory Safety & Data Structure Integrity
 
 **Key observation:** No exploitable code execution paths were found through normal SQL input. The binary protocol `_recv` functions are generally well-audited. However, integer overflow in array operations uses undefined behavior, and on-disk data structures trust their headers without runtime validation.
 
@@ -536,7 +556,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 4: Access Control Observations
+## Part 5: Access Control Observations
 
 ### A-1: MERGE with RLS Produces Errors Instead of Silent Filtering
 
@@ -558,7 +578,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 5: Known Issues (Reassessed Severity)
+## Part 6: Known Issues (Reassessed Severity)
 
 ### K-1: SCRAM Iteration Count GUC Minimum is 1
 
@@ -647,7 +667,7 @@ This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` 
 
 ---
 
-## Part 6: Areas Audited and Found Clean
+## Part 7: Areas Audited and Found Clean
 
 The following areas were thoroughly reviewed and found well-implemented:
 
@@ -673,10 +693,18 @@ The following areas were thoroughly reviewed and found well-implemented:
 - **Encoding conversion**: `pg_any_to_server()` / `pg_server_to_any()` have proper integer overflow checks
 - **Parallel query shared memory**: DSM segments have OS-level access controls (same user); plan deserialization not externally reachable
 - **Virtual generated column security**: `check_virtual_generated_security_walker` properly blocks user-defined functions and types via `FirstUnpinnedObjectId` boundary
+- **PL/pgSQL exception handling**: `CopyErrorData()` does complete deep copy into `stmt_mcontext` before subtransaction rollback; `eval_econtext` properly restored; `eval_tuptable` correctly set to NULL
+- **PL/pgSQL EXECUTE ... INTO**: Query string passes through type output function then to `SPI_execute_extended` -- no format string injection possible
+- **PL/pgSQL RAISE**: Uses `errmsg_internal("%s", err_message)` -- `%s` prevents format string attacks
+- **PL/Perl Safe sandbox**: Opmask properly set, DynaLoader deleted, `require`/`dofile` replaced with safe versions, `entereval` is safe due to permanent opmask. No known escape vector
+- **PL/Perl recursive structures**: `plperl_sv_to_datum` calls `check_stack_depth()` at entry
+- **SPI stack integrity**: Properly saves/restores `SPI_processed`, `SPI_tuptable`, `SPI_result` at each nesting level; `AtEOSubXact_SPI`/`AtEOXact_SPI` clean up properly
+- **PL/pgSQL FOREACH ARRAY**: Array properly copied, slice dimension validated, safe iteration via `array_create_iterator`
+- **PL/pgSQL expanded object transfer**: `plpgsql_param_eval_var_transfer` properly transfers ownership and NULLs the variable to prevent double-free
 
 ---
 
-## Part 7: Priority Recommendations
+## Part 8: Priority Recommendations
 
 ### Fix Immediately (Critical/High severity)
 
