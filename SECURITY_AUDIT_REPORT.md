@@ -23,6 +23,23 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 | S-4 | `xml2/xpath.c`: `xpath_table()` unquoted params in SQL | High | Any user with EXECUTE + xml2 extension |
 | S-5 | `postgres_fdw`: `IMPORT FOREIGN SCHEMA` injects unquoted type names from remote | Medium | User connecting to malicious foreign server |
 
+### Logical Replication & Exotic Attack Vectors (Wave 3 Deep-Dive)
+
+| ID | Finding | Severity | Exploitability |
+|----|---------|----------|----------------|
+| X-1 | Logical replication: heap buffer over-read from malicious publisher (Assert-only bounds check) | **High** | Attacker controls a publisher |
+| X-2 | Search-path operator hijacking via `public` schema | Medium | Regular user with CREATE on `public` |
+| X-3 | Advisory lock table exhaustion -- complete database DoS | Medium | Any unprivileged user |
+| X-4 | NOTIFY queue saturation DoS | Medium | Any user with a connection |
+
+### Client Tools (Wave 3 Deep-Dive)
+
+| ID | Finding | Severity | Exploitability |
+|----|---------|----------|----------------|
+| C-1 | pg_dump: subscription `suboriginremotelsn` SQL injection in binary-upgrade mode | Low | Superuser + `--binary-upgrade` |
+| C-2 | pg_restore: signed/unsigned confusion causes DoS with crafted archives | Low | Crafted `.dump` file |
+| C-3 | pg_restore: `ReadInt` UB with large `intSize` from crafted archive | Low | Crafted `.dump` file |
+
 ### Novel Findings -- Protocol & Implementation Bugs (Deep-Dive)
 
 | ID | Finding | Severity | Exploitability |
@@ -200,7 +217,128 @@ A malicious remote server can return `int; DROP TABLE important; --` as a type n
 
 ---
 
-## Part 2: Novel Protocol & Implementation Bugs
+## Part 2: Logical Replication, Exotic Vectors & Client Tools
+
+### X-1: Heap Buffer Over-Read in Logical Replication from Malicious Publisher
+
+- **Severity: High**
+- **File:** `src/backend/replication/logical/worker.c`, lines 1042, 1153, 2872
+- **Privileges required:** Attacker controls a PostgreSQL publisher that the victim subscribes to
+
+**Description:** Three locations in the logical replication apply worker use `Assert()` as the **only** bounds check when accessing tuple data arrays. In production builds (compiled without `USE_ASSERT_CHECKING`), these Asserts are compiled out, leaving **no runtime validation**.
+
+**Vulnerable code** (`slot_store_data`, line 1040-1042):
+```c
+StringInfo colvalue = &tupleData->colvalues[remoteattnum];
+Assert(remoteattnum < tupleData->ncols);  // ONLY checked in debug builds!
+```
+
+Same pattern in `slot_modify_data` (line 1153) and `apply_handle_update` (line 2872).
+
+**Attack chain:**
+- Attacker controls a malicious PostgreSQL publisher
+- Publisher sends a RELATION message declaring N columns (`proto.c` line 1023 sets `rel->natts = N`)
+- Subscriber builds an `attrmap` mapping local columns to remote indices 0..N-1
+- Publisher later sends INSERT/UPDATE tuples with `ncols < N` (`proto.c` line 875: `tuple->ncols = natts` comes directly from the wire with no cross-validation)
+- `slot_store_data` iterates local columns, maps to remote indices, and accesses `tupleData->colvalues[remoteattnum]` out of bounds
+
+**Impact:** Heap buffer over-read on the subscriber. If the out-of-bounds `colstatus` byte happens to match `LOGICALREP_COLUMN_TEXT`, the code calls type input functions on garbage data, causing crashes or worse. Realistic in cross-organization replication.
+
+**Remediation:** Convert the three `Assert()` calls to runtime `if` checks with `ereport(ERROR, ...)`.
+
+---
+
+### X-2: Search-Path Operator Hijacking via `public` Schema
+
+- **Severity:** Medium
+- **File:** `src/backend/parser/parse_oper.c`, lines 401-427; `src/backend/catalog/namespace.c`, lines 1946-2045
+- **Privileges required:** Regular user with CREATE privilege on `public` schema
+
+**Description:** Operator resolution walks the `search_path` and selects the first matching operator. A user with CREATE on any schema in another user's search_path can create a trojan operator.
+
+**Attack chain:**
+- Attacker creates `CREATE OPERATOR public.= (leftarg=integer, rightarg=integer, procedure=evil_eq)`
+- Victim's query `SELECT * FROM t WHERE id = 5` resolves `=` via search_path
+- If victim has `public` before `pg_catalog` in search_path, attacker's operator wins
+- Operator function runs with victim's privileges
+
+**Mitigation:** `pg_catalog` is implicitly first unless explicitly placed elsewhere. Since PostgreSQL 15, CREATE on `public` is revoked by default. But remains exploitable in upgraded databases or when `public` CREATE is re-granted.
+
+---
+
+### X-3: Advisory Lock Table Exhaustion -- Complete Database DoS
+
+- **Severity:** Medium
+- **File:** `src/backend/storage/lmgr/lock.c`, line 3375
+- **Privileges required:** Any unprivileged user
+
+**Description:** Any regular user can acquire unlimited advisory locks, competing for entries in the shared lock table. Advisory locks share the same table as regular object locks.
+
+**Exploitation:**
+```sql
+SELECT pg_advisory_lock(generate_series(1, 1000000));
+```
+
+This exhausts the lock table, causing **all other backends** to fail when acquiring ANY lock (including basic relation locks for SELECT). The code at line 1043 confirms: `ereport(ERROR, errmsg("out of shared memory"))`.
+
+**Impact:** Complete database-wide denial of service from a single unprivileged connection.
+
+**Remediation:** Add a per-user or per-session limit on advisory locks, or use a separate pool for advisory locks.
+
+---
+
+### X-4: NOTIFY Queue Saturation DoS
+
+- **Severity:** Medium
+- **File:** `src/backend/commands/async.c`, lines 570, 926, 1355
+- **Privileges required:** Any user with a connection
+
+**Description:** The notification queue is bounded by `max_notify_queue_pages` (default ~8GB). A user starts a LISTEN, then rapidly sends NOTIFY in large transactions from a separate session. The queue tail can't advance past the attacker's listening position. Other users' NOTIFY-ing transactions fail with `ERROR: too many notifications in the NOTIFY queue`.
+
+**Remediation:** Add per-user queue usage limits or rate limiting.
+
+---
+
+### C-1: pg_dump Subscription `suboriginremotelsn` SQL Injection in Binary-Upgrade Mode
+
+- **Severity:** Low
+- **File:** `src/bin/pg_dump/pg_dump.c`, line 5682 (`dumpSubscription`)
+- **Privileges required:** Superuser + `--binary-upgrade` mode
+
+**Description:** The `suboriginremotelsn` value is interpolated inside single quotes using `%s` without `appendStringLiteralAH()`. A value like `'); DROP TABLE important; --` breaks out.
+
+**Vulnerable code:**
+```c
+appendPQExpBuffer(query, ", '%s');\n", subinfo->suboriginremotelsn);
+```
+
+**Mitigating factors:** Only executes during `--binary-upgrade` (used by `pg_upgrade`). The value comes from system-maintained `pg_replication_origin_status.remote_lsn`. Requires superuser catalog corruption to exploit.
+
+---
+
+### C-2: pg_restore Signed/Unsigned Confusion in `ReadInt` -> `size_t`
+
+- **Severity:** Low (DoS only)
+- **File:** `src/bin/pg_dump/pg_backup_custom.c`, line 1016 (`_CustomReadFunc`)
+
+**Description:** `ReadInt()` returns signed `int`, assigned to `size_t blkLen`. A negative value in a crafted archive becomes a huge `size_t`, and `pg_malloc(blkLen)` tries to allocate ~2^64 bytes, causing OOM exit.
+
+**Remediation:** Check `blkLen` for negative/unreasonable values before allocation.
+
+---
+
+### C-3: pg_restore `ReadInt` Undefined Behavior with Large `intSize`
+
+- **Severity:** Low
+- **File:** `src/bin/pg_dump/pg_backup_archiver.c`, lines 2199-2203
+
+**Description:** When `intSize > 4` (from a crafted archive header), `bitShift` reaches 32+. Left-shifting an `int` by 32+ bits is undefined behavior in C. The archive header `intSize` check at line 4234 allows values up to 32.
+
+**Remediation:** Clamp `intSize` to `sizeof(int)` or use `int64` for the accumulator.
+
+---
+
+## Part 3: Novel Protocol & Implementation Bugs
 
 ### N-1: COPY BINARY Header Extension -- Uninterruptible DoS Loop
 
@@ -530,6 +668,11 @@ The following areas were thoroughly reviewed and found well-implemented:
 - **Binary protocol `_recv` functions**: `array_recv`, `record_recv`, `range_recv`, `numeric_recv`, `inet_recv`, etc. are systematically well-audited with proper length/bounds validation
 - **`palloc` MaxAllocSize safety net**: Acts as a backstop for many potential integer overflow issues, preventing small-allocation-then-large-write scenarios
 - **Overflow-checked arithmetic**: `pg_mul_s32_overflow` / `pg_add_s32_overflow` used consistently in `repeat()`, `lpad()`, `ArrayGetNItems()` and other high-risk paths
+- **Regex engine**: DFA-based execution -- NOT vulnerable to classic ReDoS catastrophic backtracking. Has compilation space limits (`REG_MAX_COMPILE_SPACE`), stack depth checks, and `CHECK_FOR_INTERRUPTS()` during execution
+- **pg_dump identifier quoting**: `fmtId()` and `appendStringLiteralAH()` used consistently across the vast majority of object dumping code. Server-decompiled expressions trusted by design (known trust boundary)
+- **Encoding conversion**: `pg_any_to_server()` / `pg_server_to_any()` have proper integer overflow checks
+- **Parallel query shared memory**: DSM segments have OS-level access controls (same user); plan deserialization not externally reachable
+- **Virtual generated column security**: `check_virtual_generated_security_walker` properly blocks user-defined functions and types via `FirstUnpinnedObjectId` boundary
 
 ---
 
@@ -538,16 +681,18 @@ The following areas were thoroughly reviewed and found well-implemented:
 ### Fix Immediately (Critical/High severity)
 
 1. **`refint.c` cascade value injection** (S-2): Use `quote_literal_cstr()` for all interpolated values, `quote_identifier()` for identifiers. **Critical** -- exploitable by any user with INSERT/UPDATE.
-2. **`refint.c` identifier injection** (S-1): Use `quote_identifier()` for all table/column names from trigger args.
-3. **`tablefunc.c` `connectby()` injection** (S-3): Use `quote_identifier()` for relname, key_fld, parent_key_fld, orderby_fld.
-4. **`xml2/xpath.c` `xpath_table()` injection** (S-4): Use `quote_identifier()` for pkeyfield, xmlfield, relname; sanitize condition.
+2. **Logical replication Assert-only bounds check** (X-1): Convert 3 `Assert()` calls in `worker.c` to runtime checks. **High** -- malicious publisher can read subscriber heap memory.
+3. **`refint.c` identifier injection** (S-1): Use `quote_identifier()` for all table/column names from trigger args.
+4. **`tablefunc.c` `connectby()` injection** (S-3): Use `quote_identifier()` for relname, key_fld, parent_key_fld, orderby_fld.
+5. **`xml2/xpath.c` `xpath_table()` injection** (S-4): Use `quote_identifier()` for pkeyfield, xmlfield, relname; sanitize condition.
 
 ### Fix Now (low effort, real impact)
 
-5. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
-6. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
-7. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
-8. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
+6. **COPY BINARY header loop** (N-1): Add `CHECK_FOR_INTERRUPTS()`. One-line fix, prevents authenticated DoS.
+7. **SCRAM client garbage acceptance** (N-2): Add `return false` in two locations. Obvious bug.
+8. **RADIUS bounds check** (N-4): Change `len` to `len + 2`. One-line fix.
+9. **SCRAM iteration minimum** (K-1): Set GUC min to 4096. One-line fix.
+10. **Advisory lock table exhaustion** (X-3): Add per-session advisory lock limit or separate pool.
 
 ### Fix Soon (moderate effort, defense-in-depth)
 
