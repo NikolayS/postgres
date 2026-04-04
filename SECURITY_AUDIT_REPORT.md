@@ -1,9 +1,9 @@
 # PostgreSQL Source Code Security Audit Report
 
-**Date:** 2026-04-04
-**Scope:** PostgreSQL server and libpq client source code
-**Methodology:** Manual source code review of security-critical subsystems
-**Auditors:** 3-person team covering Authentication/Crypto, Network/Input, and Memory Safety/Privilege Escalation
+- **Date:** 2026-04-04
+- **Scope:** PostgreSQL server and libpq client source code
+- **Methodology:** Manual source code review of security-critical subsystems
+- **Auditors:** 3-person team covering Authentication/Crypto, Network/Input, and Memory Safety/Privilege Escalation
 
 ---
 
