@@ -35,6 +35,14 @@ The initial pass identified mostly **well-known design trade-offs** (timing atta
 | N-6 | TOAST decompression memory bomb | Low | Requires disk corruption |
 | N-7 | Deferred triggers lack `RestrictSearchPath()` | Low | Authenticated user |
 
+### Memory Safety (Deep-Dive)
+
+| ID | Finding | Severity | Notes |
+|----|---------|----------|-------|
+| M-1 | `array_cat()` signed integer overflow (UB) | Low-Medium | Any user; downstream check may be optimized away |
+| M-2 | JSONB/multirange/array on-disk headers trusted without validation | Medium | Requires corrupted data; systemic issue |
+| M-3 | `array_set_slice()` size computation overflow | Low | DoS only |
+
 ### Access Control Observations (Deep-Dive)
 
 | ID | Finding | Severity | Notes |
@@ -331,7 +339,66 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 3: Access Control Observations
+## Part 3: Memory Safety & Data Structure Integrity
+
+**Key observation:** No exploitable code execution paths were found through normal SQL input. The binary protocol `_recv` functions are generally well-audited. However, integer overflow in array operations uses undefined behavior, and on-disk data structures trust their headers without runtime validation.
+
+### M-1: Signed Integer Overflow (UB) in `array_cat()` Dimension Summation
+
+- **Severity:** Low-Medium
+- **File:** `src/backend/utils/adt/array_userfuncs.c`, line 439
+- **Privileges required:** Any authenticated user
+
+**Description:** When concatenating two arrays, `dims[0] = dims1[0] + dims2[0]` performs signed integer addition without overflow checking. If both dimensions are near `INT_MAX/2`, the sum overflows. The subsequent `ArrayGetNItems()` catches negative results, but this relies on **undefined behavior** -- a sufficiently aggressive compiler could optimize away the downstream check.
+
+**Vulnerable code:**
+```c
+dims[0] = dims1[0] + dims2[0];  // signed overflow = UB
+// ...
+nitems = ArrayGetNItems(ndim, dims);  // catches negative, but UB already happened
+```
+
+**Remediation:** Use `pg_add_s32_overflow()` before the addition, consistent with other overflow-protected paths in the codebase.
+
+---
+
+### M-2: On-Disk JSONB Headers Trusted Without Bounds Validation (Systemic)
+
+- **Severity:** Medium (requires corrupted data)
+- **File:** `src/backend/utils/adt/jsonb_util.c`, lines 1126-1152 (`iteratorFromContainer`), line 513 (`fillJsonbValue`)
+
+**Description:** `JsonContainerSize()` reads `nElems` directly from the JSONB binary header. There is no validation that `nElems` is consistent with the actual varlena size. If JSONB data on disk is corrupted (e.g., `nElems` set larger than actual data):
+- `it->dataProper` points beyond the actual data
+- `container->children[index]` in `fillJsonbValue` is an out-of-bounds read
+- String/numeric data pointers computed from JEntry offsets can point anywhere
+
+**Vulnerable code:**
+```c
+it->nElems = JsonContainerSize(container);    // from disk header, unchecked
+it->children = container->children;
+it->dataProper = (char *) it->children + it->nElems * sizeof(JEntry);  // OOB if corrupted
+```
+
+This also affects multirange types (`multirangetypes.c:831-844` -- `rangeCount` trusted from disk) and arrays (`arrayfuncs.c:3662-3683` -- data pointer walks without bounds check).
+
+**Impact:** Out-of-bounds read leading to crash or information disclosure. Requires corrupted on-disk data (not triggerable through normal SQL input).
+
+**Remediation:** Add consistency checks between header metadata (element counts) and actual varlena size when deserializing.
+
+---
+
+### M-3: `array_set_slice()` Size Computation Overflow
+
+- **Severity:** Low
+- **File:** `src/backend/utils/adt/arrayfuncs.c`, line 3088
+
+**Description:** `newsize = overheadlen + olddatasize - olditemsize + newitemsize` -- all `int` without overflow check. When extending a large array with another large slice, the sum can exceed `INT_MAX`. The resulting negative value becomes a huge `Size` rejected by palloc (DoS, not code execution).
+
+**Remediation:** Use overflow-checked arithmetic.
+
+---
+
+## Part 4: Access Control Observations
 
 ### A-1: MERGE with RLS Produces Errors Instead of Silent Filtering
 
@@ -353,7 +420,7 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 4: Known Issues (Reassessed Severity)
+## Part 5: Known Issues (Reassessed Severity)
 
 ### K-1: SCRAM Iteration Count GUC Minimum is 1
 
@@ -442,7 +509,7 @@ If a deferred trigger function uses unqualified names and `search_path` is modif
 
 ---
 
-## Part 5: Areas Audited and Found Clean
+## Part 6: Areas Audited and Found Clean
 
 The following areas were thoroughly reviewed and found well-implemented:
 
@@ -460,10 +527,13 @@ The following areas were thoroughly reviewed and found well-implemented:
 - **SSL buffered data MITM detection** (`src/backend/tcop/backend_startup.c:626-630`): Correctly rejects pre-handshake data
 - **Extended query error handling** (`src/backend/tcop/postgres.c:4789`): `ignore_till_sync` correctly prevents desync
 - **No `alloca()` or VLA usage** found in backend code; PostgreSQL consistently uses `palloc()`
+- **Binary protocol `_recv` functions**: `array_recv`, `record_recv`, `range_recv`, `numeric_recv`, `inet_recv`, etc. are systematically well-audited with proper length/bounds validation
+- **`palloc` MaxAllocSize safety net**: Acts as a backstop for many potential integer overflow issues, preventing small-allocation-then-large-write scenarios
+- **Overflow-checked arithmetic**: `pg_mul_s32_overflow` / `pg_add_s32_overflow` used consistently in `repeat()`, `lpad()`, `ArrayGetNItems()` and other high-risk paths
 
 ---
 
-## Part 6: Priority Recommendations
+## Part 7: Priority Recommendations
 
 ### Fix Immediately (Critical/High severity)
 
@@ -490,12 +560,14 @@ The following areas were thoroughly reviewed and found well-implemented:
 
 ### Backlog (known trade-offs, long-term)
 
-15. Shell escaping in archive commands (K-3)
-16. Memory zeroing for key material (K-11, K-12)
-17. Constant-time comparisons in auth (K-6 through K-9)
-18. MD5 deprecation completion (K-14)
-19. `numeric_recv()` bounds check (K-4)
-20. `sprintf` -> `snprintf` migration (K-15)
+15. **Integer overflow UB in `array_cat()`** (M-1): Use `pg_add_s32_overflow()`.
+16. **On-disk header validation** (M-2): Add consistency checks for JSONB, multirange, array deserialization.
+17. Shell escaping in archive commands (K-3)
+18. Memory zeroing for key material (K-11, K-12)
+19. Constant-time comparisons in auth (K-6 through K-9)
+20. MD5 deprecation completion (K-14)
+21. `numeric_recv()` bounds check (K-4)
+22. `sprintf` -> `snprintf` migration (K-15)
 
 ### Not Worth Fixing
 
