@@ -38,17 +38,36 @@ showed these bottlenecks for single-insert-per-TX workloads at ~148k ev/s:
   similar to how NUM_BUFFER_PARTITIONS was raised over the years.
 - **Benchmark:** Compare 8 vs 16 vs 32 at 8 and 16 clients.
 
-### Idea 2: BulkInsertState for SPI inserts (confidence 6/10)
-- **Status:** TODO
-- **File:** `src/backend/executor/spi.c`, `src/backend/access/heap/heapam.c`
-- **What:** When SPI executes an INSERT, provide a BulkInsertState so the bulk
-  extend adaptive logic kicks in. Currently only COPY gets BulkInsertState.
-- **Why:** PgQ's C insert_event_raw uses SPI for the INSERT. Without
-  BulkInsertState, each insert may trigger single-page extension instead of
-  bulk extend. The adaptive extension (scale by waiter count, remember
-  last extend size) is wasted.
-- **Risk:** Moderate. Need to manage BulkInsertState lifecycle across SPI calls
-  within a transaction. Precedent in COPY code.
+### Idea 2: BulkInsertState for executor INSERT path (confidence 6/10)
+- **Status:** IMPLEMENTED (Phase 1: per-ModifyTableState bistate)
+- **File:** `src/backend/executor/nodeModifyTable.c`, `src/include/nodes/execnodes.h`
+- **What:** Add a BulkInsertState to the ModifyTable executor node, so any
+  INSERT that goes through the standard executor path (including SPI) gets
+  the same bulk-extend and FSM-bypass optimizations that COPY uses.
+- **Implementation:**
+  - Added `mt_bulk_insert_state` field to `ModifyTableState` in execnodes.h
+  - Created in `ExecInitModifyTable()` for non-FDW INSERT operations
+  - Passed to `table_tuple_insert()` in `ExecInsert()` (normal path only,
+    not ON CONFLICT speculative path)
+  - For partitioned tables, calls `ReleaseBulkInsertStatePin()` when the
+    target partition changes (tracked via `mt_bulk_insert_last_relid`)
+  - Freed in `ExecEndModifyTable()`
+- **Benefits:**
+  - `INSERT ... SELECT`: full benefit — bistate persists across all rows,
+    enabling adaptive bulk extension (`already_extended_by` grows), buffer
+    pin caching, and FSM bypass for pre-extended pages
+  - Single-row SPI INSERT: modest benefit — bistate is created/destroyed
+    per plan execution, so adaptive scaling doesn't accumulate across calls.
+    Still gets the BAS_BULKWRITE ring buffer strategy (16 MB) and initial
+    bulk extend based on waiter count
+- **Future (Phase 2):** For PgQ's single-row SPI pattern to fully benefit
+  from adaptive extension, the bistate would need to persist across SPI
+  calls within the same SPI connection. This could be done by adding a
+  per-relation bistate cache to `_SPI_connection`, keyed by relation OID,
+  but that's a larger change touching the SPI lifecycle.
+- **Risk:** Low. Follows the same pattern as COPY. The bistate is purely
+  an optimization hint — passing it never changes correctness, only
+  performance. The partition-switch handling mirrors COPY's approach.
 
 ### Idea 1: Multiple target blocks (confidence 4/10)
 - **Status:** DESIGN COMPLETE (do not implement without benchmarking simpler ideas first)

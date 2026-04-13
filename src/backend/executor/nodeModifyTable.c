@@ -52,6 +52,7 @@
 
 #include "postgres.h"
 
+#include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/tableam.h"
 #include "access/tupconvert.h"
@@ -899,6 +900,25 @@ ExecInsert(ModifyTableContext *context,
 									   resultRelInfo, slot,
 									   &partRelInfo);
 		resultRelInfo = partRelInfo;
+
+		/*
+		 * If we have a BulkInsertState and the target partition changed,
+		 * release the buffer pin and reset the bulk extension state.  The
+		 * bistate may hold a pin on a buffer belonging to a different
+		 * partition, and next_free/last_free offsets are per-relation.  We
+		 * keep already_extended_by so the adaptive scaling benefit carries
+		 * across partition switches.
+		 */
+		if (mtstate->mt_bulk_insert_state)
+		{
+			Oid			partrelid = RelationGetRelid(partRelInfo->ri_RelationDesc);
+
+			if (partrelid != mtstate->mt_bulk_insert_last_relid)
+			{
+				ReleaseBulkInsertStatePin(mtstate->mt_bulk_insert_state);
+				mtstate->mt_bulk_insert_last_relid = partrelid;
+			}
+		}
 	}
 
 	ExecMaterializeSlot(slot);
@@ -1272,7 +1292,7 @@ ExecInsert(ModifyTableContext *context,
 			/* insert the tuple normally */
 			table_tuple_insert(resultRelationDesc, slot,
 							   estate->es_output_cid,
-							   0, NULL);
+							   0, mtstate->mt_bulk_insert_state);
 
 			/* insert index entries for tuple */
 			if (resultRelInfo->ri_NumIndices > 0)
@@ -5771,6 +5791,16 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 		}
 		else
 			resultRelInfo->ri_BatchSize = 1;
+
+		/*
+		 * For non-FDW INSERT, create a BulkInsertState to enable adaptive
+		 * bulk relation extension and to bypass FSM lookups for consecutive
+		 * inserts.  This mirrors what COPY does, and helps multi-row INSERTs
+		 * (e.g. INSERT ... SELECT) as well as SPI-driven repeated inserts
+		 * against the same plan.  The bistate is freed in ExecEndModifyTable.
+		 */
+		if (resultRelInfo->ri_FdwRoutine == NULL)
+			mtstate->mt_bulk_insert_state = GetBulkInsertState();
 	}
 
 	/*
@@ -5827,6 +5857,10 @@ ExecEndModifyTable(ModifyTableState *node)
 			ExecDropSingleTupleTableSlot(resultRelInfo->ri_PlanSlots[j]);
 		}
 	}
+
+	/* Free the BulkInsertState if one was created for INSERT */
+	if (node->mt_bulk_insert_state)
+		FreeBulkInsertState(node->mt_bulk_insert_state);
 
 	/*
 	 * Close all the partitioned tables, leaf partitions, and their indices

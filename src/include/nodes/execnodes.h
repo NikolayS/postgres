@@ -1508,6 +1508,10 @@ typedef struct ModifyTableState
 	List	   *mt_updateColnosLists;
 	List	   *mt_mergeActionLists;
 	List	   *mt_mergeJoinConditions;
+
+	/* BulkInsertState for optimizing multi-row INSERTs (NULL if not INSERT) */
+	struct BulkInsertStateData *mt_bulk_insert_state;
+	Oid			mt_bulk_insert_last_relid;	/* last relation bistate was used for */
 } ModifyTableState;
 
 /* ----------------
