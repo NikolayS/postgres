@@ -93,3 +93,59 @@ CPU overhead with no I/O reduction. Would help for compressible data
 
 5. **Combined effect: +15% to +45%** for the realistic case (2KB payloads),
    **+12% to +31%** for small payloads. The gains increase with concurrency.
+
+## Round 2: Re-profiling and additional experiments
+
+### New bottleneck profile on patched PG (16 clients, ~2KB)
+
+| Wait event | Samples | % | Was (stock) |
+|------------|---------|---|-------------|
+| IO:DataFileWrite | 236 | 51% | 0-57% |
+| Client:ClientRead | 62 | 13% | 21-30% |
+| Lock:extend | 55 | 12% | 11% |
+| CPU/Running | 49 | 11% | 23-52% |
+| Buffer:BufferExclusive | 44 | 10% | 23% |
+
+Multi-target blocks cut BufferContent from 23% to 10%. IO:DataFileWrite
+and Lock:extend are now the dominant bottlenecks.
+
+### SMGR_TARGBLOCK_SLOTS = 8 vs 4
+
+| Slots | TPS (16 clients, 2KB) |
+|-------|----------------------|
+| 4 | 109,795 |
+| 8 | 88,401 (**-19.5%**) |
+
+**4 slots is the sweet spot.** More slots causes cache/memory pressure.
+
+### PL/pgSQL mode on patched PG (what pgq2 will use)
+
+| Clients | C (~100B) | PL (~100B) | PL/C | C (~2KB) | PL (~2KB) | PL/C |
+|---------|----------|-----------|------|---------|----------|------|
+| 4 | 171,508 | 124,880 | 73% | 116,015 | 95,250 | 82% |
+| 8 | 180,122 | 91,679 | 51% | 120,258 | 96,565 | 80% |
+| 16 | 193,411 | 95,800 | 50% | 98,480 | 110,516 | 112% |
+
+PL/pgSQL is 73-82% of C at 4 clients. Gap widens at high concurrency
+for small payloads. For 2KB payloads the gap is minimal (80-112%).
+
+### Sequence contention: NOT a bottleneck
+
+No sequence-related waits visible in pg_stat_activity sampling.
+sequence cache_size=1 is wasteful but not a visible serialization point.
+
+### AIO / io_uring status
+
+The patched PG 19dev has AIO infrastructure committed (io_uring support,
+buffer lock refactoring) but **only for reads**. AIO writes not yet
+implemented — FlushBuffer() still does synchronous pwrite(). This is
+why IO:DataFileWrite is 51% of time. Community-scale change needed.
+
+### Remaining optimization paths
+
+| Idea | Expected impact | Feasibility |
+|------|----------------|-------------|
+| Sequence cache_size=20 | Small (seq not visible bottleneck) | Trivial config |
+| AIO writes in checkpoint | Very high (51% bottleneck) | Wait for PG 20 |
+| Reduce Lock:extend further | Medium (12%) | Need bulk extend improvements |
+| Compressible payload + wal_compression | Medium (if data compresses) | Config only |
