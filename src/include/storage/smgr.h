@@ -20,6 +20,14 @@
 #include "storage/relfilelocator.h"
 
 /*
+ * Number of target-block slots per SMgrRelation.  Each backend hashes into
+ * one slot via MyProcNumber, so concurrent inserters naturally spread across
+ * different heap pages, reducing LWLock:BufferContent contention.  Must be a
+ * power of 2 for fast modulo (bitwise AND).
+ */
+#define SMGR_TARGBLOCK_SLOTS  4
+
+/*
  * smgr.c maintains a table of SMgrRelation objects, which are essentially
  * cached file handles.  An SMgrRelation is created (if not already present)
  * by smgropen(), and destroyed by smgrdestroy().  Note that neither of these
@@ -43,7 +51,7 @@ typedef struct SMgrRelationData
 	 * currently only reliable during recovery, since there is no cache
 	 * invalidation for fork extension.
 	 */
-	BlockNumber smgr_targblock; /* current insertion target block */
+	BlockNumber smgr_targblock[SMGR_TARGBLOCK_SLOTS]; /* per-slot insertion target blocks */
 	BlockNumber smgr_cached_nblocks[MAX_FORKNUM + 1];	/* last known size */
 
 	/* additional public fields may someday exist here */

@@ -70,7 +70,7 @@ showed these bottlenecks for single-insert-per-TX workloads at ~148k ev/s:
   performance. The partition-switch handling mirrors COPY's approach.
 
 ### Idea 1: Multiple target blocks (confidence 4/10)
-- **Status:** DESIGN COMPLETE (do not implement without benchmarking simpler ideas first)
+- **Status:** IMPLEMENTED (4-slot array, hash by MyProcNumber)
 - **File:** `src/backend/access/heap/hio.c` (RelationGetBufferForTuple)
 - **What:** Instead of a single `rd_targblock` that all backends converge on,
   maintain an array of N target blocks. Hash each backend to a different target

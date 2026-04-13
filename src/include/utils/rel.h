@@ -602,15 +602,33 @@ RelationCloseSmgr(Relation relation)
 #endif							/* !FRONTEND */
 
 /*
+ * RelationTargetBlockSlot
+ *		Compute this backend's target-block slot index.
+ *
+ * MyProcNumber is stable for the backend's lifetime and already globally
+ * available (via storage/procnumber.h, included transitively through
+ * storage/relfilelocator.h -> storage/smgr.h).  Masking with
+ * (SMGR_TARGBLOCK_SLOTS - 1) compiles to a single AND instruction.
+ */
+#define RelationTargetBlockSlot() \
+	((uint32) MyProcNumber & (SMGR_TARGBLOCK_SLOTS - 1))
+
+/*
  * RelationGetTargetBlock
  *		Fetch relation's current insertion target block.
  *
  * Returns InvalidBlockNumber if there is no current target block.  Note
  * that the target block status is discarded on any smgr-level invalidation,
  * so there's no need to re-open the smgr handle if it's not currently open.
+ *
+ * Each backend indexes into its own slot (based on MyProcNumber), so
+ * concurrent inserters target different pages, reducing BufferContent
+ * LWLock contention.
  */
 #define RelationGetTargetBlock(relation) \
-	( (relation)->rd_smgr != NULL ? (relation)->rd_smgr->smgr_targblock : InvalidBlockNumber )
+	( (relation)->rd_smgr != NULL ? \
+	  (relation)->rd_smgr->smgr_targblock[RelationTargetBlockSlot()] : \
+	  InvalidBlockNumber )
 
 /*
  * RelationSetTargetBlock
@@ -618,7 +636,7 @@ RelationCloseSmgr(Relation relation)
  */
 #define RelationSetTargetBlock(relation, targblock) \
 	do { \
-		RelationGetSmgr(relation)->smgr_targblock = (targblock); \
+		RelationGetSmgr(relation)->smgr_targblock[RelationTargetBlockSlot()] = (targblock); \
 	} while (0)
 
 /*

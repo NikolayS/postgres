@@ -302,7 +302,8 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	 * (Note: don't rely on this reln pointer below this loop.)
 	 */
 	reln = RelationGetSmgr(rel);
-	reln->smgr_targblock = InvalidBlockNumber;
+	for (int i = 0; i < SMGR_TARGBLOCK_SLOTS; i++)
+		reln->smgr_targblock[i] = InvalidBlockNumber;
 	for (int i = 0; i <= MAX_FORKNUM; ++i)
 		reln->smgr_cached_nblocks[i] = InvalidBlockNumber;
 

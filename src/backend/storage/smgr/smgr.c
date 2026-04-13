@@ -270,7 +270,8 @@ smgropen(RelFileLocator rlocator, ProcNumber backend)
 	if (!found)
 	{
 		/* hash_search already filled in the lookup key */
-		reln->smgr_targblock = InvalidBlockNumber;
+		for (int i = 0; i < SMGR_TARGBLOCK_SLOTS; i++)
+			reln->smgr_targblock[i] = InvalidBlockNumber;
 		for (int i = 0; i <= MAX_FORKNUM; ++i)
 			reln->smgr_cached_nblocks[i] = InvalidBlockNumber;
 		reln->smgr_which = 0;	/* we only have md.c at present */
@@ -356,7 +357,8 @@ smgrrelease(SMgrRelation reln)
 		smgrsw[reln->smgr_which].smgr_close(reln, forknum);
 		reln->smgr_cached_nblocks[forknum] = InvalidBlockNumber;
 	}
-	reln->smgr_targblock = InvalidBlockNumber;
+	for (int i = 0; i < SMGR_TARGBLOCK_SLOTS; i++)
+		reln->smgr_targblock[i] = InvalidBlockNumber;
 
 	RESUME_INTERRUPTS();
 }
