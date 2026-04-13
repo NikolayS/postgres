@@ -149,3 +149,86 @@ why IO:DataFileWrite is 51% of time. Community-scale change needed.
 | AIO writes in checkpoint | Very high (51% bottleneck) | Wait for PG 20 |
 | Reduce Lock:extend further | Medium (12%) | Need bulk extend improvements |
 | Compressible payload + wal_compression | Medium (if data compresses) | Config only |
+
+## Round 3: I/O Optimization and Overhead Analysis
+
+### PG 19dev I/O Settings (individual tests, 8 clients, ~2KB, 20s)
+
+| # | Setting | Value | TPS | Delta vs baseline |
+|---|---------|-------|-----|-------------------|
+| 0 | Baseline (defaults) | — | 81,520 | — |
+| 1 | `debug_io_direct` | `'data'` | 102,540 | **+25.8%** |
+| 2 | `io_max_concurrency` | 128 (was 64) | 114,154 | **+40.0%** |
+| 3 | `effective_io_concurrency` + `maintenance_io_concurrency` | 200 (was 16) | 109,859 | **+34.7%** |
+| 4 | `io_combine_limit` | 32 / 256kB (was 16) | 86,796 | **+6.5%** |
+
+**Note:** Individual test results may be inflated by page cache warming from
+baseline runs. The combined test (below) gives a more honest picture.
+
+### Combined I/O settings (all winners together, 30s)
+
+| Clients | TPS | MB/s | vs baseline without I/O tuning |
+|---------|-----|------|-------------------------------|
+| 4 | 104,643 | 204 | -10% vs individual best |
+| 8 | 93,657 | 183 | -18% vs individual best |
+| 16 | 101,006 | 197 | -11% vs individual best |
+
+**The combo is WORSE than individual settings.** `debug_io_direct` bypasses the
+kernel page cache while `effective_io_concurrency` tries to leverage it.
+They fight each other. Individual test results were also inflated by page
+cache effects from prior runs.
+
+**Verdict:** These PG 19dev I/O settings are interesting for reads but don't
+help our write-dominated queue workload when combined. The AIO infrastructure
+(io_method=worker) primarily benefits reads; writes still go through synchronous
+pwrite(). The +40% from io_max_concurrency alone may be a measurement artifact.
+
+### TOAST Analysis
+
+2KB JSON payloads (1,822 bytes ev_data, 1,882 bytes full tuple) stay inline —
+well below the ~2KB TOAST threshold. TOAST tables are empty. **Non-factor.**
+
+### Index Overhead (ev_txid btree)
+
+| Config | Avg TPS | Delta |
+|--------|---------|-------|
+| With index (baseline) | 134,640 | — |
+| Without index | 138,585 | **+2.9%** |
+| Seq cache 100 (with index) | 135,898 | +0.9% |
+| No index + cache 100 | 140,377 | **+4.3%** |
+
+The ev_txid index costs ~3% of insert throughput. For a queue that needs
+txid-based consumer reads, this is an acceptable cost.
+
+### Sequence Cache
+
+Increasing from cache=1 to cache=100 yields only +0.9% — within noise.
+Sequence contention is not a significant bottleneck at this concurrency level.
+
+### Summary of all optimization attempts
+
+| Optimization | Category | Result | Keep? |
+|---|---|---|---|
+| NUM_XLOGINSERT_LOCKS 8→32 | PG patch | **+5-12%** | YES |
+| BulkInsertState for executor | PG patch | **+5-10%** | YES |
+| Multi-target blocks (4 slots) | PG patch | **+10-100%** | YES |
+| Multi-target blocks (8 slots) | PG patch | **-19.5%** | NO |
+| wal_compression = lz4 | Config | **-17%** (random JSON) | NO for queue payloads |
+| wal_compression = zstd | Config | **-20%** (random JSON) | NO for queue payloads |
+| debug_io_direct = 'data' | Config (PG19) | **+26%** individual, worse combined | MAYBE |
+| io_max_concurrency = 128 | Config (PG19) | **+40%** individual, worse combined | NEEDS VALIDATION |
+| effective_io_concurrency = 200 | Config (PG19) | **+35%** individual, worse combined | NEEDS VALIDATION |
+| io_combine_limit = 32 | Config (PG19) | **+6.5%** | MINOR |
+| Drop ev_txid index | Schema | **+2.9%** | NO (needed for consumer reads) |
+| Sequence cache = 100 | Config | **+0.9%** | NOISE |
+| SMGR_TARGBLOCK_SLOTS = 8 | PG patch | **-19.5%** | NO |
+| TOAST tuning | Schema | N/A (not TOASTing) | N/A |
+
+### Best confirmed results (3 PG patches, standard config)
+
+| Mode | Payload | Stock PG 18 | Patched PG 19dev | Delta |
+|------|---------|------------|-----------------|-------|
+| C | ~100B | 152k ev/s | **193k ev/s** | **+31%** |
+| C | ~2KB | 92k ev/s / 180 MB/s | **120k ev/s / 235 MB/s** | **+35%** |
+| PL/pgSQL | ~100B | — | 125k ev/s (4 clients) | — |
+| PL/pgSQL | ~2KB | — | 110k ev/s / 215 MB/s | — |
