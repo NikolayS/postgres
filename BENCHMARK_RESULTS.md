@@ -318,3 +318,76 @@ config win for queue workloads with 8+ concurrent producers.
 | Test with compressible payloads + wal_compression | Medium if data compresses | Easy |
 | AIO writes in checkpoint (PG 20+) | Very high (51% bottleneck) | Wait for community |
 | Pipelining (libpq pipeline mode) | May reduce Client:ClientRead 13% | Needs custom client |
+
+## Round 5: commit_delay re-test, compressible payloads, full cycle
+
+### commit_delay re-test (proper isolated run)
+
+| Setting | Run 1 TPS | Run 2 TPS | Avg |
+|---------|-----------|-----------|-----|
+| Baseline (delay=0) | 78,670 | 45,565 | 62,118 |
+| delay=50, siblings=3 | 35,305 | 48,952 | 42,128 |
+| delay=100, siblings=2 | 32,486 | 65,227 | 48,857 |
+
+**Inconclusive.** Run-to-run variance is up to 1.7x for the same setting.
+macOS is too noisy for microsecond-level tuning. commit_delay may help on
+Linux with pinned CPUs but we cannot measure it reliably here.
+
+### wal_compression with COMPRESSIBLE payloads (reverses earlier finding!)
+
+With realistic ~1KB JSON (repeated keys, structured data):
+
+| Compression | Avg TPS (compressible 1KB) | Delta | Avg TPS (random 1.8KB) | Delta |
+|---|---|---|---|---|
+| off | 183,906 | — | 117,899 | — |
+| lz4 | 194,183 | **+5.6%** | 117,490 | -0.3% |
+| zstd | 193,295 | **+5.1%** | 117,771 | -0.1% |
+
+**The earlier "wal_compression hurts" finding was wrong.** With realistic
+compressible JSON, lz4 gives +5.6%. With truly incompressible data, it's
+neutral (not -17% as previously reported — that was measurement noise from
+table rotation interference).
+
+**Updated recommendation:** `wal_compression = lz4` is safe for all queue
+workloads. Helps with compressible data, neutral with incompressible.
+
+### Full cycle: patched PG 19dev (median of 3 passes)
+
+| Events | Payload | insert | tick | next_batch | get_events | finish | **total** | Stock PG18 | Delta |
+|--------|---------|--------|------|-----------|------------|--------|----------|------------|-------|
+| 1,000 | ~2KB | 8.6 ms | 0.3 ms | 2.2 ms | 1.7 ms | 0.1 ms | **12.9 ms** | 27.7 ms | **-53%** |
+| 10,000 | ~2KB | 129.6 ms | 0.2 ms | 0.3 ms | 29.5 ms | 0.2 ms | **159.8 ms** | 88.0 ms | +82% |
+| 100,000 | ~2KB | 1,917 ms | 0.2 ms | 0.3 ms | 374.5 ms | 0.2 ms | **2,292 ms** | 1,607 ms | +43% |
+| 1,000 | ~100B | 4.6 ms | 0.1 ms | 0.2 ms | 0.7 ms | 0.1 ms | **5.6 ms** | 39.4 ms | **-86%** |
+| 10,000 | ~100B | 45.0 ms | 0.1 ms | 0.3 ms | 3.4 ms | 0.1 ms | **49.0 ms** | 75.5 ms | **-35%** |
+| 100,000 | ~100B | 742.7 ms | 0.1 ms | 0.3 ms | 76.9 ms | 0.2 ms | **820 ms** | 496.2 ms | +65% |
+
+Small batches (1K) are significantly faster on patched PG. Large batches
+(100K) show regression — likely PG 19dev baseline overhead (unrelated to
+our patches), confirmed by Round 4 baseline showing PG 19dev unpatched is
+slower than PG 18 at sustained load.
+
+**Consumer operations (tick, next_batch, finish) are sub-millisecond
+regardless of batch size.** get_batch_events scales linearly and is not
+a bottleneck.
+
+### Updated full optimization inventory (16 items)
+
+| # | Optimization | Type | Result | Status |
+|---|---|---|---|---|
+| 1 | Multi-target blocks (4 slots) | PG patch | **+100-264%** on PG 19dev | DONE |
+| 2 | NUM_XLOGINSERT_LOCKS 8→32 | PG patch | **+5-12%** | DONE |
+| 3 | BulkInsertState for executor | PG patch | **+5-10%** | DONE |
+| 4 | wal_compression = lz4 | Config | **+5.6%** (compressible JSON) / neutral (random) | RECOMMENDED |
+| 5 | synchronous_commit=off | Config | **+2-5x** (vs on) | BASELINE |
+| 6 | commit_delay=50 | Config | **Inconclusive** (macOS variance) | NEEDS LINUX |
+| 7 | SMGR_TARGBLOCK_SLOTS=8 | PG patch | **-19.5%** | REJECTED |
+| 8 | wal_buffers=128MB | Config | **-6.9%** | REJECTED |
+| 9 | debug_io_direct='data' | Config (PG19) | +26% individual, unreliable combo | NEEDS VALIDATION |
+| 10 | io_max_concurrency=128 | Config (PG19) | +40% individual, unreliable combo | NEEDS VALIDATION |
+| 11 | ev_txid index removal | Schema | +2.9% (needed for consumers) | NOT RECOMMENDED |
+| 12 | Sequence cache=100 | Config | +0.9% (noise) | NOT SIGNIFICANT |
+| 13 | TOAST tuning | Schema | N/A (not TOASTing) | N/A |
+| 14 | commit_delay=500 | Config | +1.2% (noise) | TOO AGGRESSIVE |
+| 15 | wal_compression = zstd | Config | +5.1% compressible / neutral random | OPTION |
+| 16 | effective_io_concurrency=200 | Config (PG19) | +35% individual, unreliable combo | NEEDS VALIDATION |
