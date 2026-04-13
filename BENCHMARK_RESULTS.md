@@ -391,3 +391,89 @@ a bottleneck.
 | 14 | commit_delay=500 | Config | +1.2% (noise) | TOO AGGRESSIVE |
 | 15 | wal_compression = zstd | Config | +5.1% compressible / neutral random | OPTION |
 | 16 | effective_io_concurrency=200 | Config (PG19) | +35% individual, unreliable combo | NEEDS VALIDATION |
+
+## Round 6: Stock PG 18 — Best Config — Final Comprehensive Results
+
+### Configuration
+```
+synchronous_commit = off
+shared_buffers = 2GB
+max_wal_size = 4GB
+wal_level = minimal
+wal_compression = lz4
+```
+PG 18.3, Apple Silicon (10 cores, 24GB), prepared mode, 30s per test.
+
+### Producer throughput (single insert per TX)
+
+**C mode (insert_event via C insert_event_raw):**
+
+| Clients | ~100B | ~1KB JSON | ~1KB MB/s | ~2KB | ~2KB MB/s |
+|---------|-------|----------|-----------|------|-----------|
+| 4 | 161,254 | 125,907 | 132 | 90,371 | 177 |
+| 8 | **158,622** | **134,594** | **141** | 85,917 | 168 |
+| 16 | 153,782 | 130,167 | 137 | **88,068** | **172** |
+
+**PL/pgSQL mode (no C code — what pgq2 uses):**
+
+| Clients | ~100B | ~1KB JSON | ~1KB MB/s | ~2KB | ~2KB MB/s |
+|---------|-------|----------|-----------|------|-----------|
+| 4 | 56,032 | 70,284 | 74 | 64,629 | 126 |
+| 8 | 72,084 | **88,374** | **93** | **75,442** | **147** |
+| 16 | **72,988** | 87,043 | 91 | 73,496 | 144 |
+
+**C/PL ratio:** 1.2-2.2x depending on payload and concurrency.
+Larger payloads narrow the gap (I/O dominates over function overhead).
+
+### Full cycle — PL/pgSQL mode (pgq2)
+
+| Events | Payload | insert | tick | next | get_events | finish | **total** |
+|--------|---------|--------|------|------|-----------|--------|----------|
+| 1,000 | ~2KB | 28.6 ms | 2.8 ms | 3.4 ms | 5.9 ms | 1.5 ms | **42.2 ms** |
+| 10,000 | ~1KB | 175.0 ms | 1.5 ms | 1.8 ms | 15.1 ms | 1.2 ms | **194.6 ms** |
+| 10,000 | ~2KB | 127.1 ms | 1.5 ms | 1.6 ms | 13.4 ms | 1.1 ms | **144.7 ms** |
+| 100,000 | ~1KB | 3,030 ms | 1.6 ms | 1.8 ms | 125.8 ms | 1.3 ms | **3,161 ms** |
+| 100,000 | ~2KB | 1,867 ms | 1.6 ms | 1.7 ms | 331.2 ms | 1.4 ms | **2,203 ms** |
+
+Consumer operations (tick, next_batch, finish_batch) are 1-3 ms regardless
+of batch size. get_batch_events scales linearly: ~6ms/1K, ~14ms/10K,
+~330ms/100K for 2KB events.
+
+### The pgq2 numbers (what to advertise)
+
+For pgq2 (pure PL/pgSQL, no C, stock PG 18, tuned):
+
+| Metric | Value |
+|--------|-------|
+| Producer throughput (~1KB JSON) | **88,374 ev/s** (8 clients) |
+| Producer throughput (~2KB) | **75,442 ev/s / 147 MB/s** (8 clients) |
+| Producer throughput (~100B) | **72,988 ev/s** (16 clients) |
+| Consumer batch read (100K events, 2KB) | **~302K ev/s** (100K in 331ms) |
+| tick + next_batch + finish_batch | **~5 ms** (constant) |
+| Full cycle 10K events, 2KB | **145 ms** end-to-end |
+
+### With C insert_event_raw (PgQ compatibility mode)
+
+| Metric | Value |
+|--------|-------|
+| Producer throughput (~100B) | **161,254 ev/s** |
+| Producer throughput (~1KB JSON) | **134,594 ev/s / 141 MB/s** |
+| Producer throughput (~2KB) | **90,371 ev/s / 177 MB/s** |
+
+### Recommended tuning guide for queue workloads
+
+```sql
+-- Essential (biggest impact)
+alter system set synchronous_commit = off;  -- 2-5x improvement
+
+-- Important
+alter system set shared_buffers = '2GB';    -- or 25% of RAM
+alter system set max_wal_size = '4GB';      -- reduce checkpoint frequency
+alter system set wal_compression = lz4;     -- helps with compressible JSON
+
+-- If no replication needed
+alter system set wal_level = minimal;       -- reduces WAL volume
+
+-- After changing shared_buffers or wal_level:
+-- restart required
+```
