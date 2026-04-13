@@ -153,8 +153,13 @@ int			wal_segment_size = DEFAULT_XLOG_SEG_SIZE;
  * Number of WAL insertion locks to use. A higher value allows more insertions
  * to happen concurrently, but adds some CPU overhead to flushing the WAL,
  * which needs to iterate all the locks.
+ *
+ * Raised from 8 to 32 to reduce contention with 10+ concurrent inserters.
+ * The extra flush-side iteration cost is negligible compared to the insert
+ * lock wait time eliminated.  Each WALInsertLockPadded is 128 bytes, so the
+ * additional shared memory is only (32-8)*128 = 3 KB.
  */
-#define NUM_XLOGINSERT_LOCKS  8
+#define NUM_XLOGINSERT_LOCKS  32
 
 /*
  * Max distance from last checkpoint, before triggering a new xlog-based

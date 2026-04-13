@@ -28,7 +28,7 @@ showed these bottlenecks for single-insert-per-TX workloads at ~148k ev/s:
 - **Risk:** Near zero. Just a GUC setting.
 
 ### Idea 3: Raise NUM_XLOGINSERT_LOCKS (confidence 8/10)
-- **Status:** TODO
+- **Status:** DONE — raised from 8 to 32
 - **File:** `src/backend/access/transam/xlog.c:154`
 - **What:** Change `#define NUM_XLOGINSERT_LOCKS 8` to 16 or 32.
 - **Why:** 8 WAL insert locks is a serialization bottleneck with 10+ concurrent
