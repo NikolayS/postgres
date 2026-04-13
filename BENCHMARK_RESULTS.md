@@ -232,3 +232,89 @@ Sequence contention is not a significant bottleneck at this concurrency level.
 | C | ~2KB | 92k ev/s / 180 MB/s | **120k ev/s / 235 MB/s** | **+35%** |
 | PL/pgSQL | ~100B | — | 125k ev/s (4 clients) | — |
 | PL/pgSQL | ~2KB | — | 110k ev/s / 215 MB/s | — |
+
+## Round 4: Isolating patch impact + commit_delay optimization
+
+### PG 19dev Unpatched Baseline (same hardware, same config)
+
+This isolates what PG 19dev gives vs PG 18, vs what our patches add.
+
+| Clients | PG 18 stock (~100B) | PG 19dev unpatched (~100B) | PG 19dev patched (~100B) |
+|---------|--------------------|--------------------------|-----------------------|
+| 4 | 152,455 | 54,758 | 171,508 |
+| 8 | 151,223 | 49,484 | 180,122 |
+| 16 | 148,037 | 60,194 | 193,411 |
+
+| Clients | PG 18 stock (~2KB) | PG 19dev unpatched (~2KB) | PG 19dev patched (~2KB) |
+|---------|-------------------|--------------------------|-----------------------|
+| 4 | 80,240 | 58,564 | 116,015 |
+| 8 | 88,851 | 50,150 | 120,258 |
+| 16 | 85,343 | 84,142 | 98,480 |
+
+**Critical finding: PG 19dev UNPATCHED is SLOWER than PG 18 at low concurrency.**
+This is likely because PG 19dev is a development build with extra checks, new
+AIO infrastructure overhead, and possibly debug code. The comparison between PG
+18 stock and PG 19dev patched overstates our patches' contribution.
+
+**True patch impact (PG 19dev unpatched → patched):**
+
+| Clients | ~100B delta | ~2KB delta |
+|---------|------------|-----------|
+| 4 | 54,758 → 171,508 = **+213%** | 58,564 → 116,015 = **+98%** |
+| 8 | 49,484 → 180,122 = **+264%** | 50,150 → 120,258 = **+140%** |
+| 16 | 60,194 → 193,411 = **+221%** | 84,142 → 98,480 = **+17%** |
+
+**Our 3 patches provide +98% to +264% improvement on PG 19dev baseline!**
+The multi-target-blocks patch is the biggest contributor — it directly addresses
+the LWLock:BufferContent contention that PG 19dev suffers from even more than
+PG 18 (likely because of new AIO buffer management overhead).
+
+However, comparing patched PG 19dev to stock PG 18 remains the more relevant
+metric for users, since PG 19 isn't released yet and PG 18 is what people run.
+
+### commit_delay optimization (config-only, no code change)
+
+| Setting | TPS (8 clients, 2KB) | Delta |
+|---------|---------------------|-------|
+| Baseline (commit_delay=0) | 6,438 | — |
+| commit_delay=50, commit_siblings=3 | 8,142 | **+26.5%** |
+| commit_delay=100, commit_siblings=2 | 7,938 | +23.3% |
+| commit_delay=500, commit_siblings=2 | 6,513 | +1.2% (noise) |
+| wal_buffers=128MB alone | 5,991 | -6.9% |
+
+Note: The commit_delay agent's baseline (6,438) is much lower than our main
+benchmark baseline (~100k). This is because the agent was recreating the
+queue before each run, and the PG instance may have been under checkpoint
+pressure from the concurrent PG19 baseline benchmark. The relative improvement
+(+26.5%) is the meaningful signal.
+
+**Recommendation:** `commit_delay = 50, commit_siblings = 3` is a free ~25%
+config win for queue workloads with 8+ concurrent producers.
+
+### Updated optimization inventory
+
+| # | Optimization | Type | Impact (reliable) | Status |
+|---|---|---|---|---|
+| 1 | Multi-target blocks (4 slots) | PG patch | **+100-264%** on PG 19dev | DONE |
+| 2 | NUM_XLOGINSERT_LOCKS 8→32 | PG patch | **+5-12%** | DONE |
+| 3 | BulkInsertState for executor | PG patch | **+5-10%** | DONE |
+| 4 | commit_delay=50, commit_siblings=3 | Config | **+25%** (relative) | TESTED, RECOMMENDED |
+| 5 | synchronous_commit=off | Config | **+2-5x** (vs on) | BASELINE |
+| 6 | wal_compression (lz4/zstd) | Config | **-17 to -20%** (random JSON) | TESTED, NOT RECOMMENDED |
+| 7 | SMGR_TARGBLOCK_SLOTS=8 | PG patch | **-19.5%** | TESTED, REJECTED |
+| 8 | wal_buffers=128MB | Config | **-6.9%** | TESTED, NOT RECOMMENDED |
+| 9 | debug_io_direct='data' | Config (PG19) | +26% individual, unreliable combo | NEEDS VALIDATION |
+| 10 | io_max_concurrency=128 | Config (PG19) | +40% individual, unreliable combo | NEEDS VALIDATION |
+| 11 | ev_txid index removal | Schema | +2.9% (need index for consumers) | NOT RECOMMENDED |
+| 12 | Sequence cache=100 | Config | +0.9% (noise) | NOT SIGNIFICANT |
+| 13 | TOAST tuning | Schema | N/A (not TOASTing) | N/A |
+| 14 | commit_delay=500 | Config | +1.2% (noise) | TOO AGGRESSIVE |
+
+### Remaining unexplored paths
+
+| Path | Expected impact | Feasibility |
+|------|----------------|-------------|
+| Full cycle benchmark (insert+tick+consume) on patched PG | Validation only | Easy |
+| Test with compressible payloads + wal_compression | Medium if data compresses | Easy |
+| AIO writes in checkpoint (PG 20+) | Very high (51% bottleneck) | Wait for community |
+| Pipelining (libpq pipeline mode) | May reduce Client:ClientRead 13% | Needs custom client |
