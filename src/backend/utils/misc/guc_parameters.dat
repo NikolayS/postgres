@@ -2440,6 +2440,14 @@
   max => 'INT_MAX',
 },
 
+{ name => 'recovery_pause_on_logical_slot_conflict', type => 'bool',
+  context => 'PGC_SIGHUP', group => 'REPLICATION_STANDBY',
+  short_desc => 'Pauses recovery instead of invalidating an active logical slot on catalog conflict.',
+  long_desc => 'When WAL replay on a standby is about to invalidate a logical replication slot because a catalog PRUNE_ON_ACCESS record has overtaken the slot\'s catalog_xmin, pause recovery instead. The operator can then drain or drop the slot and call pg_wal_replay_resume() to continue.',
+  variable => 'recovery_pause_on_logical_slot_conflict',
+  boot_val => 'false',
+},
+
 { name => 'recovery_prefetch', type => 'enum', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY',
   short_desc => 'Prefetch referenced blocks during recovery.',
   long_desc => 'Look ahead in the WAL to find references to uncached data.',
