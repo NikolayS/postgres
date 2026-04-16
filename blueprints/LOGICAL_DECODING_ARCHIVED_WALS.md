@@ -55,7 +55,7 @@ Logical replication in PostgreSQL today has a fundamental coupling problem: the 
 - **PG17** added failover slots and slot synchronization.
 - **PG18** added `pg_logicalinspect` — visibility into serialized logical snapshot state.
 - **PG19 (proposed, unreleased as of 2026-04-17):** dynamic `wal_level` (Sawada, under review) and `pg_waldump` reading from tar archives (Sul, under review) are pgsql-hackers threads still in discussion. PG19's release is September 2026 at earliest. These are listed as potentially useful infrastructure, not as committed features.
-- **Craig Ringer's 2020 proposal** to teach xlogreader's page-read callback to invoke `restore_command` when segments are missing from `pg_wal` remains unimplemented but was revived on pgsql-hackers in July 2025 by Alexander Kukushkin.
+- **Craig Ringer's 2020 proposal** to teach xlogreader's page-read callback to invoke `restore_command` when segments are missing from `pg_wal` remains unimplemented but was revived on pgsql-hackers in July 2025 by Japin Li (thread participants include Fujii Masao, Alexander Kukushkin, et al.).
 - **No external tool** (wal2json, Debezium, pglogical, pg_waldump, WAL-G's walparser) can perform logical decoding offline. Every one requires a running PostgreSQL server.
 
 ### The fundamental barrier
@@ -853,7 +853,7 @@ These are explicitly out of scope for the PoC but documented for roadmap plannin
 
 1. **Core patch: slot-aware replay throttling** — the revised, reframed version of v0.1's `recovery_target_function` proposal (see §4.2.3). Shape TBD: likely a declarative built-in mode, not user plpgsql. The *need* is pausing replay before applying a WAL record that would invalidate an active logical slot's `catalog_xmin`. Start as a problem statement on pgsql-hackers after the PoC demonstrates the need empirically.
 
-2. **Core patch: walsender `restore_command` integration — complementary, not foundational.** Craig Ringer's 2020 proposal, revived by Kukushkin in 2025. This patch lets a **primary's walsender** fetch archived segments when a downstream logical replica has fallen behind and the primary has already recycled the segment. It keeps existing logical replication alive across retention gaps. It is **not** the mechanism this PoC uses — we don't run a walsender on the primary at all. The two efforts are complementary (the walsender patch improves robustness of today's logical replication; this PoC decouples replication from the primary entirely) and should not be conflated.
+2. **Core patch: walsender `restore_command` integration — complementary, not foundational.** Craig Ringer's 2020 proposal, revived in July 2025 by Japin Li. This patch lets a **primary's walsender** fetch archived segments when a downstream logical replica has fallen behind and the primary has already recycled the segment. It keeps existing logical replication alive across retention gaps. It is **not** the mechanism this PoC uses — we don't run a walsender on the primary at all. The two efforts are complementary (the walsender patch improves robustness of today's logical replication; this PoC decouples replication from the primary entirely) and should not be conflated.
 
 3. **Catalog snapshot export** — Periodically serialize catalog state alongside WAL archives. Enables a true standalone decoder without a running PostgreSQL instance. Multi-year effort.
 
@@ -870,7 +870,7 @@ These are explicitly out of scope for the PoC but documented for roadmap plannin
 1. Craig Ringer, "Logical archiving" thread, pgsql-hackers, December 2020 — the original `restore_command` proposal for logical walsenders:
    https://www.postgresql.org/message-id/2B44FA4B-7500-4B37-82BD-BFACA20001AD@yandex-team.ru
 
-2. Alexander Kukushkin et al., "Requested WAL segment has already been removed" — July 2025 revival of `restore_command` for walsenders:
+2. Japin Li, "Requested WAL segment has already been removed" — July 2025 revival of `restore_command` for walsenders (thread participants include Fujii Masao, Alexander Kukushkin, et al.):
    https://www.postgresql.org/message-id/CAGjGUALfTQz4aCfN38ZRtiPmtzbdmacAm=Pse4aLbxYX4j0Cjw@mail.gmail.com
 
 3. Bertrand Drouvot, "Allow logical decoding on standbys" — PG16 commit `0fdab27`:
@@ -958,7 +958,7 @@ Slot creation took ~1 second. Replay advanced linearly (~176 MB/sec local disk).
 
 ### 10.4 US-1 verdict: requires core patch
 
-**US-1 continuous CDC is not viable in the blueprint's archive-only architecture without a core patch.** The G3 failure fires deterministically under any write-active primary; the earliest bypass the community has discussed (Ringer 2020, Kukushkin 2025) solves adjacent but different problems (walsender archive fetch, primary-side WAL retention). A new problem statement is drafted in issue #25 ([comment 4260187347](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260187347)) proposing a standby-side GUC `recovery_pause_on_logical_slot_conflict` that pauses replay before applying a WAL record that would invalidate any active logical slot's `catalog_xmin` horizon. TBDs prior to external posting: human sanity-check of the mechanism description (blueprint's architecture lead). `two_phase`, failover-slot, and synced-slot interactions verified as requiring no special handling via PG18 source inspection (issue #25 [comment 4260312575](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260312575)).
+**US-1 continuous CDC is not viable in the blueprint's archive-only architecture without a core patch.** The G3 failure fires deterministically under any write-active primary; the earliest bypass the community has discussed (Ringer 2020, Japin Li 2025) solves adjacent but different problems (walsender archive fetch, primary-side WAL retention). A new problem statement is drafted in issue #25 ([comment 4260187347](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260187347)) proposing a standby-side GUC `recovery_pause_on_logical_slot_conflict` that pauses replay before applying a WAL record that would invalidate any active logical slot's `catalog_xmin` horizon. TBDs prior to external posting: human sanity-check of the mechanism description (blueprint's architecture lead). `two_phase`, failover-slot, and synced-slot interactions verified as requiring no special handling via PG18 source inspection (issue #25 [comment 4260312575](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260312575)).
 
 ### 10.5 Outcome determination
 
