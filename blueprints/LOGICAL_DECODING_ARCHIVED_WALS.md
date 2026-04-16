@@ -200,6 +200,8 @@ This is **Path 2** from the community research ("PITR-based logical decoding / r
 
 ### 4.1 Phase 1 — Prove the Pipe (MVP)
 
+> **Tracking issue:** [NikolayS/postgres#25](https://github.com/NikolayS/postgres/issues/25) — Sprint 0 gate experiment (all four gates G1–G4).
+
 **Goal:** Confirm that a physical standby replaying WAL from archive (not streaming) can host a logical slot and produce decoded changes.
 
 **Nobody has publicly verified this works.** The @x4m session concluded with "somebody needs to try it." This is the single highest-value experiment.
@@ -642,6 +644,8 @@ Each user story has a corresponding manual test runbook. These are also automate
 ## 7. Implementation Plan
 
 ### Sprint 0 — Validate Foundation (2 weeks, with early-exit)
+
+> **Tracking issue:** [NikolayS/postgres#25](https://github.com/NikolayS/postgres/issues/25).
 
 **Revised in v0.2.** The v0.1 plan treated slot creation as the single gate. It isn't — it's one of four gates (see §4.1.3). Even if slot creation succeeds, the harder questions are whether it decodes newly-restored WAL, whether it survives replay progress, and whether it survives restart cycles. Budget two weeks with an early exit if the answers are clean; if any gate hits an obstacle that requires a `snapbuild.c` / `standby.c` source-level investigation, two weeks is the realistic minimum (not 1–2 days).
 
