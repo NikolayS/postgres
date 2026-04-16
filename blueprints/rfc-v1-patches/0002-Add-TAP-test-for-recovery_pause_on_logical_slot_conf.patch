@@ -1,31 +1,35 @@
-From a16bce1f0e95d2540769ab1e3d359f784932b1b7 Mon Sep 17 00:00:00 2001
+From d63deab46c5e17eb6c0b0e2d0e9789e70e595b9e Mon Sep 17 00:00:00 2001
 From: Nikolay Samokhvalov <nik@postgres.ai>
-Date: Thu, 16 Apr 2026 18:41:14 +0000
+Date: Thu, 16 Apr 2026 19:09:10 +0000
 Subject: [PATCH 2/2] Add TAP test for recovery_pause_on_logical_slot_conflict
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-Two-phase test: Phase 1 sets up an archive-only standby from a clean
-basebackup + pg_log_standby_snapshot and creates a logical slot while
-the archive contains no catalog-prune records. Phase 2 then runs
-catalog-churning workload on the primary (transient tables + VACUUM
-on pg_class, pg_attribute, pg_type, pg_depend, pg_statistic) and
-waits for those segments to archive.
+10 assertions, ~30 wallclock seconds.
 
-When the standby replays through those segments, the GUC pauses
-replay; a Perl orchestrator loop drains the slot with
-pg_logical_slot_get_changes and calls pg_wal_replay_resume. The slot
-should survive — wal_status=reserved, not invalidated.
+Two-phase flow: Phase 1 sets up an archive-only standby from a clean
+basebackup + pg_log_standby_snapshot and creates logical slots on
+TWO standbys while the archive contains no catalog-prune records.
+One standby has the GUC on, the other off. Phase 2 then runs catalog-
+churning workload on the primary (transient tables + VACUUM on
+pg_class, pg_attribute, pg_type, pg_depend, pg_statistic) and waits
+for those segments to archive.
 
-A second standby is created in Phase 1 with the GUC off, creates its
-own slot, and is expected to have its slot invalidated by the same
-Phase-2 workload (wal_status=lost). This baseline assertion keeps the
-test honest: if GUC-off ever stops invalidating, either the test
-setup is no longer triggering the conflict or the patch accidentally
-affects default behavior.
+When the standbys replay through those segments, the GUC-on one
+pauses; a Perl orchestrator drains the slot with
+pg_logical_slot_get_changes and calls pg_wal_replay_resume. The
+GUC-off baseline standby lets its slot invalidate — the upstream
+default behavior, unchanged.
 
-Runs in ~40 seconds. 7 assertions:
+A third standby is created after Phase 2 archives (so its replay
+will pause quickly on first conflict record). The test then calls
+pg_promote(wait=>true, wait_seconds=>30) on the paused standby and
+asserts that promote returns true in under 10 seconds. Guards the
+CheckForStandbyTrigger() escape path — without that, pg_promote
+stalls for the full wait_seconds and returns false.
+
+Assertions:
   ok 1 - GUC is registered
   ok 2 - slot created cleanly in Phase 1 (GUC on, state: reserved)
   ok 3 - baseline slot created cleanly in Phase 1 (GUC off, reserved)
@@ -33,17 +37,20 @@ Runs in ~40 seconds. 7 assertions:
   ok 5 - at least one pause event was handled
   ok 6 - at least 2000 decoded events
   ok 7 - baseline (GUC off): slot invalidates as expected (lost)
+  ok 8 - promote-test standby reached paused state before promotion
+  ok 9 - pg_promote returned true while standby was paused by GUC
+  ok 10 - pg_promote completed in under 10s
 ---
- .../t/050_recovery_pause_on_slot_conflict.pl  | 247 ++++++++++++++++++
- 1 file changed, 247 insertions(+)
+ .../t/050_recovery_pause_on_slot_conflict.pl  | 296 ++++++++++++++++++
+ 1 file changed, 296 insertions(+)
  create mode 100644 src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl
 
 diff --git a/src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl b/src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl
 new file mode 100644
-index 00000000000..cdd907165c6
+index 00000000000..56f61262039
 --- /dev/null
 +++ b/src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl
-@@ -0,0 +1,247 @@
+@@ -0,0 +1,296 @@
 +# Copyright (c) 2026, PostgreSQL Global Development Group
 +
 +# Exercise the recovery_pause_on_logical_slot_conflict GUC on a standby.
@@ -125,9 +132,15 @@ index 00000000000..cdd907165c6
 +$node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
 +
 +# Force the segment containing that anchor to archive so the standby
-+# can see it via restore_command.
++# can see it via restore_command. Switch TWICE: first switch closes the
++# segment with the snapshot record; second switch gives snapbuild the
++# forward WAL it needs to decide the slot is consistent. Without the
++# second switch, DecodingContextFindStartpoint blocks on 'waiting for
++# WAL to become available at seg N+1' — flaky slot creation.
 +my $phase1_seg = $node_primary->safe_psql('postgres',
 +    "SELECT pg_walfile_name(pg_current_wal_lsn())");
++$node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
++$node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
 +$node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
 +$node_primary->poll_query_until('postgres', qq[
 +    SELECT last_archived_wal IS NOT NULL
@@ -286,6 +299,49 @@ index 00000000000..cdd907165c6
 +is($off_state, 'lost',
 +   "baseline (GUC off): slot invalidates as expected under catalog prune");
 +
++# Promote-during-pause: bring up a third standby, get it paused by the
++# GUC, then call pg_promote() and assert promotion actually completes
++# (rather than stalling until someone also runs pg_wal_replay_resume).
++# Guards the CheckForStandbyTrigger() escape path in the wait loop.
++my $node_standby_p = PostgreSQL::Test::Cluster->new('standby_promote');
++$node_standby_p->init_from_backup($node_primary, $backup_name,
++    has_streaming => 0, has_restoring => 1);
++$node_standby_p->append_conf('postgresql.conf', qq[
++hot_standby = on
++recovery_pause_on_logical_slot_conflict = on
++wal_level = logical
++max_standby_archive_delay = -1
++max_standby_streaming_delay = -1
++]);
++$node_standby_p->start;
++$node_standby_p->poll_query_until('postgres',
++    "SELECT pg_last_wal_replay_lsn() IS NOT NULL", 't');
++$node_standby_p->safe_psql('postgres',
++    "SELECT pg_create_logical_replication_slot('promote_slot', 'test_decoding')");
++
++# Wait for replay to reach a pause (Phase-2 archive is already shipped
++# so it will happen within a few seconds).
++my $paused = 0;
++for (my $i = 0; $i < 60; $i++) {
++    my $s = $node_standby_p->safe_psql('postgres',
++        "SELECT pg_get_wal_replay_pause_state()");
++    if ($s eq 'paused') { $paused = 1; last; }
++    usleep(500_000);
++}
++ok($paused, "promote-test standby reached paused state before promotion");
++
++# Call pg_promote with a short wait. Without the CheckForStandbyTrigger
++# escape in the wait loop, this stalls for the full wait_seconds and
++# returns false; with the fix, it returns true in ~1 second.
++my $t0 = time();
++my $promoted = $node_standby_p->safe_psql('postgres',
++    "SELECT pg_promote(wait => true, wait_seconds => 30)");
++my $elapsed = time() - $t0;
++is($promoted, 't', "pg_promote returned true while standby was paused by GUC");
++cmp_ok($elapsed, '<', 10,
++    "pg_promote completed in under 10s (actual: ${elapsed}s)");
++
++$node_standby_p->stop;
 +$node_standby_off->stop;
 +$node_standby->stop;
 +$node_primary->stop;

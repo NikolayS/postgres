@@ -1,6 +1,6 @@
-From fb514d2d92fb68f9076db95e71ea71d5725b364e Mon Sep 17 00:00:00 2001
+From 87e7c8f924874c74d4cb8644061da07bf015c6cd Mon Sep 17 00:00:00 2001
 From: Nikolay Samokhvalov <nik@postgres.ai>
-Date: Thu, 16 Apr 2026 18:41:00 +0000
+Date: Thu, 16 Apr 2026 19:08:53 +0000
 Subject: [PATCH 1/2] Pause recovery on logical slot conflict
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -26,35 +26,37 @@ catalog_xmin — typically ~2 * autovacuum_naptime after slot creation.
 Hooks into ResolveRecoveryConflictWithSnapshot(), the single choke
 point in the replay path for RS_INVAL_HORIZON conflicts, via a new
 MaybePauseOnLogicalSlotConflict() function. Reuses the existing
-SetRecoveryPause / recoveryNotPausedCV / ConfirmRecoveryPaused
-machinery — no new shared-memory state. Hot path when GUC off is one
-boolean early-return.
+SetRecoveryPause / recoveryNotPausedCV machinery — no new
+shared-memory state. Hot path when GUC off is one boolean
+early-return.
 
 Edge cases handled:
-- Slots still inside DecodingContextFindStartpoint (effective_catalog_xmin
-  not yet valid) are skipped. Pausing for them would deadlock: snapbuild
-  needs WAL to advance, pause holds it back. Invalidating an in-progress
-  slot is harmless — the caller retries.
-- Pause-check uses TransactionIdPrecedesOrEquals to match the semantics
-  of DetermineSlotInvalidationCause. Without that, a slot whose
-  catalog_xmin was just advanced to horizon+1 by a previous pause cycle
-  would fail to re-pause on a subsequent record with horizon == horizon+1,
-  yet would still be invalidated by the fall-through.
-- PromoteIsTriggered() is checked in the wait loop so pg_promote() does
-  not stall while paused.
+- Slots still inside DecodingContextFindStartpoint
+  (effective_catalog_xmin not yet valid) are skipped. Pausing for them
+  would deadlock: snapbuild needs WAL to advance, pause holds it back.
+  Invalidating an in-progress slot is harmless — the caller retries.
+- Pause-check uses TransactionIdPrecedesOrEquals to match the
+  semantics of DetermineSlotInvalidationCause. Without that, a slot
+  whose catalog_xmin was just advanced to horizon+1 by a previous
+  pause cycle would fail to re-pause on a subsequent record with
+  horizon == horizon+1, yet would still be invalidated by the
+  fall-through.
+- CheckForStandbyTrigger() is called in the wait loop so pg_promote()
+  does not stall while paused. Mirrors the existing recoveryPausesHere
+  escape loop.
 - Synced slots (data.synced == true, i.e. managed by the slot-sync
-  worker per sync_replication_slots) are skipped in both the pause-check
-  and advance scans. Writing to their fields from the startup process
-  would race with the slot-sync worker, and ALTER / DROP_REPLICATION_SLOT
-  on a synced slot errors out — so the operator-facing "drain or drop"
-  recipe does not apply.
+  worker per sync_replication_slots) are skipped in both the
+  pause-check and advance scans. Writing to their fields from the
+  startup process would race with the slot-sync worker, and ALTER /
+  DROP_REPLICATION_SLOT on a synced slot errors out — so the
+  operator-facing "drain or drop" recipe does not apply.
 
-ConfirmRecoveryPaused() is made extern for use by
-MaybePauseOnLogicalSlotConflict's wait loop — the pause is entered
-from inside ResolveRecoveryConflictWithSnapshot rather than the main
-replay loop, so we need to transition RECOVERY_PAUSE_REQUESTED ->
-RECOVERY_PAUSED ourselves so SQL-level observers see 'paused' rather
-than 'pause requested'.
+ConfirmRecoveryPaused() and CheckForStandbyTrigger() are made extern
+for use by MaybePauseOnLogicalSlotConflict's wait loop — the pause is
+entered from inside ResolveRecoveryConflictWithSnapshot rather than
+the main replay loop, so we need to transition
+RECOVERY_PAUSE_REQUESTED -> RECOVERY_PAUSED ourselves and consume
+PROMOTE_SIGNAL_FILE ourselves.
 
 Known limitation: the advance marks slots dirty but does not force an
 immediate SaveSlotToPath. If the standby crashes between resume and
@@ -62,16 +64,16 @@ the next restartpoint, the advance is lost — on restart replay
 re-encounters the same conflict record, re-pauses, and the operator
 re-drains (idempotent). A future iteration could tighten this.
 ---
- src/backend/access/transam/xlogrecovery.c     |  19 +-
- src/backend/storage/ipc/standby.c             | 225 ++++++++++++++++++
+ src/backend/access/transam/xlogrecovery.c     |  27 ++-
+ src/backend/storage/ipc/standby.c             | 227 ++++++++++++++++++
  src/backend/utils/misc/guc_parameters.dat     |   8 +
  src/backend/utils/misc/postgresql.conf.sample |   2 +
- src/include/access/xlogrecovery.h             |   2 +
+ src/include/access/xlogrecovery.h             |   3 +
  src/include/storage/standby.h                 |   2 +
- 6 files changed, 256 insertions(+), 2 deletions(-)
+ 6 files changed, 265 insertions(+), 4 deletions(-)
 
 diff --git a/src/backend/access/transam/xlogrecovery.c b/src/backend/access/transam/xlogrecovery.c
-index c236e2b7969..25cbcc0dfcb 100644
+index c236e2b7969..0452e0d33d5 100644
 --- a/src/backend/access/transam/xlogrecovery.c
 +++ b/src/backend/access/transam/xlogrecovery.c
 @@ -96,6 +96,21 @@ const char *recoveryTargetName;
@@ -105,6 +107,15 @@ index c236e2b7969..25cbcc0dfcb 100644
  
  static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
  							  int emode, bool fetching_ckpt,
+@@ -386,7 +401,7 @@ static int	XLogFileRead(XLogSegNo segno, TimeLineID tli,
+ 						 XLogSource source, bool notfoundOk);
+ static int	XLogFileReadAnyTLI(XLogSegNo segno, XLogSource source);
+ 
+-static bool CheckForStandbyTrigger(void);
++/* CheckForStandbyTrigger is extern for MaybePauseOnLogicalSlotConflict */
+ static void SetPromoteIsTriggered(void);
+ static bool HotStandbyActiveInReplay(void);
+ 
 @@ -3080,7 +3095,7 @@ SetRecoveryPause(bool recoveryPause)
   * Confirm the recovery pause by setting the recovery pause state to
   * RECOVERY_PAUSED.
@@ -114,8 +125,21 @@ index c236e2b7969..25cbcc0dfcb 100644
  ConfirmRecoveryPaused(void)
  {
  	/* If recovery pause is requested then set it paused */
+@@ -4435,7 +4450,11 @@ SetPromoteIsTriggered(void)
+ /*
+  * Check whether a promote request has arrived.
+  */
+-static bool
++/*
++ * Non-static: MaybePauseOnLogicalSlotConflict needs this to break its wait
++ * loop on promotion, same as recoveryPausesHere does.
++ */
++bool
+ CheckForStandbyTrigger(void)
+ {
+ 	if (LocalPromoteIsTriggered)
 diff --git a/src/backend/storage/ipc/standby.c b/src/backend/storage/ipc/standby.c
-index 29af7733948..241d8587ee3 100644
+index 29af7733948..62f743cc7ee 100644
 --- a/src/backend/storage/ipc/standby.c
 +++ b/src/backend/storage/ipc/standby.c
 @@ -24,8 +24,11 @@
@@ -130,7 +154,7 @@ index 29af7733948..241d8587ee3 100644
  #include "storage/proc.h"
  #include "storage/procarray.h"
  #include "storage/sinvaladt.h"
-@@ -503,8 +506,230 @@ ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHorizon,
+@@ -503,8 +506,232 @@ ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHorizon,
  	 * reached, e.g. due to using a physical replication slot.
  	 */
  	if (IsLogicalDecodingEnabled() && isCatalogRel)
@@ -249,10 +273,12 @@ index 29af7733948..241d8587ee3 100644
 +		/*
 +		 * If the operator gave up on the slot and triggered a promotion
 +		 * instead, bail out of the wait so the startup process can proceed
-+		 * with the promotion path. Without this, pg_promote() stalls until
-+		 * someone also calls pg_wal_replay_resume() — a UX hazard.
++		 * with the promotion path. Must use CheckForStandbyTrigger (which
++		 * actually consumes PROMOTE_SIGNAL_FILE), not PromoteIsTriggered
++		 * (which only reads a flag populated by the former). Mirrors the
++		 * same escape in recoveryPausesHere().
 +		 */
-+		if (PromoteIsTriggered())
++		if (CheckForStandbyTrigger())
 +		{
 +			ConditionVariableCancelSleep();
 +			return;
@@ -394,7 +420,7 @@ index ac38cddaaf9..17b2bcc4df8 100644
  
  # - Subscribers -
 diff --git a/src/include/access/xlogrecovery.h b/src/include/access/xlogrecovery.h
-index ba7750dca0b..08c8342a49b 100644
+index ba7750dca0b..58d578ce853 100644
 --- a/src/include/access/xlogrecovery.h
 +++ b/src/include/access/xlogrecovery.h
 @@ -129,6 +129,7 @@ extern PGDLLIMPORT XLogRecoveryCtlData *XLogRecoveryCtl;
@@ -405,11 +431,12 @@ index ba7750dca0b..08c8342a49b 100644
  extern PGDLLIMPORT char *PrimaryConnInfo;
  extern PGDLLIMPORT char *PrimarySlotName;
  extern PGDLLIMPORT char *recoveryRestoreCommand;
-@@ -213,6 +214,7 @@ extern bool HotStandbyActive(void);
+@@ -213,6 +214,8 @@ extern bool HotStandbyActive(void);
  extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID *replayTLI);
  extern RecoveryPauseState GetRecoveryPauseState(void);
  extern void SetRecoveryPause(bool recoveryPause);
 +extern void ConfirmRecoveryPaused(void);
++extern bool CheckForStandbyTrigger(void);
  extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
  extern TimestampTz GetLatestXTime(void);
  extern TimestampTz GetCurrentChunkReplayStartTime(void);
