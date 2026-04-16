@@ -401,7 +401,7 @@ static int	XLogFileRead(XLogSegNo segno, TimeLineID tli,
 						 XLogSource source, bool notfoundOk);
 static int	XLogFileReadAnyTLI(XLogSegNo segno, XLogSource source);
 
-static bool CheckForStandbyTrigger(void);
+/* CheckForStandbyTrigger is extern for MaybePauseOnLogicalSlotConflict */
 static void SetPromoteIsTriggered(void);
 static bool HotStandbyActiveInReplay(void);
 
@@ -4450,7 +4450,11 @@ SetPromoteIsTriggered(void)
 /*
  * Check whether a promote request has arrived.
  */
-static bool
+/*
+ * Non-static: MaybePauseOnLogicalSlotConflict needs this to break its wait
+ * loop on promotion, same as recoveryPausesHere does.
+ */
+bool
 CheckForStandbyTrigger(void)
 {
 	if (LocalPromoteIsTriggered)

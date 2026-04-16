@@ -621,10 +621,12 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		/*
 		 * If the operator gave up on the slot and triggered a promotion
 		 * instead, bail out of the wait so the startup process can proceed
-		 * with the promotion path. Without this, pg_promote() stalls until
-		 * someone also calls pg_wal_replay_resume() — a UX hazard.
+		 * with the promotion path. Must use CheckForStandbyTrigger (which
+		 * actually consumes PROMOTE_SIGNAL_FILE), not PromoteIsTriggered
+		 * (which only reads a flag populated by the former). Mirrors the
+		 * same escape in recoveryPausesHere().
 		 */
-		if (PromoteIsTriggered())
+		if (CheckForStandbyTrigger())
 		{
 			ConditionVariableCancelSleep();
 			return;
