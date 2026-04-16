@@ -79,9 +79,15 @@ $node_primary->backup($backup_name);
 $node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
 
 # Force the segment containing that anchor to archive so the standby
-# can see it via restore_command.
+# can see it via restore_command. Switch TWICE: first switch closes the
+# segment with the snapshot record; second switch gives snapbuild the
+# forward WAL it needs to decide the slot is consistent. Without the
+# second switch, DecodingContextFindStartpoint blocks on 'waiting for
+# WAL to become available at seg N+1' — flaky slot creation.
 my $phase1_seg = $node_primary->safe_psql('postgres',
     "SELECT pg_walfile_name(pg_current_wal_lsn())");
+$node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
+$node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
 $node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
 $node_primary->poll_query_until('postgres', qq[
     SELECT last_archived_wal IS NOT NULL
@@ -240,6 +246,49 @@ for (my $i = 0; $i < 60; $i++) {
 is($off_state, 'lost',
    "baseline (GUC off): slot invalidates as expected under catalog prune");
 
+# Promote-during-pause: bring up a third standby, get it paused by the
+# GUC, then call pg_promote() and assert promotion actually completes
+# (rather than stalling until someone also runs pg_wal_replay_resume).
+# Guards the CheckForStandbyTrigger() escape path in the wait loop.
+my $node_standby_p = PostgreSQL::Test::Cluster->new('standby_promote');
+$node_standby_p->init_from_backup($node_primary, $backup_name,
+    has_streaming => 0, has_restoring => 1);
+$node_standby_p->append_conf('postgresql.conf', qq[
+hot_standby = on
+recovery_pause_on_logical_slot_conflict = on
+wal_level = logical
+max_standby_archive_delay = -1
+max_standby_streaming_delay = -1
+]);
+$node_standby_p->start;
+$node_standby_p->poll_query_until('postgres',
+    "SELECT pg_last_wal_replay_lsn() IS NOT NULL", 't');
+$node_standby_p->safe_psql('postgres',
+    "SELECT pg_create_logical_replication_slot('promote_slot', 'test_decoding')");
+
+# Wait for replay to reach a pause (Phase-2 archive is already shipped
+# so it will happen within a few seconds).
+my $paused = 0;
+for (my $i = 0; $i < 60; $i++) {
+    my $s = $node_standby_p->safe_psql('postgres',
+        "SELECT pg_get_wal_replay_pause_state()");
+    if ($s eq 'paused') { $paused = 1; last; }
+    usleep(500_000);
+}
+ok($paused, "promote-test standby reached paused state before promotion");
+
+# Call pg_promote with a short wait. Without the CheckForStandbyTrigger
+# escape in the wait loop, this stalls for the full wait_seconds and
+# returns false; with the fix, it returns true in ~1 second.
+my $t0 = time();
+my $promoted = $node_standby_p->safe_psql('postgres',
+    "SELECT pg_promote(wait => true, wait_seconds => 30)");
+my $elapsed = time() - $t0;
+is($promoted, 't', "pg_promote returned true while standby was paused by GUC");
+cmp_ok($elapsed, '<', 10,
+    "pg_promote completed in under 10s (actual: ${elapsed}s)");
+
+$node_standby_p->stop;
 $node_standby_off->stop;
 $node_standby->stop;
 $node_primary->stop;
