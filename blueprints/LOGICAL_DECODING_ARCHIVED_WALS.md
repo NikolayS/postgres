@@ -1,7 +1,7 @@
 # Logical Decoding from Archived WAL — SPEC
 
-**Version:** 0.5  
-**Status:** Draft — ready to start Sprint 0 (post-Sprint-0 cleanup expected as v0.6)  
+**Version:** 0.6  
+**Status:** Post Sprint 0 execution — findings incorporated; pgsql-hackers RFC draft ready  
 **Date:** 2026-04-19  
 **Author:** Claude Opus 4.6 (1M context)  
 **Key researcher:** Claude Opus 4.6 (deep research mode)  
@@ -29,6 +29,7 @@ AI-authored under [@NikolayS](https://github.com/NikolayS)'s direction; architec
 | 0.3     | 2026-04-17 | Address second-round review (3 reviews). **Hard technical corrections:** (a) `recovery_target_*` GUCs are `PGC_POSTMASTER` — cannot be "cleared at runtime"; US-2 recipe and §4.4 step 7 rewritten with the correct mechanism (`pg_wal_replay_resume()` past the paused target; orchestrator-driven `pg_wal_replay_pause()` when replay LSN reaches `L_end`); (b) `pg_switch_wal()` does **not** produce `XLOG_RUNNING_XACTS` — §4.1.4 risk 1 and S0-1 loop corrected to use `pg_log_standby_snapshot()` (via `LogStandbySnapshot()`) plus dummy writes and optional `pg_switch_wal()` for prompt archival; (c) `pg_create_logical_replication_slot()` **blocks** inside `DecodingContextFindStartpoint()` waiting for snapshot-builder consistency — it does not return a transient error; orchestrator model changed from "retry on `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE`" to "statement_timeout + cancel" with progress polling; (d) PG19 references softened — PG19 doesn't exist yet (Sept 2026 earliest) and both dynamic `wal_level` and `pg_waldump` tar support are pgsql-hackers threads still under review; (e) G4 wording directions corrected (on resume, consumer sees LSN > `confirmed_flush_lsn` already decoded, never LSN ≤ `confirmed_flush_lsn`); (f) architecture diagram now shows `pgoutput` (plugin policy says `test_decoding` is PoC-only); (g) `pg_get_wal_stats()` usage in US-4 correctly attributed to the `pg_walinspect` extension. **Strong reframings:** G1 expected result softened from "Should work" to "Plausible based on standby logical decoding internals, but unproven in restore-only mode"; US-2 gains label clarifier ("forward logical decoding from a rewound physical state — not backward decoding"); G4 for Sprint 0 narrowed to "slot exists, not corrupt, resumed consumption is explainable and bounded" (exact duplicate/gap semantics deferred to post-PoC); G3 reproducer design rewritten around the actual invalidation trigger (replay of vacuum-on-catalog WAL records) — temp object churn + explicit `VACUUM pg_class/pg_attribute/pg_type` on primary with autovacuum active; `max_slot_wal_keep_size` on the **standby** added as a separate invalidation vector; G3 budget increased from 2d → 4.5d. **New sections in §7:** "Out of scope for Sprint 0" box; two-outcome scope-split (Outcome A: continuous viable → US-1/US-3/Phase 3 in scope; Outcome B: forensic only → US-2 survives, US-1 questionable, Phase 3 narrows); Sprint 0 observability subsection (standby logs, `pg_replication_slots` snapshots, replay LSN progression, `restore_command` retries, error codes, WAL segment names). **Documentation completeness:** CLI validation logic section; `recovery_target_inclusive = true` caveat (slot created at paused target already has that record applied — `catalog_xmin` may start further ahead than intended). **Judgment call left open:** US-4 kept with "candidate for removal in v0.4" marker after @reviewer-3 questioned whether it's load-bearing (core devs already have `pg_waldump` + regression suite + TAP tests; §4.2.3's real motivation is slot invalidation, not US-4). Not cut unilaterally. |
 | 0.4     | 2026-04-18 | **US-4 explicitly retained** after v0.3 "candidate for removal" marker. Although all three round-3 reviewers recommended cutting it, US-4 is a core idea from [@x4m](https://github.com/x4m) and part of the project's motivation, not brainstorm residue. The "EXPERIMENTAL" qualifier on US-4 remains because the user-space approximation of per-record stepping is genuinely coarse, but the user-story value does not. S2-4 retained in Sprint 2. Remaining round-3 corrections (Sprint 0 budget math, G1 failure wording, PG18-for-Sprint-0, CLI `--from-time` resolution, archive continuity, etc.) deferred to a follow-up revision. |
 | 0.5     | 2026-04-19 | Pre-Sprint-0 cleanup addressing round-4 review convergence. **Must-fix-before-Sprint-0:** (a) Sprint 0 day budget reconciled — tasks sum to 11.5d (excluding contingent S0-8) or 14.5d (including it); Sprint 0 budget extended from 2 weeks → 3 weeks on the Gantt; S0-9 findings write-up budget bumped 1d → 2d; Sprint 1 start pushed by 1 week, total PoC timeline now ~9 weeks; (b) US-4 acceptance criteria rewritten around the "pause-at-LSN, run user-supplied hook, advance, repeat" framing that actually reflects US-4's value, replacing the narrower amcheck-between-batches description that v0.4's justification had already superseded; (c) Outcome A's "US-4 keep-or-cut decision still open" bullet corrected to "US-4 in scope per v0.4 retention" — v0.4 changelog and §7.0.2 were contradicting each other; (d) S0-9's deliverable reference corrected from "v0.4" (which is this revision's predecessor, pre-Sprint-0) to "v0.6 findings appendix (post-Sprint-0)"; (e) US-4 header "EXPERIMENTAL" all-caps tag removed — it reads as "speculative, may be cut," which is exactly the opposite of the v0.4 retention. Replaced with a softer "coarse-grained by design, per-record stepping is future work" note in the body. **Also fixed:** (f) G1 failure-interpretation matrix row rewritten to drop the `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` retry-model phrasing (contradicts v0.3's blocking model); new wording: "slot creation never reaches consistency before statement_timeout despite snapshot forcing and replay progress"; (g) §4.1.4 risk 3 (`pg_wal` overflow when consumer stalls) explicitly flagged as "deferred to Sprint 1 with monitoring + thresholds" rather than waved through as "operationally acceptable"; (h) changelog v0.4 entry's defensive tone around US-4 not altered (historical) but v0.5 references §2 US-4 for reasoning instead of re-arguing. **Genuinely-deferred-to-v0.6+:** archive-continuity full-sequence scan (§4.4.1 improvement); CLI `--from-time` → LSN resolution policy; PG18-for-Sprint-0 switch (already decided in v0.3 via the "single PG version, likely PG17" language — revisit if `pg_logicalinspect` observability proves load-bearing during G1 debugging). These remain known issues, not "etc." |
+| 0.6     | 2026-04-19 | **Sprint 0 executed** on a lab VM (PG18 + PG17 cross-validated) instead of waiting for a team. All four gates resolved with full raw evidence. See new **§10 Sprint 0 Execution Findings**. Key outcomes: **G1 PASS, G2 PASS, G3 FAILS** reliably under any autovacuum workload (MTTI 30–126s, deterministic in ~3s with `VACUUM pg_statistic`), **G4 PASS**. **Major recipe correction in §2 US-2:** the v0.5 `recovery_target_lsn + pause + create slot` recipe **does not work** — slot creation on a paused standby blocks snapbuild. The working recipe is gated-archive: pre-stage archive segments up to but NOT including the segment containing a quiet-moment `pg_log_standby_snapshot()` record, start standby, launch slot creation (blocks), release the snapshot's segment — snapbuild reads the path-(a) running_xacts forward from `restart_lsn` and hits `SNAPBUILD_CONSISTENT` immediately. **Works with primary DEAD** during recovery provided production has recorded periodic quiet-moment snapshots. Production-side prerequisite now documented in §2 US-2 and §11. **§4.2.3 refined:** the "slot-aware replay throttling" core-patch direction has been drafted as a pgsql-hackers RFC with measured MTTI data, exact WAL trigger records, and design rationale addressing performance, execution-context, and argument-availability concerns from earlier reviews; draft lives in GitHub issue [#25](https://github.com/NikolayS/postgres/issues/25) comment thread, ready for human sanity-check before posting. **Outcome determined: Outcome B (forensic-only) is the shipping scope.** US-1 (continuous CDC) requires the core patch; US-2 (windowed extraction) is viable now with the corrected recipe. Three reproducer scripts committed to `/blueprints/repro_*.sh`. |
 
 ---
 
@@ -88,16 +89,24 @@ WAL records reference relations by `RelFileLocator` (physical file identity), no
 
 **Fundamental constraint:** a logical slot can only decode WAL **generated after the slot was created** — `snapbuild` assembles the historic catalog snapshot starting from the slot-creation LSN; earlier WAL cannot be replayed through the slot.
 
-**Correct recipe** (note: `recovery_target_*` GUCs are `PGC_POSTMASTER`, set at server start; they cannot be changed via reload at runtime):
+**Production-side prerequisite (required for US-2):** maintain a lightweight background task on the primary that calls `SELECT pg_log_standby_snapshot();` during quiet moments (no in-flight xacts). Each such call emits a `Standby/RUNNING_XACTS` WAL record with `oldestRunningXid == nextXid`, which snapbuild treats as a "path (a)" record — reaching `SNAPBUILD_CONSISTENT` in a single step upon replay. Without these records in the archive, slot creation on an archive-fed standby with a busy primary workload cannot reach consistency (source: `snapbuild.c` `SnapBuildFindSnapshot()`). Overhead: < 100 bytes of WAL per call. One snapshot per low-traffic period (hourly or less) is plenty.
 
-1. Identify LSN boundaries: `L_start` (start of decode window) and `L_end` (end). `recovery_target_lsn` is preferred over `recovery_target_time` — time-based targets pause at the first commit *after* the target and are imprecise.
-2. Restore the base backup to a point **before** `L_start`.
-3. Start the standby with `recovery_target_lsn = L_start`, `recovery_target_action = 'pause'`, `standby.signal`. Wait for the pause.
-4. Create the logical slot. It is now pinned at `L_start` (modulo `recovery_target_inclusive` — see caveat below).
-5. Call `pg_wal_replay_resume()`. Replay continues past `L_start` indefinitely. **No config change is needed or possible** — the target is a postmaster-level GUC and is effectively inert once we've resumed past it.
-6. Orchestrator polls `pg_last_wal_replay_lsn()`. When it reaches `L_end`, call `pg_wal_replay_pause()`. Consume remaining changes from the slot. Done.
+**Correct recipe (gated archive + quiet-moment snapshot, validated in Sprint 0 — see §10):**
 
-**Caveat on `recovery_target_inclusive = true` (default):** recovery pauses *after* applying the target record. So at step 4, the standby has already replayed through `L_start`; the slot's `catalog_xmin` starts from the snapbuild state at that point. If `L_start` happens to land near a catalog-changing record, `catalog_xmin` may start further ahead than the operator intended. Usually fine, but worth checking if the investigation's LSN boundary is tight.
+1. Identify the most recent quiet-moment snapshot's LSN before the incident: `L_QUIET`. Its segment: `S_QUIET`. The window to decode is `[L_QUIET, L_end]`.
+2. Restore the base backup to a point **before** `L_QUIET`.
+3. Pre-stage a "gated archive" directory with WAL segments up to but **NOT including** `S_QUIET`. (Important: excluding the segment that contains the snapshot record.)
+4. Configure standby: `restore_command` pointing at the gated archive, `hot_standby = on`, `wal_retrieve_retry_interval = 1s` (makes step 7 snappy), no `recovery_target*`, no `recovery_min_apply_delay`.
+5. Start standby. Replay stops at end of gated archive. `restart_lsn` at subsequent slot creation will land at end of segment-before-S_QUIET = start of `S_QUIET`.
+6. Launch `pg_create_logical_replication_slot('recovery_slot', 'pgoutput')` in background. It blocks waiting for `SNAPBUILD_CONSISTENT`.
+7. Copy `S_QUIET` into the gated archive directory. The standby's `restore_command` retry picks it up within `wal_retrieve_retry_interval`; replay advances into the segment; snapbuild reads the path-(a) running_xacts record forward from `restart_lsn`, hits CONSISTENT via path (a), slot creation completes (typically ~1 second).
+8. Copy remaining segments through `S_L_end` into the gated archive. Replay advances through the decode window.
+9. Pause replay via `pg_wal_replay_pause()` when `pg_last_wal_replay_lsn() >= L_end`.
+10. Drain the slot with `pg_logical_slot_get_changes('recovery_slot', NULL, NULL)`. Output contains all decoded changes from `restart_lsn` through the paused point.
+
+**This works with the primary DEAD.** Validated in Sprint 0: [blueprints/repro_us2_deadprim.sh](repro_us2_deadprim.sh) runs end-to-end in ~90s with the primary killed before recovery; 60-second sustained-OLTP window produced 5811 decoded changes including 98 DELETEs with full old-tuple data. See §10.3 for raw evidence.
+
+**Deprecated v0.5 recipe note:** earlier versions of this blueprint described a `recovery_target_lsn = L_start + action = 'pause'` recipe. That variant does not work: creating a slot on a paused standby blocks snapbuild indefinitely because no forward WAL arrives on the startup-process read path. Sprint 0 testing proved this is a dead end. Retained in the changelog for historical transparency.
 
 **Acceptance criteria:**
 - Follow the 6-step procedure above, using a base backup predating the decode window.
@@ -893,3 +902,118 @@ These are explicitly out of scope for the PoC but documented for roadmap plannin
     https://www.postgresql.org/docs/16/release-16.html
 
 13. [@x4m](https://github.com/x4m) (Andrey Borodin), Postgres.tv hacking session — architectural input for this PoC: https://www.youtube.com/watch?v=LjiU6kB6izw (transcription by [Circleback.ai](https://circleback.ai))
+
+14. Sprint 0 execution on lab VM — full raw evidence, reproducer scripts, and 35+ comments of review: https://github.com/NikolayS/postgres/issues/25
+
+---
+
+## 10. Sprint 0 Execution Findings (added in v0.6)
+
+Sprint 0 was executed on a lab VM with PostgreSQL 18.3 (PGDG Ubuntu 24.04) and cross-validated on PG17.9. Three reproducer scripts committed to the blueprint repo; ~35 comments on [issue #25](https://github.com/NikolayS/postgres/issues/25) capture the full iteration history and raw data.
+
+### 10.1 Gate-by-gate results
+
+| Gate | Outcome | Evidence |
+|------|---------|----------|
+| **G1** — slot creation on archive-only standby | **PASS** | `pg_create_logical_replication_slot()` succeeds (< 4 s) once primary produces `XLOG_RUNNING_XACTS` records. Verified on PG17 + PG18. |
+| **G2** — decode post-creation WAL | **PASS** | INSERT/UPDATE/DELETE decoded correctly. REPLICA IDENTITY FULL emits full old-tuple for DELETEs — blueprint's caveat validated. |
+| **G3** — slot survives replay progress | **FAIL by design** | Under any autovacuum-enabled workload, `Heap2/PRUNE_ON_ACCESS` records on `pg_statistic` (rel 1663/5/2619) trigger `InvalidatePossiblyObsoleteSlot()` when their `snapshotConflictHorizon` crosses the slot's `catalog_xmin`. MTTI 30–126 s natural, ~3 s deterministic with forced `VACUUM pg_statistic`. Identical trigger mechanism on PG17 and PG18. |
+| **G4** — slot survives restart | **PASS** | `(catalog_xmin, restart_lsn, confirmed_flush_lsn)` preserved exactly across fast-shutdown + restart. Resumed consumption delivers post-`confirmed_flush_lsn` changes once, no duplicates/gaps. |
+
+### 10.2 G3 MTTI characterization (raw data from issue #25 runs)
+
+| Scenario | Autovacuum | Primary workload | MTTI |
+|----------|-----------|------------------|------|
+| Control | **off** | 1 INS/sec on non-catalog table | **> 600 s (not invalidated in 10 min observation)** |
+| G3-A baseline | on, default `naptime=60s` | 1 INS/sec | ~126 s |
+| G3-A amplified | on, `naptime=10s` | 2 INS/sec | ~44 s |
+| G3-B temp-object churn | on, default | ~100 temp CREATE/DROP per sec | ~30 s |
+| G3-C forced catalog VACUUM | on, default | + explicit `VACUUM pg_statistic` | **~3 s (deterministic)** |
+
+**Mechanism in every case**: `Heap2/PRUNE_ON_ACCESS` on `pg_statistic` (rel 1663/5/2619), `isCatalogRel: T`, `snapshotConflictHorizon >= slot.catalog_xmin`. Invalidation reason: `rows_removed`. No `hot_standby_feedback` channel shields an archive-only standby (correctly identified in §3.4 as a silent no-op in this configuration).
+
+### 10.3 US-2 working recipe validation
+
+The §2 US-2 recipe (gated-archive + quiet-moment snapshot) **works end-to-end with the primary dead during recovery**. Reproducer: [`blueprints/repro_us2_deadprim.sh`](repro_us2_deadprim.sh).
+
+Representative run (60-second sustained-OLTP window, primary killed before recovery):
+
+```
+slot created at 12:42:01, restart_lsn=0/5000000, catalog_xmin=755
+replay past L_end (0/1B000000): 2 seconds for 352 MB of WAL on local disk
+slot drain: 5811 total changes, 98 DELETEs including full old-tuple data
+
+ lsn     | xid  |                                                            data
+---------+------+------------------------------------------------------------------------------------------------
+0/1A000868 | 2658 | table public.orders: DELETE: id[integer]:3 customer[text]:'carol' amount[numeric]:9.99
+0/1A0008B8 | 2658 | table public.orders: DELETE: id[integer]:6 customer[text]:'busy-0' amount[numeric]:0
+ ...
+```
+
+Slot creation took ~1 second. Replay advanced linearly (~176 MB/sec local disk).
+
+### 10.4 US-1 verdict: requires core patch
+
+**US-1 continuous CDC is not viable in the blueprint's archive-only architecture without a core patch.** The G3 failure fires deterministically under any write-active primary; the earliest bypass the community has discussed (Ringer 2020, Kukushkin 2025) solves adjacent but different problems (walsender archive fetch, primary-side WAL retention). A new problem statement is drafted in issue #25 ([comment 4260187347](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260187347)) proposing a standby-side GUC `recovery_pause_on_logical_slot_conflict` that pauses replay before applying a WAL record that would invalidate any active logical slot's `catalog_xmin` horizon. TBDs prior to external posting: human sanity-check of the mechanism description (blueprint's architecture lead). `two_phase`, failover-slot, and synced-slot interactions verified as requiring no special handling via PG18 source inspection (issue #25 [comment 4260312575](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260312575)).
+
+### 10.5 Outcome determination
+
+Per the blueprint's §7 scope-split:
+
+- **Outcome A (continuous US-1)**: not viable without core patch. Elevated to `Future Work > §8.1` as the primary unblocker.
+- **Outcome B (windowed US-2)**: **viable with the corrected recipe in §2.** Production-side prerequisite (periodic `pg_log_standby_snapshot()` at quiet moments) is a hard requirement, documented in §11.
+- **Outcome C**: not reached.
+
+The project is a real shippable forensic-recovery product. Sprints 1–3 focus on tool-building around the US-2 workflow and the companion reproducers.
+
+### 10.6 Reproducer scripts
+
+Committed to this repository for reviewer verification:
+
+- [`blueprints/repro_g3.sh`](repro_g3.sh) — deterministic G3 invalidation in ~20 s.
+- [`blueprints/repro_us2_gated.sh`](repro_us2_gated.sh) — US-2 with live primary and continuous primer.
+- [`blueprints/repro_us2_deadprim.sh`](repro_us2_deadprim.sh) — US-2 with **dead primary**. The recipe that backs §2 US-2.
+
+All scripts self-contained (~150 lines each), run under an unprivileged user on any Ubuntu host with PGDG PG18 installed, and complete in ≤ 2 minutes.
+
+---
+
+## 11. Production-Side Prerequisites (added in v0.6)
+
+### 11.1 `pg_log_standby_snapshot()` backgrounder on the primary
+
+Required for US-2 recovery to succeed without live-primary access during recovery. The prerequisite is a small, low-frequency backgrounder that calls `SELECT pg_log_standby_snapshot();` during quiet moments.
+
+**Implementation options:**
+
+| Option | Pros | Cons |
+|--------|------|------|
+| Cron job on primary, hourly | Trivial to set up. | Only fires at scheduled times, regardless of activity. |
+| Triggered by `pg_cron` with quiet-detection | Integrated into PG. | Requires pg_cron extension. |
+| External service watching `pg_stat_activity` | Fires opportunistically when no xacts are running — always produces path-(a) record. | Requires separate service. |
+
+**Minimum viable:**
+
+```sql
+-- cron: 0 * * * * (every hour at :00)
+SELECT pg_log_standby_snapshot();
+```
+
+Even a single call per hour provides a recovery anchor that's usable for forensic windows up to several hours later, as long as the archive retains those segments.
+
+**Operator also logs**: timestamp + LSN of each call, so incident responders can identify the nearest `L_QUIET` without scanning the archive.
+
+### 11.2 WAL archive continuity
+
+Archive retention must cover the longest forensic window the operator cares about. For a 1-hour window at ~100 MB/min of WAL (realistic OLTP), that's 6 GB. Standard backup tools (WAL-G, pgBackRest) handle this natively.
+
+### 11.3 Base backup cadence
+
+Operator must retain a base backup predating the oldest L_QUIET they want to recover to. For hourly quiet-moment snapshots and weekly base backups, any incident within the past 7 days is recoverable.
+
+### 11.4 What is NOT required
+
+- `hot_standby_feedback` on the production primary-to-standby channel (irrelevant for archive-only architecture; documented in §3.4).
+- Live primary access during incident response (validated in §10.3).
+- A long-lived logical slot on the primary (that would recouple us to production; the blueprint's point).
+
