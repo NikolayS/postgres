@@ -756,7 +756,7 @@ Sprint 0 doesn't just pass or fail — it splits the project into one of two fut
 - US-1: **at serious risk**. Not removed, but demoted to "for low-churn OLTP only, with explicit workload caveats." May be cut.
 - US-2 (windowed extraction): **the primary surviving use case**. Phase 3 refocuses on this.
 - US-3: at risk (relies on same continuous-slot assumption as US-1). May be cut or reframed.
-- US-4: likely cut (without continuous replication the main demo goes away).
+- US-4: narrows substantially — the continuous-replication demo goes away — but the paused-state inspection primitive may still be useful for internal debug / correctness workflows. Keep as an internal tool, don't feature in the shipped product positioning.
 - Sprint 1 becomes a US-2-focused sprint. Sprint 2 DDL testing narrows to whether DDL affects US-2 windows. Sprint 3 CLI becomes a forensic-extraction CLI, not a CDC tool.
 
 **Outcome C (unlikely): total failure.** G1 doesn't pass on any configuration. Escalate as a pgsql-hackers problem statement; PoC pauses pending core-level investigation. Spin down the team until the investigation completes.
@@ -832,7 +832,7 @@ Sprint 2:                                          █████████�
 Sprint 3:                                                                ██████████
 ```
 
-**Total: ~9 weeks to usable PoC.** If Sprint 0 exits early (all four gates pass cleanly by day 8), revert toward the ~7–8 week timeline.
+**Total: ~9 weeks to usable PoC.** Early Sprint 0 exit (all four gates pass cleanly by day 8) pulls this in to ~8 weeks.
 
 ---
 
