@@ -30,6 +30,7 @@ AI-authored under [@NikolayS](https://github.com/NikolayS)'s direction; architec
 | 0.4     | 2026-04-18 | **US-4 explicitly retained** after v0.3 "candidate for removal" marker. Although all three round-3 reviewers recommended cutting it, US-4 is a core idea from [@x4m](https://github.com/x4m) and part of the project's motivation, not brainstorm residue. The "EXPERIMENTAL" qualifier on US-4 remains because the user-space approximation of per-record stepping is genuinely coarse, but the user-story value does not. S2-4 retained in Sprint 2. Remaining round-3 corrections (Sprint 0 budget math, G1 failure wording, PG18-for-Sprint-0, CLI `--from-time` resolution, archive continuity, etc.) deferred to a follow-up revision. |
 | 0.5     | 2026-04-19 | Pre-Sprint-0 cleanup addressing round-4 review convergence. **Must-fix-before-Sprint-0:** (a) Sprint 0 day budget reconciled — tasks sum to 11.5d (excluding contingent S0-8) or 14.5d (including it); Sprint 0 budget extended from 2 weeks → 3 weeks on the Gantt; S0-9 findings write-up budget bumped 1d → 2d; Sprint 1 start pushed by 1 week, total PoC timeline now ~9 weeks; (b) US-4 acceptance criteria rewritten around the "pause-at-LSN, run user-supplied hook, advance, repeat" framing that actually reflects US-4's value, replacing the narrower amcheck-between-batches description that v0.4's justification had already superseded; (c) Outcome A's "US-4 keep-or-cut decision still open" bullet corrected to "US-4 in scope per v0.4 retention" — v0.4 changelog and §7.0.2 were contradicting each other; (d) S0-9's deliverable reference corrected from "v0.4" (which is this revision's predecessor, pre-Sprint-0) to "v0.6 findings appendix (post-Sprint-0)"; (e) US-4 header "EXPERIMENTAL" all-caps tag removed — it reads as "speculative, may be cut," which is exactly the opposite of the v0.4 retention. Replaced with a softer "coarse-grained by design, per-record stepping is future work" note in the body. **Also fixed:** (f) G1 failure-interpretation matrix row rewritten to drop the `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` retry-model phrasing (contradicts v0.3's blocking model); new wording: "slot creation never reaches consistency before statement_timeout despite snapshot forcing and replay progress"; (g) §4.1.4 risk 3 (`pg_wal` overflow when consumer stalls) explicitly flagged as "deferred to Sprint 1 with monitoring + thresholds" rather than waved through as "operationally acceptable"; (h) changelog v0.4 entry's defensive tone around US-4 not altered (historical) but v0.5 references §2 US-4 for reasoning instead of re-arguing. **Genuinely-deferred-to-v0.6+:** archive-continuity full-sequence scan (§4.4.1 improvement); CLI `--from-time` → LSN resolution policy; PG18-for-Sprint-0 switch (already decided in v0.3 via the "single PG version, likely PG17" language — revisit if `pg_logicalinspect` observability proves load-bearing during G1 debugging). These remain known issues, not "etc." |
 | 0.6     | 2026-04-19 | **Sprint 0 executed** on a lab VM (PG18 + PG17 cross-validated) instead of waiting for a team. All four gates resolved with full raw evidence. See new **§10 Sprint 0 Execution Findings**. Key outcomes: **G1 PASS, G2 PASS, G3 FAILS** reliably under any autovacuum workload (MTTI 30–126s, deterministic in ~3s with `VACUUM pg_statistic`), **G4 PASS**. **Major recipe correction in §2 US-2:** the v0.5 `recovery_target_lsn + pause + create slot` recipe **does not work** — slot creation on a paused standby blocks snapbuild. The working recipe is gated-archive: pre-stage archive segments up to but NOT including the segment containing a quiet-moment `pg_log_standby_snapshot()` record, start standby, launch slot creation (blocks), release the snapshot's segment — snapbuild reads the path-(a) running_xacts forward from `restart_lsn` and hits `SNAPBUILD_CONSISTENT` immediately. **Works with primary DEAD** during recovery provided production has recorded periodic quiet-moment snapshots. Production-side prerequisite now documented in §2 US-2 and §11. **§4.2.3 refined:** the "slot-aware replay throttling" core-patch direction has been drafted as a pgsql-hackers RFC with measured MTTI data, exact WAL trigger records, and design rationale addressing performance, execution-context, and argument-availability concerns from earlier reviews; draft lives in GitHub issue [#25](https://github.com/NikolayS/postgres/issues/25) comment thread, ready for human sanity-check before posting. **Outcome determined: Outcome B (forensic-only) is the shipping scope.** US-1 (continuous CDC) requires the core patch; US-2 (windowed extraction) is viable now with the corrected recipe. Three reproducer scripts committed to `/blueprints/repro_*.sh`. |
+| 0.7     | 2026-04-16 | **Post-Sprint-0 follow-ups** from continued issue #25 iteration. **(a)** New static-analysis tool `blueprints/wal_archive_ceiling.sh` validated end-to-end against a real failed-recovery archive — its `--db <oid>` prediction of the invalidation LSN matches the standby's dynamic invalidation exactly (same LSN, same `snapshotConflictHorizon`, same rel/blk). Documented as §10.7. **(b)** US-2 ceiling empirically shown to be controlled by **primary-side** `autovacuum_naptime`, not any standby-side GUC — a 300s window with default autovacuum invalidates at t≈138s, the same workload with `autovacuum_naptime=600s` survives the full 300s and drains 30 413 rows cleanly. Added to §10.2 table and §11.5. **(c)** Per-database specificity of slot invalidation called out: `InvalidatePossiblyObsoleteSlot` check is gated by `slot->data.database`, so catalog prunes in other databases do NOT invalidate the slot. The tool's initial version over-predicted by matching any-DB prunes; fix (commit 3e21eee3e8d) adds `--db <oid>` flag. |
 
 ---
 
@@ -929,6 +930,8 @@ Sprint 0 was executed on a lab VM with PostgreSQL 18.3 (PGDG Ubuntu 24.04) and c
 | G3-A amplified | on, `naptime=10s` | 2 INS/sec | ~44 s |
 | G3-B temp-object churn | on, default | ~100 temp CREATE/DROP per sec | ~30 s |
 | G3-C forced catalog VACUUM | on, default | + explicit `VACUUM pg_statistic` | **~3 s (deterministic)** |
+| **v0.7 300s ceiling (baseline)** | on, default | sustained OLTP for 300 s | invalidation at LSN 0/33004780 ≈ t+138s ([raw evidence](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260569185)) |
+| **v0.7 300s ceiling (tuned primary)** | on, **`naptime=600s`** | same 300 s OLTP | **survived full window, 30 413 rows decoded, 501 DELETEs** ([raw evidence](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260731579)) |
 
 **Mechanism in every case**: `Heap2/PRUNE_ON_ACCESS` on `pg_statistic` (rel 1663/5/2619), `isCatalogRel: T`, `snapshotConflictHorizon >= slot.catalog_xmin`. Invalidation reason: `rows_removed`. No `hot_standby_feedback` channel shields an archive-only standby (correctly identified in §3.4 as a silent no-op in this configuration).
 
@@ -976,6 +979,28 @@ Committed to this repository for reviewer verification:
 
 All scripts self-contained (~150 lines each), run under an unprivileged user on any Ubuntu host with PGDG PG18 installed, and complete in ≤ 2 minutes.
 
+### 10.7 Static ceiling analysis tool (added in v0.7)
+
+[`blueprints/wal_archive_ceiling.sh`](wal_archive_ceiling.sh) — given an existing WAL archive directory, reports two LSNs that fully determine the US-2 viability of that archive:
+
+- **path-(a) anchor** — earliest `XLOG_RUNNING_XACTS` with `oldestRunningXid == nextXid`, i.e. the earliest LSN at which `snapbuild.c` can bootstrap a logical slot in one step via path (a) of `SnapBuildFindSnapshot`.
+- **MTTI ceiling** — first `Heap2/PRUNE_ON_ACCESS` on a catalog relation at-or-after the anchor that would invalidate the slot during replay. Per-database via `--db <oid>` (logical slots are per-database; the check in `InvalidatePossiblyObsoleteSlot` is gated by `slot->data.database`, so prunes in other databases are irrelevant).
+
+Byte-distance between the two is the archive's practical US-2 window.
+
+**Validation:** run against the real 300s-window failed-recovery archive, compared against the standby's actual invalidation LSN:
+
+| | Tool prediction (`--db 5`) | Standby invalidation |
+|---|---|---|
+| LSN | `0/33004780` | `0/33004780` |
+| snapshotConflictHorizon | 3383 | 3383 |
+| rel | 1663/5/2619 (pg_statistic in postgres) | 1663/5/2619 |
+| block | 18 | 18 |
+
+Full raw evidence on [issue #25](https://github.com/NikolayS/postgres/issues/25#issuecomment-4260999478).
+
+This closes the loop for operator workflow: run the tool on an archive **before** committing to recovery, get a go/no-go answer (and the precise LSN the paused-recovery GUC proposal would need to stop at once it lands).
+
 ---
 
 ## 11. Production-Side Prerequisites (added in v0.6)
@@ -1016,4 +1041,18 @@ Operator must retain a base backup predating the oldest L_QUIET they want to rec
 - `hot_standby_feedback` on the production primary-to-standby channel (irrelevant for archive-only architecture; documented in §3.4).
 - Live primary access during incident response (validated in §10.3).
 - A long-lived logical slot on the primary (that would recouple us to production; the blueprint's point).
+
+### 11.5 Primary-side autovacuum tuning (added in v0.7)
+
+The US-2 practical window ceiling is controlled **entirely by the primary's autovacuum cadence at WAL-generation time**. The invalidating records (`Heap2/PRUNE_ON_ACCESS` with `snapshotConflictHorizon` on catalog relations) are baked into the primary's WAL; no standby-side GUC alters what's already on disk.
+
+**Rule of thumb:** for an N-second recoverable US-2 window on the primary's default configuration:
+
+> `autovacuum_naptime ≥ 2 × N`
+
+or equivalently, schedule autovacuum suppression on catalog relations for the planned window duration.
+
+**Validated:** §10.2 rows "v0.7 300s ceiling (baseline)" vs "v0.7 300s ceiling (tuned primary)" — identical workload, the only difference being `autovacuum_naptime`. With 60s default → invalidation at t≈138s; with 600s → survived the full 300s window.
+
+**Beyond the tuning limit:** arbitrary-window recovery requires the proposed paused-recovery GUC (see §4.2.3 / Future Work §8.1). Until that lands, operators should use `blueprints/wal_archive_ceiling.sh --db <oid>` to discover the actual ceiling of a given archive up-front rather than discovering it mid-incident.
 
