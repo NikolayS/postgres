@@ -16,6 +16,23 @@
 #      (baseline, confirms the test setup actually triggers the conflict).
 #   3. GUC-on behavior with drain-and-resume: slot survives, all
 #      workload rows are decoded, wal_status remains 'reserved'.
+#
+# STATUS: this scaffold hits a legitimate ordering issue when the catalog
+# prune record lands in the archive BEFORE the slot has reached
+# SNAPBUILD_CONSISTENT: slot creation blocks in
+# DecodingContextFindStartpoint waiting for more WAL, while replay is
+# paused by the GUC waiting for slot drain. This is a real edge case the
+# patch's followups need to address (either skip the pause for
+# not-yet-consistent slots, or let slot creation proceed while paused).
+#
+# The bash-level demo at /tmp/us1_v2.sh on the lab VM avoids this by
+# creating the slot BEFORE the catalog-churn workload on the primary
+# is replayed. Issue #25 has the evidence.
+#
+# To turn this skeleton into a passing TAP test: restructure the flow so
+# the slot is created after standby starts but before the primary runs
+# the catalog-churn workload that emits the prune record. Two-phase
+# setup required.
 
 use strict;
 use warnings FATAL => 'all';
@@ -30,6 +47,7 @@ $node_primary->init(allows_streaming => 'logical', has_archiving => 1);
 $node_primary->append_conf('postgresql.conf', qq[
 wal_level = logical
 archive_mode = on
+archive_timeout = 1s
 autovacuum = on
 autovacuum_naptime = 5s
 fsync = off
@@ -49,34 +67,55 @@ $node_primary->safe_psql('postgres', qq[
     INSERT INTO events (payload) VALUES ('seed');
 ]);
 
-# Emit a quiet-moment running_xacts record so snapbuild can hit path (a)
-# from the archive alone. Must be BEFORE the backup, so standby's replay
-# starting from the backup checkpoint can find it.
-$node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
-$node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
-
-# Standby from basebackup, taken BEFORE the catalog-churn workload. The
-# prune record we want to test against must happen AFTER the backup so
-# it's replayed by the standby (not applied during backup startup).
+# Take basebackup first, then emit quiet-moment snapshot + catalog
+# churn in post-backup WAL. Standby starting from this backup will
+# replay through the archive and encounter:
+#   1) pg_log_standby_snapshot() → snapbuild path (a) anchor
+#   2) VACUUM pg_statistic → catalog prune record → our GUC's trigger
 my $backup_name = 'backup1';
 $node_primary->backup($backup_name);
 
-# Drive catalog churn via a single set-returning insert (fast), then
-# explicit VACUUM on pg_statistic — which produces a deterministic
-# Heap2/PRUNE_ON_ACCESS record against a catalog relation (rel ...2619)
-# once any pg_statistic tuples become dead.
+# Quiet-moment RUNNING_XACTS in post-backup WAL.
+$node_primary->safe_psql('postgres', "SELECT pg_log_standby_snapshot();");
+
+# Catalog churn. Table create+drop iterations produce dead tuples in
+# pg_class / pg_attribute / pg_type / pg_depend. Subsequent VACUUM
+# emits Heap2/PRUNE_ON_ACCESS on those catalog relations in the
+# 'postgres' database — the trigger for the GUC under test.
 $node_primary->safe_psql('postgres', qq[
     INSERT INTO events (payload)
         SELECT 'row-' || g FROM generate_series(1, 3000) g;
-    ANALYZE events;
 ]);
-$node_primary->safe_psql('postgres', "VACUUM pg_statistic;");
-$node_primary->safe_psql('postgres', "VACUUM pg_class;");
+for (my $i = 0; $i < 20; $i++) {
+    $node_primary->safe_psql('postgres',
+        "CREATE TABLE churn_$i (id int, payload text); DROP TABLE churn_$i;");
+}
+$node_primary->safe_psql('postgres', qq[
+    ANALYZE events;
+    ANALYZE events;
+    VACUUM pg_class;
+    VACUUM pg_attribute;
+    VACUUM pg_type;
+    VACUUM pg_depend;
+    VACUUM pg_statistic;
+]);
+
+# Wait for EVERYTHING the primary has written so far to reach the
+# archive. Without this, the standby stalls in restore_command waiting
+# for a segment that's in pg_wal but not yet in the archive directory.
+#
+# Strategy: capture the current write position, force a segment switch
+# so the containing segment closes and archives, then poll pg_stat_archiver
+# until last_archived_wal has reached (at least) the segment that held
+# that capture-point LSN.
+my $workload_end_seg = $node_primary->safe_psql('postgres',
+    "SELECT pg_walfile_name(pg_current_wal_lsn())");
 $node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
-# Emit another switch + wait for archiver so the last segment lands.
-$node_primary->safe_psql('postgres', "SELECT pg_switch_wal();");
-$node_primary->poll_query_until('postgres',
-    "SELECT last_archived_wal IS NOT NULL FROM pg_stat_archiver", 't');
+$node_primary->poll_query_until('postgres', qq[
+    SELECT last_archived_wal IS NOT NULL
+       AND last_archived_wal >= '$workload_end_seg'
+    FROM pg_stat_archiver
+]) or die "Timed out waiting for workload segment $workload_end_seg to archive";
 
 my $node_standby = PostgreSQL::Test::Cluster->new('standby');
 $node_standby->init_from_backup($node_primary, $backup_name,
@@ -85,6 +124,8 @@ $node_standby->append_conf('postgresql.conf', qq[
 hot_standby = on
 recovery_pause_on_logical_slot_conflict = on
 wal_level = logical
+max_standby_archive_delay = -1
+max_standby_streaming_delay = -1
 ]);
 $node_standby->start;
 
@@ -162,6 +203,8 @@ $node_standby_off->append_conf('postgresql.conf', qq[
 hot_standby = on
 recovery_pause_on_logical_slot_conflict = off
 wal_level = logical
+max_standby_archive_delay = -1
+max_standby_streaming_delay = -1
 ]);
 $node_standby_off->start;
 
