@@ -1,8 +1,8 @@
 # Logical Decoding from Archived WAL — SPEC
 
-**Version:** 0.4  
-**Status:** Draft — execution-ready for Sprint 0  
-**Date:** 2026-04-18  
+**Version:** 0.5  
+**Status:** Draft — ready to start Sprint 0 (post-Sprint-0 cleanup expected as v0.6)  
+**Date:** 2026-04-19  
 **Author:** @NikolayS (Nik Samokhvalov)  
 **Contributors:**  
 - @x4m (Andrey Borodin) — main idea generator; architecture ideas from Postgres.tv hacking session  
@@ -18,6 +18,7 @@
 | 0.2     | 2026-04-16 | @NikolayS (Nik Samokhvalov) | Address three independent technical reviews. Corrections: (a) `hot_standby_feedback = on` is **not** required on an archive-only standby — it's a standby→primary mechanism and is a silent no-op without a walreceiver; (b) `pg_wal_replay_resume()` does **not** promote a `standby.signal` standby with no `recovery_target*` — the original framing was wrong; (c) the slot only decodes WAL **generated after slot creation** (fundamental `snapbuild` constraint) — US-2 rewritten accordingly; (d) `recovery_target_function` reframed from a semi-designed plpgsql API to "slot-aware replay throttling, mechanism TBD" after @reviewer-3 flagged infeasibility (performance, startup-process execution context, in-flight relmap); (e) Ringer/Kukushkin walsender patch clarified — it solves a complementary problem (walsender fetching archived segments for an existing consumer), not foundational to this PoC. Structural: Sprint 0 redefined as 4 gates (slot create → decode post-creation WAL → survive replay progress → survive restart/resume) budgeted at 2 weeks; slot invalidation elevated to project-level risk; US-4 step-replay marked experimental (the `sleep(0.1)` loop gives batch granularity, not per-record); added test matrix items (streaming large txns, 2PC, subtxn overflow, replica identity variants, TOAST pglz+lz4 mix, restart mid-decode, PG18 sequences); increased S2-2 DDL budget; tightened managed-service positioning from "why needed now" to "strategic upside if providers cooperate"; SQL output caveats in §4.3.1. |
 | 0.3     | 2026-04-17 | @NikolayS (Nik Samokhvalov) | Address second-round review (3 reviews). **Hard technical corrections:** (a) `recovery_target_*` GUCs are `PGC_POSTMASTER` — cannot be "cleared at runtime"; US-2 recipe and §4.4 step 7 rewritten with the correct mechanism (`pg_wal_replay_resume()` past the paused target; orchestrator-driven `pg_wal_replay_pause()` when replay LSN reaches `L_end`); (b) `pg_switch_wal()` does **not** produce `XLOG_RUNNING_XACTS` — §4.1.4 risk 1 and S0-1 loop corrected to use `pg_log_standby_snapshot()` (via `LogStandbySnapshot()`) plus dummy writes and optional `pg_switch_wal()` for prompt archival; (c) `pg_create_logical_replication_slot()` **blocks** inside `DecodingContextFindStartpoint()` waiting for snapshot-builder consistency — it does not return a transient error; orchestrator model changed from "retry on `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE`" to "statement_timeout + cancel" with progress polling; (d) PG19 references softened — PG19 doesn't exist yet (Sept 2026 earliest) and both dynamic `wal_level` and `pg_waldump` tar support are pgsql-hackers threads still under review; (e) G4 wording directions corrected (on resume, consumer sees LSN > `confirmed_flush_lsn` already decoded, never LSN ≤ `confirmed_flush_lsn`); (f) architecture diagram now shows `pgoutput` (plugin policy says `test_decoding` is PoC-only); (g) `pg_get_wal_stats()` usage in US-4 correctly attributed to the `pg_walinspect` extension. **Strong reframings:** G1 expected result softened from "Should work" to "Plausible based on standby logical decoding internals, but unproven in restore-only mode"; US-2 gains label clarifier ("forward logical decoding from a rewound physical state — not backward decoding"); G4 for Sprint 0 narrowed to "slot exists, not corrupt, resumed consumption is explainable and bounded" (exact duplicate/gap semantics deferred to post-PoC); G3 reproducer design rewritten around the actual invalidation trigger (replay of vacuum-on-catalog WAL records) — temp object churn + explicit `VACUUM pg_class/pg_attribute/pg_type` on primary with autovacuum active; `max_slot_wal_keep_size` on the **standby** added as a separate invalidation vector; G3 budget increased from 2d → 4.5d. **New sections in §7:** "Out of scope for Sprint 0" box; two-outcome scope-split (Outcome A: continuous viable → US-1/US-3/Phase 3 in scope; Outcome B: forensic only → US-2 survives, US-1 questionable, Phase 3 narrows); Sprint 0 observability subsection (standby logs, `pg_replication_slots` snapshots, replay LSN progression, `restore_command` retries, error codes, WAL segment names). **Documentation completeness:** CLI validation logic section; `recovery_target_inclusive = true` caveat (slot created at paused target already has that record applied — `catalog_xmin` may start further ahead than intended). **Judgment call left open:** US-4 kept with "candidate for removal in v0.4" marker after @reviewer-3 questioned whether it's load-bearing (core devs already have `pg_waldump` + regression suite + TAP tests; §4.2.3's real motivation is slot invalidation, not US-4). Not cut unilaterally. |
 | 0.4     | 2026-04-18 | @NikolayS (Nik Samokhvalov) | **US-4 explicitly retained** after v0.3 "candidate for removal" marker. Although all three round-3 reviewers recommended cutting it, US-4 is a core idea from @x4m and part of the project's motivation, not brainstorm residue. The "EXPERIMENTAL" qualifier on US-4 remains because the user-space approximation of per-record stepping is genuinely coarse, but the user-story value does not. S2-4 retained in Sprint 2. Remaining round-3 corrections (Sprint 0 budget math, G1 failure wording, PG18-for-Sprint-0, CLI `--from-time` resolution, archive continuity, etc.) deferred to a follow-up revision. |
+| 0.5     | 2026-04-19 | @NikolayS (Nik Samokhvalov) | Pre-Sprint-0 cleanup addressing round-4 review convergence. **Must-fix-before-Sprint-0:** (a) Sprint 0 day budget reconciled — tasks sum to 11.5d (excluding contingent S0-8) or 14.5d (including it); Sprint 0 budget extended from 2 weeks → 3 weeks on the Gantt; S0-9 findings write-up budget bumped 1d → 2d; Sprint 1 start pushed by 1 week, total PoC timeline now ~9 weeks; (b) US-4 acceptance criteria rewritten around the "pause-at-LSN, run user-supplied hook, advance, repeat" framing that actually reflects US-4's value, replacing the narrower amcheck-between-batches description that v0.4's justification had already superseded; (c) Outcome A's "US-4 keep-or-cut decision still open" bullet corrected to "US-4 in scope per v0.4 retention" — v0.4 changelog and §7.0.2 were contradicting each other; (d) S0-9's deliverable reference corrected from "v0.4" (which is this revision's predecessor, pre-Sprint-0) to "v0.6 findings appendix (post-Sprint-0)"; (e) US-4 header "EXPERIMENTAL" all-caps tag removed — it reads as "speculative, may be cut," which is exactly the opposite of the v0.4 retention. Replaced with a softer "coarse-grained by design, per-record stepping is future work" note in the body. **Also fixed:** (f) G1 failure-interpretation matrix row rewritten to drop the `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` retry-model phrasing (contradicts v0.3's blocking model); new wording: "slot creation never reaches consistency before statement_timeout despite snapshot forcing and replay progress"; (g) §4.1.4 risk 3 (`pg_wal` overflow when consumer stalls) explicitly flagged as "deferred to Sprint 1 with monitoring + thresholds" rather than waved through as "operationally acceptable"; (h) changelog v0.4 entry's defensive tone around US-4 not altered (historical) but v0.5 references §2 US-4 for reasoning instead of re-arguing. **Genuinely-deferred-to-v0.6+:** archive-continuity full-sequence scan (§4.4.1 improvement); CLI `--from-time` → LSN resolution policy; PG18-for-Sprint-0 switch (already decided in v0.3 via the "single PG version, likely PG17" language — revisit if `pg_logicalinspect` observability proves load-bearing during G1 debugging). These remain known issues, not "etc." |
 
 ---
 
@@ -105,22 +106,26 @@ WAL records reference relations by `RelFileLocator` (physical file identity), no
 - The target staging database receives the masked data via logical apply.
 - Manual verification: insert row with `email='secret@example.com'` on production. Confirm staging receives `email='***@***.com'` or equivalent.
 
-### US-4: WAL correctness verification (batched replay) — **EXPERIMENTAL**
+### US-4: WAL correctness verification via paused-state inspection
 
 > **As** a PostgreSQL core developer,  
-> **I want** to replay WAL in small controlled batches and run consistency checks between them  
-> **so that** I can detect bugs where the cluster ends up in an inconsistent state after a burst of replay.
+> **I want** to pause WAL replay at or near a chosen LSN, run a consistency check or ad-hoc query against the cluster state at that point, then advance and repeat,  
+> **so that** I can inspect and verify cluster behavior across a specific WAL sequence that's hard to reproduce otherwise.
 
-**Attribution (v0.4):** this user story originates with @x4m and is a core motivation for the project — not a brainstorm tangent. The "controlled replay from archive" primitive that falls out of the standby-as-decoder architecture enables correctness-verification workflows that are genuinely hard to build any other way, even with existing tools. Keeping.
+**Attribution:** this user story originates with @x4m and is a core motivation for the project. The "controlled replay from archive" primitive that falls out of the standby-as-decoder architecture enables correctness-verification workflows that core developers currently perform by hand with considerable effort.
 
-**Honesty note (v0.2, unchanged in v0.4):** true per-record stepping is **not** achievable from user space. `pg_wal_replay_pause()` / `pg_wal_replay_resume()` with a `sleep(N)` between them gives a time-bounded *batch* of replay, not a single record — the startup process may apply 1 or 10,000 records depending on how busy it is during that window. The coarser "pause → consume → resume" loop is a useful debugging aid but an approximation of per-record stepping. True per-record determinism would require a core patch (see §4.2.3); until then, US-4 is **experimental** in the sense that the granularity is coarser than the ideal — the user-story value is not experimental.
+**What's new here vs existing tools:** `pg_waldump` inspects WAL statically; the regression suite and TAP tests verify known-good scenarios. Neither provides a live, interactive workflow: reconstruct a production-like state, replay WAL to LSN X, open psql, look around, advance replay by a controlled amount, look again. US-4 makes that repeatable rather than bespoke.
 
-**Why US-4 is kept despite reviewer pushback (v0.4):** reviewers correctly noted that core developers have `pg_waldump`, the regression suite, and TAP tests. Those tools inspect and test; they do not provide a live, interactive "pause replay at LSN X, query the cluster state, advance, query again" workflow against arbitrary archived WAL. That live workflow is what US-4 unlocks. The right comparison isn't US-4 vs `pg_waldump`; it's US-4 vs "reconstruct a production-like state with a specific WAL sequence replayed up to a specific point, and poke at it from psql." The latter is what core developers currently do by hand with considerable effort. US-4 makes it repeatable.
+**Granularity caveat (v0.2, refined in v0.5):** replay control from user space is **coarse-grained by design** — `pg_wal_replay_pause()` / `pg_wal_replay_resume()` with a `sleep(N)` or polling loop gives a time-/LSN-bounded *batch* of replay between pauses, not a single record. The startup process may apply 1 or 10,000 records in a batch depending on how busy it is. True per-record stepping would require core support (see §4.2.3); that's future work, not a Sprint-gating dependency. The user-story value does **not** depend on per-record granularity — inspection between bounded batches is itself novel and useful.
 
 **Acceptance criteria:**
-- Orchestration script runs a pause → resume-for-N-ms → pause → check loop. Reports replay LSN before/after each iteration and uses the `pg_walinspect` extension (`pg_get_wal_records_info(start, end)` is closer to what we want than `pg_get_wal_stats()`) or `pg_waldump` to show which records were applied in the batch.
-- If a consistency check fails (e.g., `amcheck`), report the LSN range rather than the exact record — exact-record pinpoint would require core support.
-- Manual verification: replay a known WAL sequence in small batches, run checks after each — confirm the loop completes without false alarms on hot-standby-specific quirks (`amcheck` has known edge cases during concurrent replay).
+- Orchestrator pauses replay at or near a user-specified LSN (via `recovery_target_lsn` + `recovery_target_action = 'pause'` for the initial position, or orchestrator-driven `pg_wal_replay_pause()` as replay crosses a target LSN for subsequent positions).
+- A user-supplied hook runs against the standby while replay is paused. The hook is any SQL — an `amcheck` call, a `SELECT count(*) FROM pg_class`, a custom verifier. The hook output is captured alongside the replay LSN.
+- Orchestrator advances replay by a user-specified bound (either a time budget or an LSN delta) via `pg_wal_replay_resume()` + orchestrator-driven pause when replay reaches the boundary.
+- The hook runs again at the new paused state. Repeat until the end of the window.
+- Consistency failures (or unexpected hook output) are reported with the replay-LSN range of the batch that contained the transition, plus the hook's output. Pin-pointing to the exact record would require core support.
+- Ancillary: `pg_walinspect`'s `pg_get_wal_records_info(start_lsn, end_lsn)` (preferred over `pg_get_wal_stats()`) or `pg_waldump` is used to describe which WAL records were applied in each batch.
+- Manual verification: replay a known WAL sequence in small bounded batches with a simple hook (e.g., `SELECT count(*) FROM pg_class`), confirm the loop completes without false alarms on hot-standby-specific quirks (`amcheck` has known edge cases during concurrent replay — worth a warning in the docs, not a blocker).
 
 ---
 
@@ -178,7 +183,7 @@ This is **Path 2** from the community research ("PITR-based logical decoding / r
 | `pg-wal-logical-decode` (CLI) | Bash + Python | Orchestrator: provisions standby from backup, configures recovery, creates slot, streams changes, tears down. |
 | Decoder Standby | PostgreSQL 16+ | Standard PG instance in recovery mode with `standby.signal`, `restore_command`, `hot_standby = on`. |
 | Consumer library | Python (psycopg2/3) | Connects to standby's logical slot via streaming replication protocol. Applies filters, emits output. |
-| Batched-replay controller (US-4, experimental) | Python | Pauses/resumes replay in time-bounded batches, runs checks between batches. Not per-record — see US-4 note. |
+| Paused-state inspection controller (US-4) | Python | Pauses replay at/near a target LSN, runs a user hook (SQL / amcheck / custom), advances in time- or LSN-bounded batches, repeats. Coarse-grained by design — per-record stepping is future work, not a Sprint 0 dependency. |
 
 ### 3.4 Constraints and limitations (PoC scope)
 
@@ -276,13 +281,13 @@ Slot-creation alone is not sufficient evidence that the approach works. Sprint 0
 
 2. **`catalog_xmin` horizon conflicts invalidate the slot (project-level risk — see §3.4).** There is no `hot_standby_feedback` shield here; the primary has already vacuumed, the WAL record exists, replay will hit it. The only knob on the standby side is *when* we apply that WAL (throttled replay). Whether that's enough in practice is a Sprint 0 gate.
 
-3. **`max_slot_wal_keep_size` on the standby as a separate invalidation vector (added in v0.3).** Independent of catalog conflicts, a slot can be invalidated if the consumer falls behind and the standby's own WAL retention limit is hit. Decision: set `max_slot_wal_keep_size = -1` on the decoder standby and accept that `pg_wal` on the standby may grow if the consumer stalls (operationally acceptable since this standby is disposable and isolated from production).
+3. **`max_slot_wal_keep_size` on the standby as a separate invalidation vector (added in v0.3, refined in v0.5).** Independent of catalog conflicts, a slot can be invalidated if the consumer falls behind and the standby's own WAL retention limit is hit. Sprint 0 decision: set `max_slot_wal_keep_size = -1` on the decoder standby. **Trade-off acknowledged in v0.5:** with unlimited retention, a stalled consumer causes `pg_wal` on the standby to grow unboundedly, and when the disk fills the standby PANICs (`XLogWrite: could not write to file ...: No space left on device`) — that's an abrupt crash, not graceful degradation. Acceptable for Sprint 0 (local archive, dev hardware, operator-attended). **Deferred to Sprint 1:** pick a production mitigation — monitor `pg_wal` size and alert before PANIC, sacrifice completeness with a bounded `max_slot_wal_keep_size`, or mount `pg_wal` on its own generously-sized volume with `restart_lsn` lag monitoring. Whichever we pick, the tool should surface slot `restart_lsn` lag prominently so operators can see pressure building.
 
 4. **Archive gaps / missing segments.** `restore_command` failure mid-decode will stall recovery. The standby will keep retrying. The orchestrator needs to detect this (replay LSN not advancing while consumer is waiting) and surface it clearly rather than hanging.
 
 ### 4.2 Phase 2 — Controlled Replay
 
-**Goal:** Mitigate slot invalidation via coarse-grained pause/consume/resume control, and provide a batched-replay + consistency-check loop as an experimental aid for US-4. (True per-record stepping is not achievable from user space — see US-4 note and §4.2.3.)
+**Goal:** Mitigate slot invalidation via coarse-grained pause/consume/resume control, and provide the paused-state inspection controller for US-4. Coarse-grained by design — per-record stepping is future work (see US-4 and §4.2.3); the user-story value does not depend on per-record granularity.
 
 #### 4.2.1 External orchestration (no core patch needed)
 
@@ -491,10 +496,12 @@ We use TDD for the orchestrator and consumer logic. The WAL decode verification 
 | CLI argument parsing & config | **Yes — TDD** | pytest | Validate all flag combinations, error cases. |
 | Orchestrator: standby lifecycle | Integration tests | pytest + Docker | Spins up primary + standby in containers. Not TDD — too slow for red/green cycles. |
 | Core verification: "does the pipe work" | Integration tests | TAP / pg_regress style | The Phase 1 experiment, automated. |
-| Batched-replay controller (experimental) | Integration tests | pytest + Docker | Verify pause/resume/consume cycle holds across multiple iterations. |
+| Paused-state inspection controller (US-4) | Integration tests | pytest + Docker | Verify pause-at-LSN → hook → advance → hook cycle holds across multiple iterations. |
 | Slot invalidation scenarios | Integration tests | pytest + Docker | DDL on primary, verify standby behavior. |
 
 ### 5.2 CI test matrix
+
+Per-scenario version gating: the `postgres-versions` list is the default set for each scenario, but individual scenarios may restrict or extend (e.g., `sequence-replication` is PG18+ only). CI implementers should honor per-scenario gating rather than running every scenario on every version — mismatches are expected and not bugs.
 
 ```yaml
 # Conceptual CI structure
@@ -602,7 +609,12 @@ test-matrix:
         - start consuming, SIGKILL standby partway through
         - restart standby
         - resume consumption
-      pass: slot state is sane; no duplicates past confirmed_flush_lsn; no gaps before it
+      # Sprint 0 uses a softer bar (§4.1.3 G4): slot still exists after restart,
+      # catalog state not corrupt, resumed consumption is explainable and bounded.
+      # The strict bar below is the post-consumer-interface-choice target that
+      # applies once Sprint 1+ settles on the streaming replication protocol
+      # consumer path (different flush/persistence semantics than the SQL interface).
+      pass: slot state is sane; on resume the consumer sees all changes with LSN > confirmed_flush_lsn that were already decoded, and never changes with LSN <= confirmed_flush_lsn (those are already acknowledged)
 
     - name: sequence-replication
       desc: "PG18 logical replication of sequences"
@@ -643,9 +655,11 @@ Each user story has a corresponding manual test runbook. These are also automate
 
 ## 7. Implementation Plan
 
-### Sprint 0 — Validate Foundation (2 weeks, with early-exit)
+### Sprint 0 — Validate Foundation (3 weeks, with early-exit)
 
 > **Tracking issue:** [NikolayS/postgres#25](https://github.com/NikolayS/postgres/issues/25).
+
+**Budget note (v0.5):** task day-sums below are 11.5d without the contingent S0-8 (internals deep-dive) and 14.5d with it. v0.3/v0.4 budgeted Sprint 0 at 2 weeks (10d), which doesn't cover even the non-contingent tasks; v0.5 extends the Sprint 0 slot on the Gantt to 3 weeks (15d). Early exit still applies — if G1–G4 all pass cleanly by day 8, close Sprint 0 and move to Sprint 1.
 
 **Revised in v0.2.** The v0.1 plan treated slot creation as the single gate. It isn't — it's one of four gates (see §4.1.3). Even if slot creation succeeds, the harder questions are whether it decodes newly-restored WAL, whether it survives replay progress, and whether it survives restart cycles. Budget two weeks with an early exit if the answers are clean; if any gate hits an obstacle that requires a `snapbuild.c` / `standby.c` source-level investigation, two weeks is the realistic minimum (not 1–2 days).
 
@@ -668,15 +682,15 @@ Each user story has a corresponding manual test runbook. These are also automate
 | S0-6 **(Gate 3)**: Characterize slot invalidation under three explicit scenarios (see 7.0.1 below). **This is the dragon** — it determines Outcome A vs Outcome B (§7.0.2). | Internals eng | S0-5 | **4.5** (was 2) |
 | S0-7 **(Gate 4)**: Restart the standby mid-decode. Resume consumption via `pg_logical_slot_get_changes()` (Sprint 0 fixes on this interface). Verify slot still exists, catalog state sane, resumed consumption explainable. Exact duplicate/gap semantics deferred to post-PoC. | Internals eng | S0-5 | 1 |
 | S0-8: If any gate fails unexpectedly, read `snapbuild.c` / `standby.c` / `slot.c` with debugger; map exact error codes; decide scope | Internals eng | any gate | 3 |
-| S0-9: Write findings section on this spec (v0.4) — for each gate: pass/fail, observed behavior, interpretation matrix outcome, scope implication | All | S0-7 | 1 |
+| S0-9: Write Sprint 0 findings — land as a new appendix + v0.6 changelog entry on this spec (v0.5 is this pre-Sprint-0 revision, so findings cannot live inside it). For each gate: pass/fail, observed behavior, interpretation matrix outcome, scope implication | All | S0-7 | 2 |
 
-**Early-exit rule:** if G1–G4 all pass cleanly by day 5, declare Sprint 0 done and move to Sprint 1. The 2-week budget exists to absorb investigation time if a gate fails in a non-obvious way.
+**Early-exit rule:** if G1–G4 all pass cleanly by day 8, declare Sprint 0 done and move to Sprint 1. The 3-week budget exists to absorb investigation time if a gate fails in a non-obvious way and to give G3 its full 4.5-day characterization window without pressure to compress.
 
 **Gate interpretation matrix** — for each gate, concrete failure symptoms mapped to scope impact:
 
 | Observed failure | Interpretation | Scope impact |
 |------------------|----------------|--------------|
-| G1: slot creation returns `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` even after hours of replay | `SNAPBUILD_CONSISTENT` not reachable from archive alone — missing some condition present on streaming standbys | Likely a core patch needed before anything else; PoC pauses |
+| G1: slot creation never reaches consistency before statement_timeout despite snapshot forcing and replay progress | `SNAPBUILD_CONSISTENT` not reachable from archive alone — missing some condition present on streaming standbys (recall that `pg_create_logical_replication_slot()` **blocks** inside `DecodingContextFindStartpoint()`; it does not return a transient error we could retry) | Likely a core patch needed before anything else; PoC pauses |
 | G1: slot creation works but only after `pg_log_standby_snapshot()` on primary at archive time | Dependency on primary cooperation | Tool must document this requirement; acceptable constraint |
 | G2: slot created but no decoded changes for post-creation WAL | Archive replay isn't advancing past slot's LSN (or decoding is silently empty) | Instrumentation / config issue, not scope change |
 | G3: slot invalidated within minutes of replay | Catalog vacuum records invalidate `catalog_xmin` quickly under normal load | Scope shrinks to narrow forensic windows; US-1 continuous use at risk |
@@ -695,6 +709,17 @@ G3 is the gate most likely to reshape the project. The v0.2 language ("moderate 
 For each scenario: record time from slot creation to invalidation (or "survived N minutes, still alive"), the exact slot state from `pg_replication_slots` at failure, and the WAL LSN + record type that caused the conflict (from logs — the standby emits a distinctive message on `InvalidatePossiblyObsoleteSlot`). Output a small data table: scenario → MTTI → trigger record.
 
 **Success definition for G3:** not a binary pass/fail, but a characterization. The decision is "under what workload regime (if any) can this approach sustain a slot indefinitely?" The answer is directly what drives the §7.0.2 scope-split below.
+
+**Decision thresholds (added in v0.5):**
+
+| Observation | Interpretation | Outcome |
+|-------------|----------------|---------|
+| Slot survives G3-A **and** G3-B for ≥1 hour without invalidation (with or without replay throttling) | The continuous-decode path is credible for at least moderate-churn OLTP workloads | **Outcome A** — continuous viable |
+| Slot survives G3-A but dies quickly (minutes) in G3-B | US-1 continuous replication not viable under any realistic catalog churn; forensic windows still useful | **Outcome B** — forensic only |
+| Slot survives G3-B but dies under G3-C | Continuous use may be possible with narrow workload assumptions (no explicit catalog VACUUMs, autovacuum-tuned primaries); document the constraint clearly | **Outcome A with caveats** — continuous viable for restricted workloads |
+| Slot dies in G3-A (low-churn baseline) | Unexpected; something fundamental is wrong, not workload-dependent | Escalate — investigate before declaring Outcome B |
+
+"Quickly" in this table means <10 minutes; "sustained" means ≥1 hour. These are first-pass thresholds; Sprint 0 may refine them based on what the data actually looks like.
 
 #### Sprint 0 — out of scope (explicit) (added in v0.3)
 
@@ -720,7 +745,7 @@ Sprint 0 doesn't just pass or fail — it splits the project into one of two fut
 - US-1 (decouple continuous replication from primary): in scope.
 - US-2 (windowed extraction): in scope, easy case.
 - US-3 (PII-free staging): in scope.
-- US-4 (correctness verification): experimental, keep-or-cut decision still open.
+- US-4 (correctness verification): in scope per v0.4 retention decision — the paused-state inspection primitive is a core value-add from @x4m, not contingent on Sprint 0 outcome.
 - Sprints 1–3 proceed roughly as planned.
 
 **Outcome B: forensic-only viable.** G1 passes, G2 passes, G3 shows the slot is invalidated quickly (minutes) under anything but the lightest workload, G4 passes.
@@ -739,8 +764,9 @@ The decision of "A vs B" is made in the S0-9 findings write-up, based on the cha
 Before Sprint 0 starts, wire up capture for these signals. Without them, a failed gate is frustrating to interpret post-hoc.
 
 - **Standby logs** at `log_min_messages = debug1` or higher for the replication/recovery subsystem. Rotate aggressively.
-- **Periodic snapshots of `pg_replication_slots`** (every 10s): columns `slot_name`, `active`, `xmin`, `catalog_xmin`, `restart_lsn`, `confirmed_flush_lsn`, `wal_status`, `safe_wal_size`, `conflicting`, `invalidation_reason` (PG17+). Stored as a CSV time-series.
+- **Periodic snapshots of `pg_replication_slots`** (every 10s): columns `slot_name`, `active`, `xmin`, `catalog_xmin`, `restart_lsn`, `confirmed_flush_lsn`, `wal_status`, `safe_wal_size`, `conflicting`, `invalidation_reason` (PG17+). Stored as a CSV time-series. **G1-specific interpretation (v0.5):** during slot creation blocking, `catalog_xmin` null = snapshot builder hasn't started; `catalog_xmin` populated + `confirmed_flush_lsn` null = scanning WAL for consistency; both populated = slot ready. Surface this as a human-readable "waiting for snapshot consistency / scanning WAL / ready" status during orchestrator polling instead of a bare "still blocked" message. Also: if `catalog_xmin` starts lagging behind the primary's current `xmin` (compare against `pg_stat_activity` on the primary), an uncommitted transaction on the primary is holding the horizon — a warning sign for G3.
 - **Periodic replay LSN progression**: `pg_last_wal_replay_lsn()`, `pg_last_wal_receive_lsn()` (should be NULL on archive-only), `pg_wal_replay_paused()`.
+- **LSN-gap metric (added in v0.5):** track `pg_last_wal_replay_lsn()` minus slot's `restart_lsn`. When that gap's byte-size approaches the standby's `pg_wal` volume size, we're on the trajectory toward a `pg_wal`-full PANIC (see §4.1.4 risk 3). Early-warning threshold: 60% of volume size. This is the key operational signal that distinguishes "consumer is catching up" from "consumer will crash the standby."
 - **`restore_command` activity**: count of retries, timings per segment, failures. Tail `restore_command` stderr into its own log. The orchestrator should parse this and expose "waiting for segment N" clearly.
 - **Error codes verbatim** on any ERROR from the standby. Don't paraphrase — committers will ask for exact codes.
 - **WAL segment names and timestamps** around events of interest (slot creation, G3 invalidation event, G4 restart). Let someone reading the report reconstruct the timeline.
@@ -764,7 +790,7 @@ The observability capture is a one-time investment (a small Python script + a do
 
 ### Sprint 2 — Controlled Replay & Robustness (2.5 weeks)
 
-**Goal:** Handle DDL (non-rewriting and rewriting), build a slot-invalidation cookbook, and provide an experimental batched-replay + consistency-check loop (US-4).
+**Goal:** Handle DDL (non-rewriting and rewriting), build a slot-invalidation cookbook, and land the paused-state inspection controller for US-4.
 
 | Task | Owner | Depends on | Days | Parallelizable |
 |------|-------|------------|------|----------------|
@@ -773,7 +799,7 @@ The observability capture is a one-time investment (a small Python script + a do
 | &nbsp;&nbsp;S2-2a: Non-rewriting DDL (ADD COLUMN, DROP COLUMN, RENAME) | Internals eng | S2-1 | 2 | — |
 | &nbsp;&nbsp;S2-2b: Rewriting DDL (ALTER TYPE, VACUUM FULL, CLUSTER) — historic catalog snapshot stress; this is where novel risk lives | Internals eng | S2-2a | 3 | — |
 | S2-3: Test: slot invalidation scenarios — detect and report gracefully; build a small invalidation cookbook (which primary ops cause it, on what timescales) | DBA | S2-1 | 3 | ∥ with S2-2 |
-| S2-4: Experimental: controlled-batch replay with amcheck verification between batches (US-4 experimental, not a PoC blocker) | Internals eng | S2-1 | 2 | — |
+| S2-4: US-4 paused-state inspection controller — pause-at-LSN + user-hook + bounded-advance loop; example hooks: `amcheck`, cluster-wide row counts. Coarse-grained, not per-record (see US-4). | Internals eng | S2-1 | 2 | — |
 | S2-5: Test: resume does not promote — verify `pg_is_in_recovery()` stays `true` across 10+ cycles with no `recovery_target*` set | DBA | S2-1 | 1 | ∥ with S2-4 |
 | S2-6: Integrate PII filter into consumer pipeline | CLI dev | S1-5, S1-6 | 2 | ∥ with S2-1 |
 | S2-7: CLI tool skeleton (`pg-wal-logical-decode` with argument parsing, config loading) | CLI dev | — | 2 | ∥ with S2-1 |
@@ -791,18 +817,18 @@ The observability capture is a one-time investment (a small Python script + a do
 | S3-5: Demo script: end-to-end logical PITR with PII masking | CLI dev | S3-1 | 1 | — |
 | S3-6: Record demo, write blog post draft | All | S3-5 | 2 | — |
 
-### Gantt overview (v0.2 — Sprint 0 expanded to 2 weeks, Sprint 2 to 2.5 weeks)
+### Gantt overview (v0.5 — Sprint 0 extended to 3 weeks per budget reconciliation)
 
 ```
-Week:     1        2        3        4        5        6        7        8
-          ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤
-Sprint 0: ████████████████
-Sprint 1:                  ████████████████
-Sprint 2:                                  ████████████████████
-Sprint 3:                                                      ██████████
+Week:     1        2        3        4        5        6        7        8        9
+          ├────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+Sprint 0: ████████████████████████
+Sprint 1:                          ████████████████
+Sprint 2:                                          ████████████████████
+Sprint 3:                                                                ██████████
 ```
 
-**Total: ~8 weeks to usable PoC** (was ~7; Sprint 0 expanded to absorb investigation time, Sprint 2 expanded for DDL + invalidation testing). If Sprint 0 exits early (all four gates pass cleanly by day 5), revert to the ~7-week timeline.
+**Total: ~9 weeks to usable PoC** (v0.3 said ~8, v0.5 reconciles Sprint 0 task-day sums with its Gantt allocation — v0.3/v0.4 claimed 2 weeks while tasks totalled 11.5–14.5d). If Sprint 0 exits early (all four gates pass cleanly by day 8), revert toward the ~7–8 week timeline.
 
 ---
 
