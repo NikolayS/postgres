@@ -70,7 +70,7 @@ wait loop reuses the existing `SetRecoveryPause` /
 underlies `recovery_target_action=pause` and
 `pg_wal_replay_pause/resume()`. No new shared-memory state.
 
-Three edge cases we ran into during prototyping:
+Six edge cases we hit, the first three during prototyping and the last three caught in an adversarial pre-submission review:
 
 1. **In-progress slot**: a slot still inside
    `DecodingContextFindStartpoint()` (has `s->data.catalog_xmin` but
@@ -98,6 +98,34 @@ Three edge cases we ran into during prototyping:
    `catalog_xmin` (and their `effective_` counterparts) to
    `TransactionIdAdvance(snapshotConflictHorizon)`. Slots the operator
    did NOT drain are untouched — they get invalidated as before.
+
+4. **Promotion escape from the wait loop**: the wait loop checks
+   `PromoteIsTriggered()` each iteration and returns on true, so a
+   `pg_promote()` issued by an operator who has given up on the slot
+   unblocks immediately. (`recoveryPausesHere` uses
+   `CheckForStandbyTrigger`, which is `static` in xlogrecovery.c — we
+   use the exposed `PromoteIsTriggered` instead.)
+
+5. **Synced slots** (PG18 `sync_replication_slots`) are skipped in
+   both the pause-check and advance scans. The slot-sync worker on the
+   standby mutates `data.catalog_xmin`/`data.xmin`/`confirmed_flush`
+   via `update_local_synced_slot`; us writing to those fields from the
+   startup process would race. `ALTER_REPLICATION_SLOT` and
+   `DROP_REPLICATION_SLOT` on a synced slot error out, so the
+   operator-facing "drain or drop" recipe does not apply either.
+   `src/test/recovery/t/040_standby_failover_slots_sync.pl` continues
+   to pass with the filter in place.
+
+6. **Durability gap (known limitation, deferred)**: the advance marks
+   slots dirty but does not force an immediate `SaveSlotToPath`. If
+   the standby crashes between resume and the next restartpoint, the
+   on-disk `catalog_xmin` is the pre-advance value; on recovery
+   restart replay re-encounters the same conflict record, re-pauses,
+   and the operator re-drains. Idempotent, no data loss, but an
+   operator-visible hiccup. `SaveSlotToPath` is currently `static` in
+   slot.c and not trivially callable from the startup process (no
+   `MyReplicationSlot`). A proper fix is out of scope for this
+   prototype.
 
 ## Tests
 
