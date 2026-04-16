@@ -3,7 +3,7 @@
 **Version:** 0.1  
 **Status:** Draft — awaiting expert review  
 **Date:** 2026-04-15  
-**Author:** @NikolayS (PostgresAI)  
+**Author:** @NikolayS  
 **Contributors:**  
 - @x4m (Andrey Borodin) — main idea generator; architecture ideas from Postgres.tv hacking session  
 - @kirkw (Kirk Wolak) — contributor
