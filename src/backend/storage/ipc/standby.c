@@ -539,13 +539,23 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 	if (!TransactionIdIsValid(snapshotConflictHorizon))
 		return;
 
-	/* Scan for a would-be-invalidated slot in the conflicting database. */
+	/*
+	 * Scan for a would-be-invalidated slot in the conflicting database.
+	 *
+	 * Skip slots that have not yet reached snapshot-builder consistency
+	 * (effective_catalog_xmin is still InvalidTransactionId). An in-progress
+	 * slot has not produced any output to a consumer, so invalidating it is
+	 * harmless — the caller can retry. Pausing for such a slot would
+	 * deadlock: DecodingContextFindStartpoint would be waiting for replay
+	 * to advance, while replay would be waiting for the slot to be drained.
+	 */
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 	for (i = 0; i < max_replication_slots; i++)
 	{
 		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
 		Oid			slot_db;
 		TransactionId slot_xmin;
+		TransactionId slot_effective_xmin;
 		bool		active_logical;
 
 		if (!s->in_use)
@@ -554,8 +564,10 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		SpinLockAcquire(&s->mutex);
 		slot_db = s->data.database;
 		slot_xmin = s->data.catalog_xmin;
+		slot_effective_xmin = s->effective_catalog_xmin;
 		active_logical = (s->data.invalidated == RS_INVAL_NONE &&
-						  slot_db != InvalidOid);
+						  slot_db != InvalidOid &&
+						  TransactionIdIsValid(slot_effective_xmin));
 		SpinLockRelease(&s->mutex);
 
 		if (!active_logical)
