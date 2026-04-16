@@ -89,8 +89,11 @@ $node_primary->poll_query_until('postgres', qq[
     FROM pg_stat_archiver
 ]) or die "Timed out waiting for phase-1 segment $phase1_seg to archive";
 
-# Bring up the standby (archive-only). No prune records exist in the
-# archive yet, so slot creation will reach SNAPBUILD_CONSISTENT quickly.
+# Bring up BOTH standbys (GUC-on and GUC-off) while the archive still
+# contains only the quiet-moment snapshot — no prune records yet. Slot
+# creation reaches SNAPBUILD_CONSISTENT quickly on both. Later, when
+# Phase 2 ships the prune records, the two standbys diverge: the
+# GUC-on one pauses and drains; the GUC-off one invalidates.
 my $node_standby = PostgreSQL::Test::Cluster->new('standby');
 $node_standby->init_from_backup($node_primary, $backup_name,
     has_streaming => 0, has_restoring => 1);
@@ -103,17 +106,40 @@ max_standby_streaming_delay = -1
 ]);
 $node_standby->start;
 
+my $node_standby_off = PostgreSQL::Test::Cluster->new('standby_off');
+$node_standby_off->init_from_backup($node_primary, $backup_name,
+    has_streaming => 0, has_restoring => 1);
+$node_standby_off->append_conf('postgresql.conf', qq[
+hot_standby = on
+recovery_pause_on_logical_slot_conflict = off
+wal_level = logical
+max_standby_archive_delay = -1
+max_standby_streaming_delay = -1
+]);
+$node_standby_off->start;
+
 $node_standby->poll_query_until('postgres',
+    "SELECT pg_last_wal_replay_lsn() IS NOT NULL", 't');
+$node_standby_off->poll_query_until('postgres',
     "SELECT pg_last_wal_replay_lsn() IS NOT NULL", 't');
 
 $node_standby->safe_psql('postgres', qq[
     SELECT pg_create_logical_replication_slot('t_slot', 'test_decoding');
+]);
+$node_standby_off->safe_psql('postgres', qq[
+    SELECT pg_create_logical_replication_slot('t_slot_off', 'test_decoding');
 ]);
 
 my $slot_ready = $node_standby->safe_psql('postgres', qq[
     SELECT wal_status FROM pg_replication_slots WHERE slot_name = 't_slot'
 ]);
 is($slot_ready, 'reserved', "slot created cleanly in Phase 1 (state: $slot_ready)");
+
+my $off_slot_ready = $node_standby_off->safe_psql('postgres', qq[
+    SELECT wal_status FROM pg_replication_slots WHERE slot_name = 't_slot_off'
+]);
+is($off_slot_ready, 'reserved',
+   "baseline slot created cleanly in Phase 1 (state: $off_slot_ready)");
 
 # --- Phase 2: catalog churn on primary --- #
 
@@ -196,6 +222,25 @@ cmp_ok($pauses_seen, '>=', 1,
 cmp_ok($total_drained, '>=', 2000,
     "at least 2000 decoded events ($total_drained got)");
 
+# Baseline assertion: the GUC-off standby, faced with the exact same
+# Phase-2 archive, should invalidate its slot. This confirms the test
+# setup actually triggers the conflict AND that GUC-off behavior is
+# unchanged from upstream — if this ever starts passing with state
+# "reserved", either the test stopped reproducing the trigger or the
+# GUC-off path accidentally benefits from our patch.
+my $off_state = 'reserved';
+for (my $i = 0; $i < 60; $i++) {
+    $off_state = $node_standby_off->safe_psql('postgres', qq[
+        SELECT wal_status FROM pg_replication_slots WHERE slot_name = 't_slot_off';
+    ]);
+    last if $off_state eq 'lost';
+    usleep(500_000);
+}
+
+is($off_state, 'lost',
+   "baseline (GUC off): slot invalidates as expected under catalog prune");
+
+$node_standby_off->stop;
 $node_standby->stop;
 $node_primary->stop;
 
