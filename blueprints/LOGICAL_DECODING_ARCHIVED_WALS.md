@@ -5,12 +5,12 @@
 **Date:** 2026-04-19  
 **Author:** Claude Opus 4.6 (1M context)  
 **Key researcher:** Claude Opus 4.6 (deep research mode)  
-**Architecture lead:** [@x4m](https://github.com/x4m) (Andrey Borodin) — Postgres.tv hacking session  
+**Architecture lead:** [@x4m](https://github.com/x4m) (Andrey Borodin) — [Postgres.tv hacking session](https://www.youtube.com/watch?v=LjiU6kB6izw)  
 **Contributors:**  
 - [@NikolayS](https://github.com/NikolayS) (Nik Samokhvalov) — idea generator, AI coordinator  
 - [@kirkw](https://github.com/kirkw) (Kirk Wolak)  
 
-**Meeting secretary / transcription:** [Circleback.ai](https://circleback.ai) — transcribed the Postgres.tv hacking session; transcript fed into the research and drafting phases.  
+**Meeting secretary / transcription:** [Circleback.ai](https://circleback.ai) — transcribed the [Postgres.tv hacking session](https://www.youtube.com/watch?v=LjiU6kB6izw); transcript fed into the research and drafting phases.  
 **Reviewers (four rounds of independent review):**  
 - Claude Opus 4.6 (separate instance from the author)  
 - Gemini 3.1 Pro  
@@ -898,4 +898,4 @@ These are explicitly out of scope for the PoC but documented for roadmap plannin
 12. PostgreSQL 16 Release Notes — logical decoding on standbys entry:
     https://www.postgresql.org/docs/16/release-16.html
 
-13. [@x4m](https://github.com/x4m) (Andrey Borodin), Postgres.tv hacking session — architectural input for this PoC (transcript in project files)
+13. [@x4m](https://github.com/x4m) (Andrey Borodin), Postgres.tv hacking session — architectural input for this PoC: https://www.youtube.com/watch?v=LjiU6kB6izw (transcription by [Circleback.ai](https://circleback.ai))
