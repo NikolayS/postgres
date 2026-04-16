@@ -378,7 +378,7 @@ static bool recoveryStopsAfter(XLogReaderState *record);
 static char *getRecoveryStopReason(void);
 static void recoveryPausesHere(bool endOfRecovery);
 static bool recoveryApplyDelay(XLogReaderState *record);
-static void ConfirmRecoveryPaused(void);
+/* ConfirmRecoveryPaused is extern for use by MaybePauseOnLogicalSlotConflict */
 
 static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
 							  int emode, bool fetching_ckpt,
@@ -3095,7 +3095,7 @@ SetRecoveryPause(bool recoveryPause)
  * Confirm the recovery pause by setting the recovery pause state to
  * RECOVERY_PAUSED.
  */
-static void
+void
 ConfirmRecoveryPaused(void)
 {
 	/* If recovery pause is requested then set it paused */

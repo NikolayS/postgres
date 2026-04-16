@@ -587,6 +587,12 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 	while (GetRecoveryPauseState() != RECOVERY_NOT_PAUSED)
 	{
 		ProcessStartupProcInterrupts();
+		/*
+		 * Promote RECOVERY_PAUSE_REQUESTED to RECOVERY_PAUSED so that
+		 * observers (pg_get_wal_replay_pause_state() / monitoring) see the
+		 * pause as actually taken, not just requested.
+		 */
+		ConfirmRecoveryPaused();
 		ConditionVariableTimedSleep(&XLogRecoveryCtl->recoveryNotPausedCV,
 									1000, WAIT_EVENT_RECOVERY_PAUSE);
 	}
