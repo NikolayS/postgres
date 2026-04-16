@@ -1,0 +1,377 @@
+From 34f5431683bd1a79f5f0b6ce68ac9861ee4a512b Mon Sep 17 00:00:00 2001
+From: Nikolay Samokhvalov <nik@postgres.ai>
+Date: Thu, 16 Apr 2026 18:11:32 +0000
+Subject: [PATCH 1/2] Pause recovery on logical slot conflict
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add a new GUC, recovery_pause_on_logical_slot_conflict (PGC_SIGHUP,
+default off). When enabled, WAL replay on a standby pauses instead of
+invalidating an active logical replication slot whose catalog_xmin
+would be overtaken by a Heap2/PRUNE_ON_ACCESS record's
+snapshotConflictHorizon. An operator can then drain the slot via
+pg_logical_slot_get_changes and call pg_wal_replay_resume() to
+continue. On resume, the patch advances the drained slot's
+catalog_xmin past the conflict horizon so the subsequent
+InvalidateObsoleteReplicationSlots call becomes a no-op; replay
+continues to the next conflict and the cycle repeats.
+
+This makes logical decoding from an archive-only standby (no streaming
+replication link to the primary) viable for continuous CDC. Without
+this GUC, slots on such standbys are invalidated the first time replay
+applies a catalog vacuum record whose horizon exceeds the slot's
+catalog_xmin — typically ~2 * autovacuum_naptime after slot creation.
+
+Hooks into ResolveRecoveryConflictWithSnapshot(), the single choke
+point in the replay path for RS_INVAL_HORIZON conflicts, via a new
+MaybePauseOnLogicalSlotConflict() function. Reuses the existing
+SetRecoveryPause / recoveryNotPausedCV / ConfirmRecoveryPaused
+machinery — no new shared-memory state. Hot path when GUC off is one
+boolean early-return.
+
+Edge cases handled:
+- Slots still inside DecodingContextFindStartpoint (effective_catalog_xmin
+  not yet valid) are skipped. Pausing for them would deadlock: snapbuild
+  needs WAL to advance, pause holds it back. Invalidating an in-progress
+  slot is harmless — the caller retries.
+- Pause-check uses TransactionIdPrecedesOrEquals to match the semantics
+  of DetermineSlotInvalidationCause. Without that, a slot whose
+  catalog_xmin was just advanced to horizon+1 by a previous pause cycle
+  would fail to re-pause on a subsequent record with horizon == horizon+1,
+  yet would still be invalidated by the fall-through.
+
+ConfirmRecoveryPaused() is made extern for use by
+MaybePauseOnLogicalSlotConflict's wait loop — the pause is entered
+from inside ResolveRecoveryConflictWithSnapshot rather than the main
+replay loop, so we need to transition RECOVERY_PAUSE_REQUESTED ->
+RECOVERY_PAUSED ourselves so SQL-level observers see 'paused' rather
+than 'pause requested'.
+---
+ src/backend/access/transam/xlogrecovery.c     |  19 +-
+ src/backend/storage/ipc/standby.c             | 185 ++++++++++++++++++
+ src/backend/utils/misc/guc_parameters.dat     |   8 +
+ src/backend/utils/misc/postgresql.conf.sample |   2 +
+ src/include/access/xlogrecovery.h             |   2 +
+ src/include/storage/standby.h                 |   2 +
+ 6 files changed, 216 insertions(+), 2 deletions(-)
+
+diff --git a/src/backend/access/transam/xlogrecovery.c b/src/backend/access/transam/xlogrecovery.c
+index c236e2b7969..25cbcc0dfcb 100644
+--- a/src/backend/access/transam/xlogrecovery.c
++++ b/src/backend/access/transam/xlogrecovery.c
+@@ -96,6 +96,21 @@ const char *recoveryTargetName;
+ XLogRecPtr	recoveryTargetLSN;
+ int			recovery_min_apply_delay = 0;
+ 
++/*
++ * If true, when WAL replay on a standby is about to invalidate an otherwise-
++ * active logical replication slot because a catalog PRUNE_ON_ACCESS record's
++ * snapshotConflictHorizon has overtaken the slot's catalog_xmin, pause replay
++ * instead and give an operator a chance to drain (or drop) the slot.
++ *
++ * Motivated by blueprints/LOGICAL_DECODING_ARCHIVED_WALS.md §4.2.3 / US-4:
++ * an archive-only logical-decoding standby cannot feed hot_standby_feedback
++ * to the primary, so it has no natural way to keep the primary's catalog
++ * horizon pinned. Without this GUC, any logical slot created on such a
++ * standby is invalidated the first time replay applies a catalog vacuum
++ * record whose horizon exceeds the slot's catalog_xmin.
++ */
++bool		recovery_pause_on_logical_slot_conflict = false;
++
+ /* options formerly taken from recovery.conf for XLOG streaming */
+ char	   *PrimaryConnInfo = NULL;
+ char	   *PrimarySlotName = NULL;
+@@ -363,7 +378,7 @@ static bool recoveryStopsAfter(XLogReaderState *record);
+ static char *getRecoveryStopReason(void);
+ static void recoveryPausesHere(bool endOfRecovery);
+ static bool recoveryApplyDelay(XLogReaderState *record);
+-static void ConfirmRecoveryPaused(void);
++/* ConfirmRecoveryPaused is extern for use by MaybePauseOnLogicalSlotConflict */
+ 
+ static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
+ 							  int emode, bool fetching_ckpt,
+@@ -3080,7 +3095,7 @@ SetRecoveryPause(bool recoveryPause)
+  * Confirm the recovery pause by setting the recovery pause state to
+  * RECOVERY_PAUSED.
+  */
+-static void
++void
+ ConfirmRecoveryPaused(void)
+ {
+ 	/* If recovery pause is requested then set it paused */
+diff --git a/src/backend/storage/ipc/standby.c b/src/backend/storage/ipc/standby.c
+index 29af7733948..7079462f8a0 100644
+--- a/src/backend/storage/ipc/standby.c
++++ b/src/backend/storage/ipc/standby.c
+@@ -24,8 +24,11 @@
+ #include "access/xlogutils.h"
+ #include "miscadmin.h"
+ #include "pgstat.h"
++#include "postmaster/startup.h"
+ #include "replication/slot.h"
++#include "storage/condition_variable.h"
+ #include "storage/bufmgr.h"
++#include "storage/lwlock.h"
+ #include "storage/proc.h"
+ #include "storage/procarray.h"
+ #include "storage/sinvaladt.h"
+@@ -503,8 +506,190 @@ ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHorizon,
+ 	 * reached, e.g. due to using a physical replication slot.
+ 	 */
+ 	if (IsLogicalDecodingEnabled() && isCatalogRel)
++	{
++		MaybePauseOnLogicalSlotConflict(locator.dbOid, snapshotConflictHorizon);
+ 		InvalidateObsoleteReplicationSlots(RS_INVAL_HORIZON, 0, locator.dbOid,
+ 										   snapshotConflictHorizon);
++	}
++}
++
++/*
++ * If recovery_pause_on_logical_slot_conflict is enabled, and replay is about
++ * to apply a catalog PRUNE_ON_ACCESS record whose snapshotConflictHorizon
++ * would cause the invalidation of at least one non-invalidated logical slot
++ * in the same database, request a recovery pause and wait on the recovery
++ * pause condition variable until an operator resumes.
++ *
++ * On resume the caller re-falls through to InvalidateObsoleteReplicationSlots:
++ * if the operator has drained / dropped / advanced the slot, invalidation is
++ * a no-op; if they chose to resume without acting, the slot is invalidated
++ * as usual. This matches the recovery_target_action=pause precedent.
++ *
++ * Only invoked from ResolveRecoveryConflictWithSnapshot(), before any buffer
++ * locks are taken, so pausing here does not deadlock with anything.
++ */
++void
++MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon)
++{
++	int			i;
++	bool		would_invalidate = false;
++
++	if (!recovery_pause_on_logical_slot_conflict)
++		return;
++	if (!TransactionIdIsValid(snapshotConflictHorizon))
++		return;
++
++	/*
++	 * Scan for a would-be-invalidated slot in the conflicting database.
++	 *
++	 * Skip slots that have not yet reached snapshot-builder consistency
++	 * (effective_catalog_xmin is still InvalidTransactionId). An in-progress
++	 * slot has not produced any output to a consumer, so invalidating it is
++	 * harmless — the caller can retry. Pausing for such a slot would
++	 * deadlock: DecodingContextFindStartpoint would be waiting for replay
++	 * to advance, while replay would be waiting for the slot to be drained.
++	 */
++	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
++	for (i = 0; i < max_replication_slots; i++)
++	{
++		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
++		Oid			slot_db;
++		TransactionId slot_xmin;
++		TransactionId slot_effective_xmin;
++		bool		active_logical;
++
++		if (!s->in_use)
++			continue;
++
++		SpinLockAcquire(&s->mutex);
++		slot_db = s->data.database;
++		slot_xmin = s->data.catalog_xmin;
++		slot_effective_xmin = s->effective_catalog_xmin;
++		active_logical = (s->data.invalidated == RS_INVAL_NONE &&
++						  slot_db != InvalidOid &&
++						  TransactionIdIsValid(slot_effective_xmin));
++		SpinLockRelease(&s->mutex);
++
++		if (!active_logical)
++			continue;
++		if (slot_db != dboid)
++			continue;
++		if (!TransactionIdIsValid(slot_xmin))
++			continue;
++		/*
++		 * Use PrecedesOrEquals (not Precedes) to match the check in
++		 * DetermineSlotInvalidationCause. Otherwise a slot whose
++		 * catalog_xmin was just advanced to exactly conflict_horizon by
++		 * a previous pause-and-advance cycle (our own resume code) will
++		 * NOT trigger a pause here when the next prune record arrives
++		 * with horizon == catalog_xmin, yet WILL still be invalidated
++		 * by the fall-through InvalidateObsoleteReplicationSlots call.
++		 */
++		if (TransactionIdPrecedesOrEquals(slot_xmin, snapshotConflictHorizon))
++		{
++			would_invalidate = true;
++			break;
++		}
++	}
++	LWLockRelease(ReplicationSlotControlLock);
++
++	if (!would_invalidate)
++		return;
++
++	ereport(LOG,
++			(errmsg("recovery paused: WAL redo at %X/%X would invalidate a logical replication slot",
++					LSN_FORMAT_ARGS(GetXLogReplayRecPtr(NULL))),
++			 errdetail("snapshotConflictHorizon %u exceeds catalog_xmin of at least one active logical slot in database %u.",
++					   snapshotConflictHorizon, dboid),
++			 errhint("Drain, advance, or drop the slot, then execute pg_wal_replay_resume().")));
++
++	SetRecoveryPause(true);
++
++	while (GetRecoveryPauseState() != RECOVERY_NOT_PAUSED)
++	{
++		ProcessStartupProcInterrupts();
++		/*
++		 * Promote RECOVERY_PAUSE_REQUESTED to RECOVERY_PAUSED so that
++		 * observers (pg_get_wal_replay_pause_state() / monitoring) see the
++		 * pause as actually taken, not just requested.
++		 */
++		ConfirmRecoveryPaused();
++		ConditionVariableTimedSleep(&XLogRecoveryCtl->recoveryNotPausedCV,
++									1000, WAIT_EVENT_RECOVERY_PAUSE);
++	}
++	ConditionVariableCancelSleep();
++
++	/*
++	 * Operator has resumed. If they drained slot(s) up to (or past) the LSN
++	 * of the about-to-be-replayed conflict record, we trust that the consumer
++	 * downstream has captured everything that needed the pre-conflict catalog
++	 * snapshot. Advance those slots' catalog_xmin past the horizon so the
++	 * subsequent InvalidateObsoleteReplicationSlots() fall-through is a
++	 * no-op. Slots that the operator did NOT drain are left alone and get
++	 * invalidated normally — that is the "I didn't act, just let the slot
++	 * die" path.
++	 *
++	 * "Drained past the conflict LSN" is defined as: the slot's
++	 * confirmed_flush_lsn >= the LSN at which replay has paused, which is
++	 * the current replay position reported by GetXLogReplayRecPtr.
++	 */
++	{
++		XLogRecPtr	conflict_lsn = GetXLogReplayRecPtr(NULL);
++		int			j;
++
++		LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
++		for (j = 0; j < max_replication_slots; j++)
++		{
++			ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[j];
++			bool		advance;
++
++			if (!s->in_use)
++				continue;
++
++			SpinLockAcquire(&s->mutex);
++			advance = (s->data.invalidated == RS_INVAL_NONE &&
++					   s->data.database == dboid &&
++					   s->data.confirmed_flush >= conflict_lsn &&
++					   ((TransactionIdIsValid(s->data.catalog_xmin) &&
++						 TransactionIdPrecedesOrEquals(s->data.catalog_xmin,
++													   snapshotConflictHorizon)) ||
++						(TransactionIdIsValid(s->data.xmin) &&
++						 TransactionIdPrecedesOrEquals(s->data.xmin,
++													   snapshotConflictHorizon))));
++			if (advance)
++			{
++				TransactionId new_xmin = snapshotConflictHorizon;
++
++				TransactionIdAdvance(new_xmin);	/* strictly > horizon */
++				if (TransactionIdIsValid(s->data.catalog_xmin) &&
++					TransactionIdPrecedesOrEquals(s->data.catalog_xmin,
++												  snapshotConflictHorizon))
++				{
++					s->data.catalog_xmin = new_xmin;
++					s->effective_catalog_xmin = new_xmin;
++				}
++				if (TransactionIdIsValid(s->data.xmin) &&
++					TransactionIdPrecedesOrEquals(s->data.xmin,
++												  snapshotConflictHorizon))
++				{
++					s->data.xmin = new_xmin;
++					s->effective_xmin = new_xmin;
++				}
++				s->just_dirtied = true;
++				s->dirty = true;
++			}
++			SpinLockRelease(&s->mutex);
++
++			if (advance)
++				ereport(LOG,
++						(errmsg("advanced catalog_xmin of logical slot \"%s\" past conflict horizon %u",
++								NameStr(s->data.name), snapshotConflictHorizon),
++						 errdetail("Slot's confirmed_flush_lsn %X/%X reached the conflict record at %X/%X; operator drained before resuming.",
++								   LSN_FORMAT_ARGS(s->data.confirmed_flush),
++								   LSN_FORMAT_ARGS(conflict_lsn))));
++		}
++		LWLockRelease(ReplicationSlotControlLock);
++	}
+ }
+ 
+ /*
+diff --git a/src/backend/utils/misc/guc_parameters.dat b/src/backend/utils/misc/guc_parameters.dat
+index 83af594d4af..165e69ca90f 100644
+--- a/src/backend/utils/misc/guc_parameters.dat
++++ b/src/backend/utils/misc/guc_parameters.dat
+@@ -2440,6 +2440,14 @@
+   max => 'INT_MAX',
+ },
+ 
++{ name => 'recovery_pause_on_logical_slot_conflict', type => 'bool',
++  context => 'PGC_SIGHUP', group => 'REPLICATION_STANDBY',
++  short_desc => 'Pauses recovery instead of invalidating an active logical slot on catalog conflict.',
++  long_desc => 'When WAL replay on a standby is about to invalidate a logical replication slot because a catalog PRUNE_ON_ACCESS record has overtaken the slot\'s catalog_xmin, pause recovery instead. The operator can then drain or drop the slot and call pg_wal_replay_resume() to continue.',
++  variable => 'recovery_pause_on_logical_slot_conflict',
++  boot_val => 'false',
++},
++
+ { name => 'recovery_prefetch', type => 'enum', context => 'PGC_SIGHUP', group => 'WAL_RECOVERY',
+   short_desc => 'Prefetch referenced blocks during recovery.',
+   long_desc => 'Look ahead in the WAL to find references to uncached data.',
+diff --git a/src/backend/utils/misc/postgresql.conf.sample b/src/backend/utils/misc/postgresql.conf.sample
+index ac38cddaaf9..17b2bcc4df8 100644
+--- a/src/backend/utils/misc/postgresql.conf.sample
++++ b/src/backend/utils/misc/postgresql.conf.sample
+@@ -403,6 +403,8 @@
+ #wal_retrieve_retry_interval = 5s       # time to wait before retrying to
+                                         # retrieve WAL after a failed attempt
+ #recovery_min_apply_delay = 0           # minimum delay for applying changes during recovery
++#recovery_pause_on_logical_slot_conflict = off  # pause recovery instead of invalidating
++                                        # a logical slot on catalog conflict
+ #sync_replication_slots = off           # enables slot synchronization on the physical standby from the primary
+ 
+ # - Subscribers -
+diff --git a/src/include/access/xlogrecovery.h b/src/include/access/xlogrecovery.h
+index ba7750dca0b..08c8342a49b 100644
+--- a/src/include/access/xlogrecovery.h
++++ b/src/include/access/xlogrecovery.h
+@@ -129,6 +129,7 @@ extern PGDLLIMPORT XLogRecoveryCtlData *XLogRecoveryCtl;
+ extern PGDLLIMPORT bool recoveryTargetInclusive;
+ extern PGDLLIMPORT int recoveryTargetAction;
+ extern PGDLLIMPORT int recovery_min_apply_delay;
++extern PGDLLIMPORT bool recovery_pause_on_logical_slot_conflict;
+ extern PGDLLIMPORT char *PrimaryConnInfo;
+ extern PGDLLIMPORT char *PrimarySlotName;
+ extern PGDLLIMPORT char *recoveryRestoreCommand;
+@@ -213,6 +214,7 @@ extern bool HotStandbyActive(void);
+ extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID *replayTLI);
+ extern RecoveryPauseState GetRecoveryPauseState(void);
+ extern void SetRecoveryPause(bool recoveryPause);
++extern void ConfirmRecoveryPaused(void);
+ extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
+ extern TimestampTz GetLatestXTime(void);
+ extern TimestampTz GetCurrentChunkReplayStartTime(void);
+diff --git a/src/include/storage/standby.h b/src/include/storage/standby.h
+index 8715c08e94f..510d1d57e1c 100644
+--- a/src/include/storage/standby.h
++++ b/src/include/storage/standby.h
+@@ -75,6 +75,8 @@ extern void ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHo
+ extern void ResolveRecoveryConflictWithSnapshotFullXid(FullTransactionId snapshotConflictHorizon,
+ 													   bool isCatalogRel,
+ 													   RelFileLocator locator);
++extern void MaybePauseOnLogicalSlotConflict(Oid dboid,
++											TransactionId snapshotConflictHorizon);
+ extern void ResolveRecoveryConflictWithTablespace(Oid tsid);
+ extern void ResolveRecoveryConflictWithDatabase(Oid dbid);
+ 
+-- 
+2.43.0
+
