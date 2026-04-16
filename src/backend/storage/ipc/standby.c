@@ -565,9 +565,18 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		slot_db = s->data.database;
 		slot_xmin = s->data.catalog_xmin;
 		slot_effective_xmin = s->effective_catalog_xmin;
+		/*
+		 * Skip synced slots (managed by the slot-sync worker per
+		 * sync_replication_slots). Writing their fields from the startup
+		 * process would race with the slot-sync worker's own updates, and
+		 * the operator-facing "drain or drop the slot" recipe in the
+		 * errhint below cannot be applied to a synced slot (ALTER /
+		 * DROP_REPLICATION_SLOT error on synced).
+		 */
 		active_logical = (s->data.invalidated == RS_INVAL_NONE &&
 						  slot_db != InvalidOid &&
-						  TransactionIdIsValid(slot_effective_xmin));
+						  TransactionIdIsValid(slot_effective_xmin) &&
+						  !s->data.synced);
 		SpinLockRelease(&s->mutex);
 
 		if (!active_logical)
@@ -608,6 +617,19 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 	while (GetRecoveryPauseState() != RECOVERY_NOT_PAUSED)
 	{
 		ProcessStartupProcInterrupts();
+
+		/*
+		 * If the operator gave up on the slot and triggered a promotion
+		 * instead, bail out of the wait so the startup process can proceed
+		 * with the promotion path. Without this, pg_promote() stalls until
+		 * someone also calls pg_wal_replay_resume() — a UX hazard.
+		 */
+		if (PromoteIsTriggered())
+		{
+			ConditionVariableCancelSleep();
+			return;
+		}
+
 		/*
 		 * Promote RECOVERY_PAUSE_REQUESTED to RECOVERY_PAUSED so that
 		 * observers (pg_get_wal_replay_pause_state() / monitoring) see the
@@ -647,8 +669,13 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 				continue;
 
 			SpinLockAcquire(&s->mutex);
+			/*
+			 * Skip synced slots — same reason as in the pause-check scan.
+			 * Writing their fields would race the slot-sync worker.
+			 */
 			advance = (s->data.invalidated == RS_INVAL_NONE &&
 					   s->data.database == dboid &&
+					   !s->data.synced &&
 					   s->data.confirmed_flush >= conflict_lsn &&
 					   ((TransactionIdIsValid(s->data.catalog_xmin) &&
 						 TransactionIdPrecedesOrEquals(s->data.catalog_xmin,
@@ -689,6 +716,19 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 								   LSN_FORMAT_ARGS(conflict_lsn))));
 		}
 		LWLockRelease(ReplicationSlotControlLock);
+
+		/*
+		 * NOTE: the advance above only marks the slot dirty; it is persisted
+		 * to disk at the next restartpoint. If the standby crashes between
+		 * here and the next restartpoint, the on-disk catalog_xmin is the
+		 * pre-advance value, and on recovery restart we re-encounter the
+		 * same conflict record, re-pause, and the operator re-drains. No
+		 * data loss — the drain is idempotent for the same slot state — but
+		 * an operator-visible hiccup. A future iteration could tighten this
+		 * by calling SaveSlotToPath directly; SaveSlotToPath is currently
+		 * static in slot.c and not trivially callable from the startup
+		 * process (no MyReplicationSlot).
+		 */
 	}
 }
 
