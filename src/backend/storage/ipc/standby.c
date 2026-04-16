@@ -576,7 +576,16 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 			continue;
 		if (!TransactionIdIsValid(slot_xmin))
 			continue;
-		if (TransactionIdPrecedes(slot_xmin, snapshotConflictHorizon))
+		/*
+		 * Use PrecedesOrEquals (not Precedes) to match the check in
+		 * DetermineSlotInvalidationCause. Otherwise a slot whose
+		 * catalog_xmin was just advanced to exactly conflict_horizon by
+		 * a previous pause-and-advance cycle (our own resume code) will
+		 * NOT trigger a pause here when the next prune record arrives
+		 * with horizon == catalog_xmin, yet WILL still be invalidated
+		 * by the fall-through InvalidateObsoleteReplicationSlots call.
+		 */
+		if (TransactionIdPrecedesOrEquals(slot_xmin, snapshotConflictHorizon))
 		{
 			would_invalidate = true;
 			break;
