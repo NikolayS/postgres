@@ -24,8 +24,11 @@
 #include "access/xlogutils.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "postmaster/startup.h"
 #include "replication/slot.h"
+#include "storage/condition_variable.h"
 #include "storage/bufmgr.h"
+#include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/sinvaladt.h"
@@ -503,8 +506,91 @@ ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHorizon,
 	 * reached, e.g. due to using a physical replication slot.
 	 */
 	if (IsLogicalDecodingEnabled() && isCatalogRel)
+	{
+		MaybePauseOnLogicalSlotConflict(locator.dbOid, snapshotConflictHorizon);
 		InvalidateObsoleteReplicationSlots(RS_INVAL_HORIZON, 0, locator.dbOid,
 										   snapshotConflictHorizon);
+	}
+}
+
+/*
+ * If recovery_pause_on_logical_slot_conflict is enabled, and replay is about
+ * to apply a catalog PRUNE_ON_ACCESS record whose snapshotConflictHorizon
+ * would cause the invalidation of at least one non-invalidated logical slot
+ * in the same database, request a recovery pause and wait on the recovery
+ * pause condition variable until an operator resumes.
+ *
+ * On resume the caller re-falls through to InvalidateObsoleteReplicationSlots:
+ * if the operator has drained / dropped / advanced the slot, invalidation is
+ * a no-op; if they chose to resume without acting, the slot is invalidated
+ * as usual. This matches the recovery_target_action=pause precedent.
+ *
+ * Only invoked from ResolveRecoveryConflictWithSnapshot(), before any buffer
+ * locks are taken, so pausing here does not deadlock with anything.
+ */
+void
+MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon)
+{
+	int			i;
+	bool		would_invalidate = false;
+
+	if (!recovery_pause_on_logical_slot_conflict)
+		return;
+	if (!TransactionIdIsValid(snapshotConflictHorizon))
+		return;
+
+	/* Scan for a would-be-invalidated slot in the conflicting database. */
+	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+		Oid			slot_db;
+		TransactionId slot_xmin;
+		bool		active_logical;
+
+		if (!s->in_use)
+			continue;
+
+		SpinLockAcquire(&s->mutex);
+		slot_db = s->data.database;
+		slot_xmin = s->data.catalog_xmin;
+		active_logical = (s->data.invalidated == RS_INVAL_NONE &&
+						  slot_db != InvalidOid);
+		SpinLockRelease(&s->mutex);
+
+		if (!active_logical)
+			continue;
+		if (slot_db != dboid)
+			continue;
+		if (!TransactionIdIsValid(slot_xmin))
+			continue;
+		if (TransactionIdPrecedes(slot_xmin, snapshotConflictHorizon))
+		{
+			would_invalidate = true;
+			break;
+		}
+	}
+	LWLockRelease(ReplicationSlotControlLock);
+
+	if (!would_invalidate)
+		return;
+
+	ereport(LOG,
+			(errmsg("recovery paused: WAL redo at %X/%X would invalidate a logical replication slot",
+					LSN_FORMAT_ARGS(GetXLogReplayRecPtr(NULL))),
+			 errdetail("snapshotConflictHorizon %u exceeds catalog_xmin of at least one active logical slot in database %u.",
+					   snapshotConflictHorizon, dboid),
+			 errhint("Drain, advance, or drop the slot, then execute pg_wal_replay_resume().")));
+
+	SetRecoveryPause(true);
+
+	while (GetRecoveryPauseState() != RECOVERY_NOT_PAUSED)
+	{
+		ProcessStartupProcInterrupts();
+		ConditionVariableTimedSleep(&XLogRecoveryCtl->recoveryNotPausedCV,
+									1000, WAIT_EVENT_RECOVERY_PAUSE);
+	}
+	ConditionVariableCancelSleep();
 }
 
 /*
