@@ -31,6 +31,7 @@ AI-authored under [@NikolayS](https://github.com/NikolayS)'s direction; architec
 | 0.5     | 2026-04-19 | Pre-Sprint-0 cleanup addressing round-4 review convergence. **Must-fix-before-Sprint-0:** (a) Sprint 0 day budget reconciled — tasks sum to 11.5d (excluding contingent S0-8) or 14.5d (including it); Sprint 0 budget extended from 2 weeks → 3 weeks on the Gantt; S0-9 findings write-up budget bumped 1d → 2d; Sprint 1 start pushed by 1 week, total PoC timeline now ~9 weeks; (b) US-4 acceptance criteria rewritten around the "pause-at-LSN, run user-supplied hook, advance, repeat" framing that actually reflects US-4's value, replacing the narrower amcheck-between-batches description that v0.4's justification had already superseded; (c) Outcome A's "US-4 keep-or-cut decision still open" bullet corrected to "US-4 in scope per v0.4 retention" — v0.4 changelog and §7.0.2 were contradicting each other; (d) S0-9's deliverable reference corrected from "v0.4" (which is this revision's predecessor, pre-Sprint-0) to "v0.6 findings appendix (post-Sprint-0)"; (e) US-4 header "EXPERIMENTAL" all-caps tag removed — it reads as "speculative, may be cut," which is exactly the opposite of the v0.4 retention. Replaced with a softer "coarse-grained by design, per-record stepping is future work" note in the body. **Also fixed:** (f) G1 failure-interpretation matrix row rewritten to drop the `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` retry-model phrasing (contradicts v0.3's blocking model); new wording: "slot creation never reaches consistency before statement_timeout despite snapshot forcing and replay progress"; (g) §4.1.4 risk 3 (`pg_wal` overflow when consumer stalls) explicitly flagged as "deferred to Sprint 1 with monitoring + thresholds" rather than waved through as "operationally acceptable"; (h) changelog v0.4 entry's defensive tone around US-4 not altered (historical) but v0.5 references §2 US-4 for reasoning instead of re-arguing. **Genuinely-deferred-to-v0.6+:** archive-continuity full-sequence scan (§4.4.1 improvement); CLI `--from-time` → LSN resolution policy; PG18-for-Sprint-0 switch (already decided in v0.3 via the "single PG version, likely PG17" language — revisit if `pg_logicalinspect` observability proves load-bearing during G1 debugging). These remain known issues, not "etc." |
 | 0.6     | 2026-04-19 | **Sprint 0 executed** on a lab VM (PG18 + PG17 cross-validated) instead of waiting for a team. All four gates resolved with full raw evidence. See new **§10 Sprint 0 Execution Findings**. Key outcomes: **G1 PASS, G2 PASS, G3 FAILS** reliably under any autovacuum workload (MTTI 30–126s, deterministic in ~3s with `VACUUM pg_statistic`), **G4 PASS**. **Major recipe correction in §2 US-2:** the v0.5 `recovery_target_lsn + pause + create slot` recipe **does not work** — slot creation on a paused standby blocks snapbuild. The working recipe is gated-archive: pre-stage archive segments up to but NOT including the segment containing a quiet-moment `pg_log_standby_snapshot()` record, start standby, launch slot creation (blocks), release the snapshot's segment — snapbuild reads the path-(a) running_xacts forward from `restart_lsn` and hits `SNAPBUILD_CONSISTENT` immediately. **Works with primary DEAD** during recovery provided production has recorded periodic quiet-moment snapshots. Production-side prerequisite now documented in §2 US-2 and §11. **§4.2.3 refined:** the "slot-aware replay throttling" core-patch direction has been drafted as a pgsql-hackers RFC with measured MTTI data, exact WAL trigger records, and design rationale addressing performance, execution-context, and argument-availability concerns from earlier reviews; draft lives in GitHub issue [#25](https://github.com/NikolayS/postgres/issues/25) comment thread, ready for human sanity-check before posting. **Outcome determined: Outcome B (forensic-only) is the shipping scope.** US-1 (continuous CDC) requires the core patch; US-2 (windowed extraction) is viable now with the corrected recipe. Three reproducer scripts committed to `/blueprints/repro_*.sh`. |
 | 0.7     | 2026-04-16 | **Post-Sprint-0 follow-ups** from continued issue #25 iteration. **(a)** New static-analysis tool `blueprints/wal_archive_ceiling.sh` validated end-to-end against a real failed-recovery archive — its `--db <oid>` prediction of the invalidation LSN matches the standby's dynamic invalidation exactly (same LSN, same `snapshotConflictHorizon`, same rel/blk). Documented as §10.7. **(b)** US-2 ceiling empirically shown to be controlled by **primary-side** `autovacuum_naptime`, not any standby-side GUC — a 300s window with default autovacuum invalidates at t≈138s, the same workload with `autovacuum_naptime=600s` survives the full 300s and drains 30 413 rows cleanly. Added to §10.2 table and §11.5. **(c)** Per-database specificity of slot invalidation called out: `InvalidatePossiblyObsoleteSlot` check is gated by `slot->data.database`, so catalog prunes in other databases do NOT invalidate the slot. The tool's initial version over-predicted by matching any-DB prunes; fix (commit 3e21eee3e8d) adds `--db <oid>` flag. |
+| 0.8     | 2026-04-16 | **Sprint 1 core patch delivered.** `recovery_pause_on_logical_slot_conflict` GUC implemented end-to-end (§4.2.3 moves from "TBD mechanism" to "shipped prototype"). ~215 lines of C across 5 files; all logic hooks into `ResolveRecoveryConflictWithSnapshot` at `src/backend/storage/ipc/standby.c:505`. **Fixes arc across 5 commits on `blueprint/logical-decoding-archived-wals`:** (1) [2d70df87982](https://github.com/NikolayS/postgres/commit/2d70df87982) initial pause mechanism via existing `SetRecoveryPause` + `recoveryNotPausedCV`; (2) [8a3b95dc0b9](https://github.com/NikolayS/postgres/commit/8a3b95dc0b9) call `ConfirmRecoveryPaused` from our wait loop so `pg_get_wal_replay_pause_state()` returns `paused` not `pause requested`; (3) [8761b6eba4b](https://github.com/NikolayS/postgres/commit/8761b6eba4b) on resume, advance slot's `catalog_xmin` past the conflict horizon if operator drained to the conflict LSN (using `TransactionIdAdvance` for horizon+1 semantics); (4) [bbd5d4e13bc](https://github.com/NikolayS/postgres/commit/bbd5d4e13bc) skip slots where `effective_catalog_xmin` is `InvalidTransactionId` (not-yet-consistent) to avoid deadlock with `DecodingContextFindStartpoint`; (5) [7d160949d87](https://github.com/NikolayS/postgres/commit/7d160949d87) use `TransactionIdPrecedesOrEquals` in pause check to match the invalidation-side semantics in `DetermineSlotInvalidationCause` (off-by-one previously caused one-prune-late invalidation). **TAP test lands passing** (`src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl`, 5/5 assertions, 36s runtime; two-phase flow: Phase 1 quiet-archive slot creation, Phase 2 primary catalog churn + orchestrator drain/resume loop). **Regression sweep clean** across 102 existing tests including `006_logical_decoding`, `010_logical_decoding_timelines`, `019_replslot_limit`, `028_pitr_timelines`, `038_save_logical_slots_shutdown`, `040_standby_failover_slots_sync` (PG18 synced slots), `contrib/test_decoding/sql/*` (14/14). Hot-path overhead when GUC off: single boolean check at top of `MaybePauseOnLogicalSlotConflict`. **Outcome upgrade: A (continuous US-1 viable) is now the shipping scope.** Dead-primary US-1 demo at `/tmp/us1_v2.sh` on lab VM: 45 469 decoded events = 3 × 15 153 primary INSERTs (100% coverage), 2 pause events handled, slot `wal_status=reserved`. US-2 ceiling lifted completely — no longer bounded by primary `autovacuum_naptime`. Outcome B section retained for operators running unpatched PG18/PG17 but §7.0.2 now states A is the primary outcome. Future Work §8.1 ("Core patch: slot-aware replay throttling") converted from "problem statement on pgsql-hackers after PoC" to "post patch to pgsql-hackers for review." |
 
 ---
 
@@ -1055,4 +1056,77 @@ or equivalently, schedule autovacuum suppression on catalog relations for the pl
 **Validated:** §10.2 rows "v0.7 300s ceiling (baseline)" vs "v0.7 300s ceiling (tuned primary)" — identical workload, the only difference being `autovacuum_naptime`. With 60s default → invalidation at t≈138s; with 600s → survived the full 300s window.
 
 **Beyond the tuning limit:** arbitrary-window recovery requires the proposed paused-recovery GUC (see §4.2.3 / Future Work §8.1). Until that lands, operators should use `blueprints/wal_archive_ceiling.sh --db <oid>` to discover the actual ceiling of a given archive up-front rather than discovering it mid-incident.
+
+---
+
+## 12. Sprint 1 Core Patch: `recovery_pause_on_logical_slot_conflict` (added in v0.8)
+
+The §4.2.3 / §8.1 "slot-aware replay throttling" direction has been implemented as a 215-line prototype on `blueprint/logical-decoding-archived-wals`. This section documents the shipped mechanism.
+
+### 12.1 What it does
+
+Adds a `PGC_SIGHUP` bool GUC, default off. When enabled, and the WAL replay on a standby is about to apply a record that would invalidate an active logical replication slot in the same database via `RS_INVAL_HORIZON` (a `Heap2/PRUNE_ON_ACCESS` on a catalog relation with `snapshotConflictHorizon >= slot.catalog_xmin`), replay pauses instead.
+
+The operator can then drain the slot via `pg_logical_slot_get_changes` and call `pg_wal_replay_resume()`. On resume, the patch advances the drained slot's `catalog_xmin` past the conflict horizon so the subsequent invalidation call is a no-op; replay continues to the next conflict, and the cycle repeats. Continuous CDC from an archive-only standby becomes viable.
+
+### 12.2 Implementation
+
+Single hook point in `ResolveRecoveryConflictWithSnapshot()` (`src/backend/storage/ipc/standby.c`, line 505):
+
+```c
+if (IsLogicalDecodingEnabled() && isCatalogRel)
+{
+    MaybePauseOnLogicalSlotConflict(locator.dbOid, snapshotConflictHorizon);
+    InvalidateObsoleteReplicationSlots(RS_INVAL_HORIZON, 0, locator.dbOid,
+                                       snapshotConflictHorizon);
+}
+```
+
+`MaybePauseOnLogicalSlotConflict()`:
+
+1. Return early if GUC off.
+2. Scan replication slots under `LW_SHARED` on `ReplicationSlotControlLock`. For each slot in `dboid` that has reached `SNAPBUILD_CONSISTENT` (its `effective_catalog_xmin` is valid) and whose `catalog_xmin` `TransactionIdPrecedesOrEquals` the conflict horizon → `would_invalidate = true`.
+3. If no such slot → return (fall through to normal invalidation, which will also be a no-op for different reasons).
+4. Else `SetRecoveryPause(true)` and wait on `XLogRecoveryCtl->recoveryNotPausedCV` with `ConditionVariableTimedSleep`, calling `ConfirmRecoveryPaused()` each tick so SQL-level observers see `paused` not `pause requested`.
+5. On resume (operator called `pg_wal_replay_resume()`), scan slots again. For each slot in `dboid` with `confirmed_flush_lsn >= current_replay_lsn` and `catalog_xmin <= horizon`, advance `catalog_xmin` and `xmin` (and their `effective_` counterparts) to `TransactionIdAdvance(horizon)` — strictly past the horizon. Mark slot dirty. The fall-through `InvalidateObsoleteReplicationSlots` now finds nothing to invalidate.
+
+### 12.3 Edge cases handled
+
+- **In-progress slot** (still inside `DecodingContextFindStartpoint`): skipped. An in-progress slot has not produced output; invalidation is harmless. Pausing for it would deadlock — snapbuild needs WAL to advance, the pause holds WAL back.
+- **Operator ignores the pause**: fall-through invalidation fires as it would without the GUC. No state corruption, slot is lost.
+- **Off-by-one vs `DetermineSlotInvalidationCause`**: we use `TransactionIdPrecedesOrEquals` in the pause-trigger check to match the invalidation semantics. Without that, a slot whose `catalog_xmin` was just advanced to `horizon+1` by a previous pause would fail to trigger a pause on the next record whose horizon is `horizon+1`, yet would still be invalidated by the fall-through (which uses `PrecedesOrEquals`).
+
+### 12.4 Validation
+
+**TAP test** `src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl` lands passing: 5/5 assertions (GUC registered, slot consistent in clean phase, slot survives prune replay, ≥1 pause handled, ≥2000 decoded events). Two-phase flow so the slot is fully consistent before catalog-prune WAL lands in the archive. ~36s runtime.
+
+**Bash end-to-end demo** `/tmp/us1_v2.sh` on the lab VM: 45 469 decoded events = 3 × 15 153 primary INSERTs (100% coverage), 2 pause events handled, final slot `wal_status=reserved`.
+
+**Regression sweep**: 102 existing tests pass including `006_logical_decoding`, `010_logical_decoding_timelines`, `019_replslot_limit`, `028_pitr_timelines`, `038_save_logical_slots_shutdown`, `040_standby_failover_slots_sync` (PG18 synced slots), and `contrib/test_decoding` (14 SQL + 6 TAP).
+
+### 12.5 Files and lines changed
+
+| File | Lines |
+|---|---|
+| `src/backend/storage/ipc/standby.c` | +158 (new `MaybePauseOnLogicalSlotConflict`) |
+| `src/backend/access/transam/xlogrecovery.c` | +15 (variable declaration + rationale; `ConfirmRecoveryPaused` no longer static) |
+| `src/backend/utils/misc/guc_parameters.dat` | +8 (GUC entry) |
+| `src/backend/utils/misc/postgresql.conf.sample` | +2 (doc line) |
+| `src/include/access/xlogrecovery.h` | +2 (`extern` for variable + `ConfirmRecoveryPaused`) |
+| `src/include/storage/standby.h` | +2 (`MaybePauseOnLogicalSlotConflict` prototype) |
+| `src/test/recovery/t/050_recovery_pause_on_slot_conflict.pl` | +218 (new TAP test) |
+| **Total** | **~215 lines core C + ~218 lines TAP = ~435 lines** |
+
+### 12.6 Remaining work before posting to pgsql-hackers
+
+- Confirm behavior under `--enable-injection-points` build (lab VM build doesn't have it, gating the two invalidation-injecting tests).
+- Add a GUC-off baseline assertion to TAP (currently only exercises GUC-on).
+- Prepare the patch series as `git format-patch -5` with email-ready commit messages.
+- Send to pgsql-hackers with a problem statement that cites this blueprint and issue #25 for the workload / MTTI / ceiling data.
+
+### 12.7 Relationship to blueprint directions
+
+§4.2.3 ("slot-aware replay throttling, mechanism TBD") is now **concrete**. Future Work §8.1 becomes **in-flight**.
+
+Outcome A (continuous US-1 viable) is the shipping scope: unpatched PG is the Outcome B fallback via §2 US-2 / §10.3 gated-archive recipe; patched PG adds arbitrary-window US-1 on top.
 
