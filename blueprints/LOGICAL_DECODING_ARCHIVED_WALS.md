@@ -1,9 +1,9 @@
 # Logical Decoding from Archived WAL — SPEC
 
-**Version:** 0.1  
-**Status:** Draft — awaiting expert review  
-**Date:** 2026-04-15  
-**Author:** @NikolayS  
+**Version:** 0.2  
+**Status:** Draft — post first-round review  
+**Date:** 2026-04-16  
+**Author:** @NikolayS (Nik Samokhvalov)  
 **Contributors:**  
 - @x4m (Andrey Borodin) — main idea generator; architecture ideas from Postgres.tv hacking session  
 - @kirkw (Kirk Wolak) — contributor
@@ -14,7 +14,8 @@
 
 | Version | Date       | Author    | Changes |
 |---------|------------|-----------|---------|
-| 0.1     | 2026-04-15 | @NikolayS | Initial draft. Consolidated ideas from @x4m hacking session + research on PG community history (Craig Ringer 2020, Kukushkin 2025 revival, PG16–19 infrastructure). Three-phase PoC plan. |
+| 0.1     | 2026-04-15 | @NikolayS (Nik Samokhvalov) | Initial draft. Consolidated ideas from @x4m hacking session + research on PG community history (Craig Ringer 2020, Kukushkin 2025 revival, PG16–19 infrastructure). Three-phase PoC plan. |
+| 0.2     | 2026-04-16 | @NikolayS (Nik Samokhvalov) | Address three independent technical reviews. Corrections: (a) `hot_standby_feedback = on` is **not** required on an archive-only standby — it's a standby→primary mechanism and is a silent no-op without a walreceiver; (b) `pg_wal_replay_resume()` does **not** promote a `standby.signal` standby with no `recovery_target*` — the original framing was wrong; (c) the slot only decodes WAL **generated after slot creation** (fundamental `snapbuild` constraint) — US-2 rewritten accordingly; (d) `recovery_target_function` reframed from a semi-designed plpgsql API to "slot-aware replay throttling, mechanism TBD" after @reviewer-3 flagged infeasibility (performance, startup-process execution context, in-flight relmap); (e) Ringer/Kukushkin walsender patch clarified — it solves a complementary problem (walsender fetching archived segments for an existing consumer), not foundational to this PoC. Structural: Sprint 0 redefined as 4 gates (slot create → decode post-creation WAL → survive replay progress → survive restart/resume) budgeted at 2 weeks; slot invalidation elevated to project-level risk; US-4 step-replay marked experimental (the `sleep(0.1)` loop gives batch granularity, not per-record); added test matrix items (streaming large txns, 2PC, subtxn overflow, replica identity variants, TOAST pglz+lz4 mix, restart mid-decode, PG18 sequences); increased S2-2 DDL budget; tightened managed-service positioning from "why needed now" to "strategic upside if providers cooperate"; SQL output caveats in §4.3.1. |
 
 ---
 
@@ -30,7 +31,7 @@ Logical replication in PostgreSQL today has a fundamental coupling problem: the 
 
 2. **No backward reach.** You can only start consuming from slot-creation time onward. There is no "logical point-in-time recovery" — you cannot say "give me all logical changes from last Tuesday." Physical PITR exists; logical PITR does not.
 
-3. **Managed-service lock-in.** Most managed PostgreSQL providers (RDS, Cloud SQL, AlloyDB) don't expose WAL archives or superuser access. If we can logically decode from archived WAL, providers could expose a filtered/sanitized logical stream without granting superuser — unlocking escape hatches and cross-platform replication.
+3. **Managed-service lock-in (strategic upside, not near-term).** Most managed PostgreSQL providers (RDS, Cloud SQL, AlloyDB) don't expose WAL archives or superuser access today. *If* a provider chose to expose WAL archives plus a suitable base backup, this approach would let them offer a filtered/sanitized logical stream without granting superuser. That is a cooperation question, not a technical one — listed here as aspirational, not as an assumption the PoC relies on.
 
 ### What exists today and why it's not enough
 
@@ -67,14 +68,21 @@ WAL records reference relations by `RelFileLocator` (physical file identity), no
 ### US-2: Logical point-in-time recovery
 
 > **As** a developer who accidentally deleted production data at 14:32 UTC,  
-> **I want** to logically decode archived WAL from 14:00 to 14:31  
+> **I want** to logically decode archived WAL between 14:00 and 14:31  
 > **so that** I can extract the exact DML needed to restore the deleted rows — without restoring a full physical cluster to that point.
 
+**Fundamental constraint (added in v0.2):** a logical slot can only decode WAL **generated after the slot was created** — `snapbuild` assembles the historic catalog snapshot starting from the slot-creation LSN; earlier WAL cannot be replayed through the slot. That means US-2 cannot be served by "restore to 14:35 then decode backwards." The correct recipe:
+
+1. Restore the base backup to a point **before** the earliest WAL you want to decode (e.g., 13:59 UTC).
+2. Start recovery with `recovery_target_time = '14:00 UTC'` (or preferably `recovery_target_lsn = <LSN>` — `recovery_target_time` is imprecise; it pauses at the first commit *after* the target) and `recovery_target_action = 'pause'`.
+3. Wait for the standby to pause. Create the logical slot.
+4. Clear the target (or set a new one at 14:31) and resume. Consume changes as they decode.
+
 **Acceptance criteria:**
-- Restore base backup to a temporary standby with `recovery_target_time` set to 14:31 UTC.
-- Create logical slot, consume changes between two LSN/time boundaries.
-- Output contains `DELETE FROM orders WHERE ...` statements (or JSON equivalent) for the affected rows.
-- Manual verification: create a table, insert rows, delete them, archive the WAL. Restore and decode — confirm deleted rows appear in logical output as `DELETE` operations.
+- Follow the 4-step procedure above, using a purpose-chosen base backup predating the decode window.
+- Output for UPDATE/DELETE requires the affected tables have adequate `REPLICA IDENTITY` (DEFAULT with PK, FULL, or USING INDEX). This is a consumer-side caveat, not a tool limitation: on tables without replica identity coverage, UPDATE/DELETE will decode without old-tuple information.
+- Output uses `pgoutput` or a production-grade plugin — **not** `test_decoding`, which has no stability guarantees. The `sql` consumer mode emits SQL *best-effort* and is only safe when plugin + replica identity allow deterministic reconstruction.
+- Manual verification: create a table with a primary key, insert rows, delete them, archive WAL. Restore per the recipe — confirm deleted rows appear in logical output as `DELETE` operations with primary-key identification.
 
 ### US-3: PII-free staging via filtered logical replay
 
@@ -87,16 +95,18 @@ WAL records reference relations by `RelFileLocator` (physical file identity), no
 - The target staging database receives the masked data via logical apply.
 - Manual verification: insert row with `email='secret@example.com'` on production. Confirm staging receives `email='***@***.com'` or equivalent.
 
-### US-4: WAL correctness verification (step-by-step replay)
+### US-4: WAL correctness verification (step-by-step replay) — **EXPERIMENTAL**
 
 > **As** a PostgreSQL core developer,  
-> **I want** to replay WAL one record at a time and run consistency checks after each record  
-> **so that** I can detect bugs where the cluster is temporarily in an inconsistent state between two WAL records.
+> **I want** to replay WAL in small controlled batches and run consistency checks between them  
+> **so that** I can detect bugs where the cluster ends up in an inconsistent state after a burst of replay.
 
-**Acceptance criteria:**
-- An external orchestration script pauses replay, runs `amcheck` or custom verification queries, then advances one record.
-- If inconsistency is detected, the script reports the exact LSN and WAL record type that caused it.
-- Manual verification: replay a known WAL sequence record-by-record, run `SELECT count(*) FROM pg_class` after each step — confirm no errors.
+**Honesty note (v0.2):** true per-record stepping is **not** achievable from user space. `pg_wal_replay_pause()` / `pg_wal_replay_resume()` with a `sleep(N)` between them gives a time-bounded *batch* of replay, not a single record — the startup process may apply 1 or 10,000 records depending on how busy it is during that window. Calling this "step-by-step" is inaccurate and was removed. The coarser "pause → consume → resume" loop is still useful as a debugging aid but is an approximation of the real ask. Real per-record determinism would require a core patch (see §4.2.3); until then, US-4 is **experimental** and should not gate the PoC.
+
+**Acceptance criteria (experimental):**
+- Orchestration script runs a pause → resume-for-N-ms → pause → check loop. Reports replay LSN before/after each iteration and which WAL records were applied in between (via `pg_get_wal_stats()` / walinspect or `pg_waldump`).
+- If a consistency check fails (e.g., `amcheck`), report the LSN range rather than the exact record — the exact-record-pinpoint claim from v0.1 was overstated.
+- Manual verification: replay a known WAL sequence in small batches, run checks after each — confirm the loop completes without false alarms.
 
 ---
 
@@ -152,16 +162,17 @@ This is **Path 2** from the community research ("PITR-based logical decoding / r
 | `pg-wal-logical-decode` (CLI) | Bash + Python | Orchestrator: provisions standby from backup, configures recovery, creates slot, streams changes, tears down. |
 | Decoder Standby | PostgreSQL 16+ | Standard PG instance in recovery mode with `standby.signal`, `restore_command`, `hot_standby = on`. |
 | Consumer library | Python (psycopg2/3) | Connects to standby's logical slot via streaming replication protocol. Applies filters, emits output. |
-| Step-replay controller | Python | For US-4: pauses/resumes replay, runs checks between steps. |
+| Batched-replay controller (US-4, experimental) | Python | Pauses/resumes replay in time-bounded batches, runs checks between batches. Not per-record — see US-4 note. |
 
 ### 3.4 Constraints and limitations (PoC scope)
 
 - **Requires PG16+** (logical decoding on standby).
 - **Requires `wal_level = logical`** on the primary at the time the WAL was generated. PG19's dynamic `wal_level` helps but cannot retroactively decode `replica`-level WAL.
-- **DDL during decode window:** PoC Phase 1 assumes no DDL. Phase 2+ handles DDL by letting the standby's physical replay apply catalog changes naturally — the logical decoder on the standby sees updated catalogs automatically.
+- **Slot only decodes post-creation WAL (fundamental).** A logical slot's `catalog_xmin` horizon is established at slot-creation time; `snapbuild` assembles the historic catalog snapshot going forward from there. You cannot create a slot at time T and decode WAL from T−1hr. To decode a past window, the standby must be rewound (via `recovery_target`) to before that window, the slot created at the rewound position, then replay resumed forward. This is not a quirk — it is how `snapbuild` works. US-2 reflects this.
+- **DDL during decode window:** PoC Phase 1 assumes no DDL. Phase 2+ relies on the standby's physical replay applying catalog changes naturally — the logical decoder on the standby sees updated catalogs automatically. **Caveat:** decoder-side correctness (catalogs update) is separate from consumer-side schema evolution (downstream output format changes). Rewriting DDL (`ALTER TABLE ... TYPE`, `VACUUM FULL`, `CLUSTER`) interacts with historic catalog snapshots in ways that have had core patches shipped as recently as PG17; treat these as high-risk test cases.
 - **Base backup required:** You need a base backup taken before the earliest WAL you want to decode. This is standard for any PITR scenario.
-- **`hot_standby_feedback = on` required** for slot creation on standby.
-- **Risk of slot invalidation:** If recovery reaches a point that would invalidate the logical slot (e.g., catalog changes conflicting with slot's `catalog_xmin`), the slot is invalidated. Phase 2 addresses this with controlled replay.
+- **`hot_standby_feedback` is a no-op here — removed as a requirement.** It is a standby→primary mechanism that operates through the walreceiver connection. On a `restore_command`-only standby there is no walreceiver, so the setting is silently inert. What actually keeps a logical slot's needed catalog tuples alive is the slot's own `catalog_xmin`, enforced by the startup process during replay — nothing else.
+- **Slot invalidation is a project-level risk, not a Phase 2 hardening task.** The moment a logical slot exists, its `catalog_xmin` horizon is pinned. If subsequently-replayed WAL represents "the primary vacuumed catalog tuples whose xmax ≥ slot.catalog_xmin," replay on the standby invalidates the slot (this is conflict resolution, not query cancellation — there is no `hot_standby_feedback` channel back to the primary to hold vacuum off). Whether this can be survived in practice, under what workloads, with what mitigations, is **one of the four Sprint 0 gates** (see §7). If this fails consistently, the PoC remains useful for narrow forensic windows but not as a reusable replication tool.
 
 ---
 
@@ -181,8 +192,12 @@ pg_basebackup -h $PRIMARY -D /tmp/decoder_standby -Fp -Xs -P
 
 # 2. Configure standby
 cat >> /tmp/decoder_standby/postgresql.conf << 'EOF'
-hot_standby = on
-hot_standby_feedback = on
+hot_standby = on               # required — enables read-only connections to query / consume the slot
+# NOTE: hot_standby_feedback deliberately omitted. It is a standby→primary
+#   channel that requires a walreceiver connection; on a restore_command-only
+#   standby there is no walreceiver, so it would be a silent no-op. What
+#   actually protects the slot's needed catalog tuples from vacuum is the
+#   slot's own catalog_xmin, enforced during replay.
 max_wal_senders = 5
 wal_level = logical
 
@@ -190,8 +205,9 @@ wal_level = logical
 restore_command = 'cp /path/to/wal_archive/%f %p'
 # For S3: restore_command = 'wal-g wal-fetch %f %p'
 
-# Recovery behavior
-recovery_target_action = 'pause'
+# IMPORTANT: do NOT set recovery_target* for continuous-decode mode.
+# For US-2 (logical PITR) a target is set transiently to pause before the
+# decode window so the slot can be created; see §4.2 for the correct recipe.
 EOF
 
 # 3. Signal standby mode
@@ -219,27 +235,30 @@ SELECT * FROM pg_logical_slot_peek_changes('archive_decoder', NULL, NULL);
 SELECT * FROM pg_logical_slot_get_changes('archive_decoder', NULL, NULL);
 ```
 
-#### 4.1.3 What to verify
+#### 4.1.3 What to verify (the four Sprint 0 gates)
 
-| Check | Expected | Notes |
-|-------|----------|-------|
-| Standby starts in recovery and reaches hot_standby | Yes | Standard PG behavior |
-| `pg_create_logical_replication_slot()` succeeds | Unknown — **this is the key test** | May fail if recovery hasn't reached CONSISTENT state |
-| `pg_logical_slot_peek_changes()` returns decoded DML | Unknown | May require `pg_log_standby_snapshot()` on primary first |
-| Changes from WAL archives (not just already-replayed WAL) appear | Unknown | Critical: do inserts on primary AFTER standby is set up, wait for archival, confirm they decode |
-| Slot survives continued WAL replay | Unknown | May get invalidated by catalog changes |
+Slot-creation alone is not sufficient evidence that the approach works. Sprint 0 must answer all four:
+
+| Gate | Check | Expected | Notes |
+|------|-------|----------|-------|
+| G1 | `pg_create_logical_replication_slot()` succeeds on an archive-only standby | Should work | Requires `snapbuild` to reach `SNAPBUILD_CONSISTENT`, which requires an `XLOG_RUNNING_XACTS` record plus completion of all xacts listed as running. Primary's bgwriter logs one every ~15s via `LogStandbySnapshot()`, and those records are in the archive. `pg_log_standby_snapshot()` only speeds this up; it is not strictly required. On a quiet system, slot creation can hang for minutes waiting for running xacts to drain — include a dummy write loop on the primary during S0 testing. |
+| G2 | Slot decodes WAL **generated after slot creation** (not just already-replayed WAL) | Unknown — critical | Do inserts on primary AFTER standby is set up and the slot exists, wait for archival, confirm they decode. The "decode historic WAL" reading of v0.1 was wrong; see §3.4 constraint. |
+| G3 | Slot survives continued WAL replay without immediate invalidation | Unknown | Once the slot exists its `catalog_xmin` horizon is pinned. If replay hits vacuum-of-catalog records past that horizon, the slot is invalidated. Mitigation unclear without deeper instrumentation. |
+| G4 | Slot survives restart / pause / resume cycles | Unknown | Kill the standby, restart, verify slot state is sane, no duplicates or gaps on next consume. |
+
+**If G1 works but G2–G4 fail, the PoC scope changes materially** — the tool becomes a forensic-window decoder, not a continuous-replication substrate. That is still useful (US-2 alone is a paying market), but it should be a scope decision made with data, not an assumption.
 
 #### 4.1.4 Known risks and mitigations
 
-1. **Slot creation may fail during recovery.** PG16 docs say logical slot creation on standby requires `pg_log_standby_snapshot()` to be called on the primary. For a pure archive scenario (no primary connection), we need to verify if a regular checkpoint's `xl_running_xacts` suffices, or if we must have called `pg_log_standby_snapshot()` before archiving.
+1. **Slot creation may stall waiting for `SNAPBUILD_CONSISTENT`.** On a quiet primary, several minutes can pass before a fresh `XLOG_RUNNING_XACTS` record plus all its running xacts have drained. Mitigation: during S0, run a lightweight insert loop on the primary with periodic `pg_switch_wal()`. `pg_log_standby_snapshot()` can help but is not strictly required. The orchestrator should catch `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` and retry.
 
-2. **`hot_standby_feedback` normally requires a primary connection.** On a restore_command-only standby, there's no primary to send feedback to. We need to confirm the standby doesn't error out — it may simply skip sending feedback, which is fine (we don't need the primary to retain WAL; we have the archive).
+2. **`catalog_xmin` horizon conflicts invalidate the slot (project-level risk — see §3.4).** There is no `hot_standby_feedback` shield here; the primary has already vacuumed, the WAL record exists, replay will hit it. The only knob we have on the standby side is *when* we apply that WAL — i.e., throttled replay. Whether that's enough in practice is a Sprint 0 gate.
 
-3. **WAL replay may outrun slot consumption.** If the standby replays WAL faster than the consumer reads the slot, the slot may be invalidated. Mitigation: pause replay, consume, resume.
+3. **Archive gaps / missing segments.** `restore_command` failure mid-decode will stall recovery. The standby will keep retrying. The orchestrator needs to detect this (replay LSN not advancing while consumer is waiting) and surface it clearly rather than hanging.
 
 ### 4.2 Phase 2 — Controlled Replay
 
-**Goal:** Prevent slot invalidation and enable step-by-step replay for debugging and controlled consumption.
+**Goal:** Mitigate slot invalidation via coarse-grained pause/consume/resume control, and provide a batched-replay + consistency-check loop as an experimental aid for US-4. (True per-record stepping is not achievable from user space — see US-4 note and §4.2.3.)
 
 #### 4.2.1 External orchestration (no core patch needed)
 
@@ -320,49 +339,40 @@ if __name__ == '__main__':
     main()
 ```
 
-#### 4.2.2 Risks with resume
+#### 4.2.2 Risks with resume (corrected in v0.2)
 
-**Critical issue from @x4m:** `pg_wal_replay_resume()` can promote the standby if recovery reaches the end of available WAL and `standby.signal` conditions aren't met correctly. Mitigations:
+**Previous version of this doc was wrong:** `pg_wal_replay_resume()` does **not** promote a standby running with `standby.signal` and no `recovery_target*`. Such a standby will never auto-promote on its own — if it runs out of WAL in the archive it will keep retrying `restore_command` and sleep. `pg_wal_replay_resume()` simply clears the paused state; it does not change recovery mode or trigger promotion. Promotion in this environment requires one of: explicit `pg_promote()`, a promote trigger file, or hitting a configured `recovery_target_*` with `recovery_target_action = 'promote'`.
 
-- Always use `standby.signal` (never `recovery.signal`).
-- Never set `recovery_target` — let the standby follow indefinitely.
-- Verify behavior: after resume, check `pg_is_in_recovery()` — if it returns `false`, the standby promoted.
+**Real risks to watch:**
 
-#### 4.2.3 Future: function-based recovery target (core patch)
+- **If the operator sets a `recovery_target_*` (for US-2),** then after hitting the target `pg_wal_replay_resume()` will continue past it; depending on `recovery_target_action` that may eventually promote. Rule: for US-2, use `recovery_target_action = 'pause'` (never `'promote'`), and once the slot is created and you resume, clear the target or rely on the absence of further targets to keep the standby following indefinitely.
+- **Use `standby.signal`, never `recovery.signal`** (the latter signals archive-recovery ending at a target; the former signals indefinite standby mode).
+- **Replay granularity is coarse.** The pause/resume cycle with `sleep(N)` does not give per-record control (see US-4 note). If the resumed window contains a catalog-invalidating record, the slot dies before you can consume. This is why "slot-aware replay throttling" matters as a future feature (§4.2.3).
+- **Sanity check after resume:** `pg_is_in_recovery()` should remain `true` — if it ever returns `false`, something (a misconfigured target, an operator command) triggered promotion.
 
-@x4m's vision — a new GUC that generalizes `recovery_min_apply_delay`:
+#### 4.2.3 Future: slot-aware replay throttling (mechanism TBD — core patch territory)
 
-```
-# postgresql.conf
-recovery_target_function = 'myschema.should_apply'
-```
+**Revised in v0.2 after feasibility pushback.**
 
-Function signature (proposed):
+The *need* is concrete: we want the startup process to be able to pause replay before applying a WAL record that would invalidate an existing logical slot's `catalog_xmin`. The PoC provides a coarse approximation via user-space pause/resume, but that loop cannot see the next record about to be applied — by the time we pause, damage may already be done.
 
-```sql
-CREATE FUNCTION myschema.should_apply(
-    lsn          pg_lsn,
-    record_type  text,      -- 'HEAP_INSERT', 'XLOG_COMMIT', 'DDL', etc.
-    relation_oid oid,       -- NULL if not relation-specific
-    xid          xid,
-    is_catalog   boolean    -- true if this modifies a catalog table
-) RETURNS boolean
-LANGUAGE plpgsql AS $$
-BEGIN
-    -- Pause before any catalog-modifying record (prevents slot invalidation)
-    IF is_catalog THEN RETURN false; END IF;
-    RETURN true;
-END;
-$$;
-```
+A v0.1 of this doc proposed a user-defined plpgsql function (`recovery_target_function`) invoked by the startup process per-record. That proposal has serious feasibility problems:
 
-Semantics:
-- Called by the startup process before applying each WAL record.
-- Returns `true` → apply and continue. Returns `false` → pause recovery (like `recovery_target_action = 'pause'`).
-- Resume applies the pending record and calls the function again for the next one.
-- **Never promotes** — this is a replay-control mechanism, not a recovery target in the promote-when-reached sense.
+1. **Performance.** Startup replays WAL at hundreds of MB/s on well-configured systems — commonly >100k records/sec. A plpgsql callback per record is not a 2× slowdown; it's orders of magnitude. Even a C hook would be painful.
+2. **Execution context.** The startup process is not a normal backend. It cannot invoke plpgsql in the usual sense — there is no SPI context available during redo, shared catalog state is mid-flight (being mutated by the very record you would be asking a question about), and invoking a function requires transaction infrastructure the startup process doesn't have. This is why `recovery_min_apply_delay` works by sleeping, not by calling user code.
+3. **Argument availability.** `is_catalog` cannot be cheaply derived — it requires resolving `RelFileLocator` against a relmap, which requires the relmap to be current, which is precisely the kind of state being mutated mid-replay.
 
-This is a **core PostgreSQL patch** — out of scope for PoC but documented here as the north star.
+**Reframed as a need, not a design:**
+
+> We need *some* form of slot-aware replay throttling in the startup process. The user-facing knob should probably be declarative (a mode like "pause if next record would conflict with any active logical slot's catalog_xmin horizon"), driven by data the startup process already has, not by user code.
+
+Concrete shapes worth exploring (not commitments):
+
+- A built-in `recovery_pause_on_logical_conflict` GUC that checks active slot horizons before applying WAL records tagged as vacuum-on-catalog.
+- Per-record classification flags emitted at `XLogInsert` time so startup doesn't pay relmap-resolution costs during redo.
+- A C-level hook (not plpgsql) gated behind a debug/extension interface, for research use only.
+
+This belongs on pgsql-hackers as a problem statement after the PoC demonstrates the need empirically. **Do not depend on this feature in the PoC plan.**
 
 ### 4.3 Phase 3 — Consumer Pipeline
 
@@ -370,12 +380,16 @@ This is a **core PostgreSQL patch** — out of scope for PoC but documented here
 
 #### 4.3.1 Consumer modes
 
-| Mode | Output | Use case |
-|------|--------|----------|
-| `json` | JSONL file, one line per change | Audit trail, analytics ingest |
-| `sql` | SQL statements (INSERT/UPDATE/DELETE) | Logical PITR, migration |
-| `replay` | Apply to target PostgreSQL | PII-free staging, cross-version replication |
-| `kafka` | Kafka producer | CDC pipeline |
+| Mode | Output | Use case | Caveat |
+|------|--------|----------|--------|
+| `json` | JSONL file, one line per change | Audit trail, analytics ingest | — |
+| `sql` | SQL statements (INSERT/UPDATE/DELETE) | Logical PITR, migration | **Best-effort.** UPDATE/DELETE reconstruction requires the source table to have `REPLICA IDENTITY DEFAULT` (with a PK), `FULL`, or `USING INDEX`. On tables without adequate replica identity, old tuples are not present in WAL, so reconstructed UPDATE/DELETE will have no `WHERE` that identifies the row. The consumer must detect and flag this — silently emitting incomplete SQL is not safe. Plugin choice matters: use `pgoutput` (protocol version pinned) or a purpose-built plugin. `test_decoding` is for proving the pipe, not for production semantics. |
+| `replay` | Apply to target PostgreSQL | PII-free staging, cross-version replication | Requires target table schemas to match (or a schema-evolution strategy). |
+| `kafka` | Kafka producer | CDC pipeline | — |
+
+**Plugin policy.** PoC uses `test_decoding` for the Sprint 0 "does the pipe work" gate. All production consumer modes target `pgoutput` with a pinned protocol version. `test_decoding` is a testing tool with no stability guarantees and must not end up in the shipped tool's default path.
+
+**Interface policy.** Consumer connects via the streaming replication protocol for `json`/`replay`/`kafka` modes (proper flush positions, keepalives). The `sql` mode is fine over a regular SQL connection using `pg_logical_slot_get_changes()`. Don't mix: `pg_logical_slot_peek_changes()` does **not** advance the slot but **does** decode — using peek in a hot loop is a backend CPU trap and confuses `confirmed_flush_lsn` bookkeeping.
 
 #### 4.3.2 PII filtering
 
@@ -411,13 +425,15 @@ pg-wal-logical-decode \
 
 Under the hood this:
 1. Copies backup to temp directory.
-2. Configures `restore_command`, `standby.signal`, `hot_standby`, `hot_standby_feedback`.
-3. Starts PostgreSQL on `--pg-port`.
-4. Waits for hot standby.
-5. Creates logical slot.
-6. Runs the pause/consume/resume loop.
-7. Applies filters, writes output.
-8. Tears down standby (if `--cleanup`).
+2. Configures `restore_command`, `standby.signal`, `hot_standby = on` (no `hot_standby_feedback` — see §3.4 / §4.1.1 notes).
+3. For US-2 (PITR): sets `recovery_target_lsn` or `_time` + `recovery_target_action = 'pause'` to land the standby before the decode window.
+4. Starts PostgreSQL on `--pg-port`.
+5. Waits for hot standby.
+6. Creates logical slot at the paused position.
+7. Clears the target (or sets a new end-of-window target) and resumes replay.
+8. Runs the consume loop (and pause/resume throttling if needed).
+9. Applies filters, writes output.
+10. Tears down standby (if `--cleanup`).
 
 ---
 
@@ -434,7 +450,7 @@ We use TDD for the orchestrator and consumer logic. The WAL decode verification 
 | CLI argument parsing & config | **Yes — TDD** | pytest | Validate all flag combinations, error cases. |
 | Orchestrator: standby lifecycle | Integration tests | pytest + Docker | Spins up primary + standby in containers. Not TDD — too slow for red/green cycles. |
 | Core verification: "does the pipe work" | Integration tests | TAP / pg_regress style | The Phase 1 experiment, automated. |
-| Step-replay controller | Integration tests | pytest + Docker | Verify pause/resume/consume cycle. |
+| Batched-replay controller (experimental) | Integration tests | pytest + Docker | Verify pause/resume/consume cycle holds across multiple iterations. |
 | Slot invalidation scenarios | Integration tests | pytest + Docker | DDL on primary, verify standby behavior. |
 
 ### 5.2 CI test matrix
@@ -496,6 +512,71 @@ test-matrix:
         - 5 concurrent sessions inserting to same table
         - archive and decode
       pass: all rows present, commit ordering preserved
+
+    # --- Added in v0.2 after reviewer feedback ---
+
+    - name: streaming-large-txn
+      desc: "Txn exceeds logical_decoding_work_mem — STREAM START/COMMIT path (PG14+)"
+      steps:
+        - set logical_decoding_work_mem to a small value (e.g., 64kB)
+        - one large txn with tens of thousands of rows
+        - archive and decode via pgoutput with streaming=on
+      pass: streamed changes assemble into correct final state; no data loss
+
+    - name: two-phase-commit
+      desc: "PREPARE TRANSACTION + COMMIT PREPARED decode path"
+      steps:
+        - BEGIN; ... ; PREPARE TRANSACTION 'txn1'
+        - later: COMMIT PREPARED 'txn1'
+        - archive and decode
+      pass: prepared and committed phases both appear correctly
+
+    - name: subtransaction-overflow
+      desc: "Function with >64 savepoints crosses PGPROC_MAX_CACHED_SUBXIDS"
+      steps:
+        - execute a function doing 70+ savepoints with interleaved inserts
+        - archive and decode
+      pass: all rows decoded with correct xid association
+
+    - name: replica-identity-variants
+      desc: "UPDATE/DELETE on tables with DEFAULT (with PK), FULL, USING INDEX, and NOTHING"
+      steps:
+        - 4 tables with each replica identity setting
+        - UPDATE and DELETE rows on each
+        - archive and decode
+      pass: DEFAULT/FULL/USING INDEX produce usable old-tuple info; NOTHING is explicitly flagged as non-reconstructable (consumer must not silently emit broken SQL)
+
+    - name: toast-compression-mix
+      desc: "TOAST values with mix of pglz and lz4 compression (PG14+)"
+      steps:
+        - insert large text values with default compression = pglz
+        - ALTER TABLE ... SET (toast_tuple_target, compression = 'lz4')
+        - insert more large values
+        - archive and decode
+      pass: both compression algorithms decompress correctly
+
+    - name: restart-mid-decode
+      desc: "Kill and restart standby while slot is actively being consumed"
+      steps:
+        - start consuming, SIGKILL standby partway through
+        - restart standby
+        - resume consumption
+      pass: slot state is sane; no duplicates past confirmed_flush_lsn; no gaps before it
+
+    - name: sequence-replication
+      desc: "PG18 logical replication of sequences"
+      steps:
+        - create sequence, call nextval() many times on primary
+        - archive and decode (PG18 only)
+      pass: sequence changes decoded (behavior documented, decoded or skipped, but not silently wrong)
+
+    - name: rewriting-ddl
+      desc: "ALTER TABLE ... TYPE, VACUUM FULL, CLUSTER — historic catalog snapshot stress"
+      steps:
+        - mix inserts with ALTER TABLE ... ALTER COLUMN TYPE
+        - mix inserts with VACUUM FULL / CLUSTER
+        - archive and decode
+      pass: no snapbuild errors; pre- and post-rewrite rows decode correctly with their respective column sets
 ```
 
 ### 5.3 Manual test protocol (for US verification)
@@ -521,24 +602,42 @@ Each user story has a corresponding manual test runbook. These are also automate
 
 ## 7. Implementation Plan
 
-### Sprint 0 — Validate Foundation (1 week)
+### Sprint 0 — Validate Foundation (2 weeks, with early-exit)
 
-**Goal:** Answer the single most important question: does logical slot creation work on a `restore_command`-only standby?
+**Revised in v0.2.** The v0.1 plan treated slot creation as the single gate. It isn't — it's one of four gates (see §4.1.3). Even if slot creation succeeds, the harder questions are whether it decodes newly-restored WAL, whether it survives replay progress, and whether it survives restart cycles. Budget two weeks with an early exit if the answers are clean; if any gate hits an obstacle that requires a `snapbuild.c` / `standby.c` source-level investigation, two weeks is the realistic minimum (not 1–2 days).
+
+**Scope the MVP narrowly** — this is a feasibility experiment, not a product build:
+
+- Single PG version (pick one, likely PG17 for broadest applicability).
+- Local archive directory, not S3 (network variables add noise).
+- `test_decoding` plugin only.
+- One append-only table with a primary key.
+- No DDL during the window.
+- Dummy-write loop on primary during the whole experiment (forces `XLOG_RUNNING_XACTS` records to stream into the archive promptly).
 
 | Task | Owner | Depends on | Days |
 |------|-------|------------|------|
-| S0-1: Set up PG16 primary with `wal_level=logical`, `archive_mode=on`, local archive dir | Internals eng | — | 0.5 |
-| S0-2: Take `pg_basebackup`, create test table, insert rows, force WAL switch, archive | Internals eng | S0-1 | 0.5 |
-| S0-3: Provision standby with `restore_command`, `standby.signal`, `hot_standby=on`, `hot_standby_feedback=on` | Internals eng | S0-2 | 0.5 |
-| S0-4: Attempt `pg_create_logical_replication_slot()` — **this is the gate** | Internals eng | S0-3 | 0.5 |
-| S0-5: If S0-4 fails, investigate: do we need `pg_log_standby_snapshot()` on primary first? Does a checkpoint suffice? What error? | Internals eng | S0-4 | 1 |
-| S0-6: If S0-4 succeeds, consume slot, verify decoded output matches inserted rows | Internals eng | S0-4 | 0.5 |
-| S0-7: Document findings — update this spec with results | All | S0-6 | 0.5 |
+| S0-1: Set up PG17 primary with `wal_level=logical`, `archive_mode=on`, local archive dir, plus a dummy-write + `pg_switch_wal()` loop | Internals eng | — | 0.5 |
+| S0-2: Take `pg_basebackup`, create test table with PK, insert starter rows, force WAL switch, archive | Internals eng | S0-1 | 0.5 |
+| S0-3: Provision standby with `restore_command`, `standby.signal`, `hot_standby=on` (no `hot_standby_feedback`), `recovery_target_action='pause'` (for US-2-style tests), or no target (for continuous) | Internals eng | S0-2 | 0.5 |
+| S0-4 **(Gate 1)**: `pg_create_logical_replication_slot('archive_decoder', 'test_decoding')` succeeds. Orchestrator retries on `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` until `SNAPBUILD_CONSISTENT` is reached | Internals eng | S0-3 | 1 |
+| S0-5 **(Gate 2)**: After slot creation, do fresh inserts on primary, archive, confirm decode. **Critical:** v0.1 implied we could decode WAL from before slot creation — we cannot. Only post-creation WAL is in scope. | Internals eng | S0-4 | 1.5 |
+| S0-6 **(Gate 3)**: Let replay advance with moderate catalog churn (CREATE/DROP on non-test schemas, a manual `VACUUM` on a catalog table if we can provoke it) — does the slot survive? Capture the failure mode if not. | Internals eng | S0-5 | 2 |
+| S0-7 **(Gate 4)**: Restart the standby mid-decode. Resume consumption. Verify no duplicates past `confirmed_flush_lsn` and no gaps before it. | Internals eng | S0-5 | 1 |
+| S0-8: If any gate fails, read `snapbuild.c` / `standby.c` / `slot.c` with debugger; map exact error codes; decide scope | Internals eng | any gate | 3 |
+| S0-9: Write findings section on this spec (v0.3) — for each gate: pass/fail, error codes, what the failure tells us about scope | All | S0-7 | 1 |
 
-**Gate decision:** If S0-4 fails and cannot be worked around, we need to evaluate:
-- Is the issue `hot_standby_feedback` requiring a primary connection? (Likely solvable — feedback is optional for our use case.)
-- Is the issue `snapbuild.c` not reaching CONSISTENT without `xl_running_xacts` from streaming? (May require `pg_log_standby_snapshot()` before archiving.)
-- Is a core patch needed just for slot creation? (Changes scope significantly.)
+**Early-exit rule:** if G1–G4 all pass cleanly by day 5, declare Sprint 0 done and move to Sprint 1. The 2-week budget exists to absorb investigation time if a gate fails in a non-obvious way.
+
+**Gate interpretation matrix** — for each gate, concrete failure symptoms mapped to scope impact:
+
+| Observed failure | Interpretation | Scope impact |
+|------------------|----------------|--------------|
+| G1: slot creation returns `ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE` even after hours of replay | `SNAPBUILD_CONSISTENT` not reachable from archive alone — missing some condition present on streaming standbys | Likely a core patch needed before anything else; PoC pauses |
+| G1: slot creation works but only after `pg_log_standby_snapshot()` on primary at archive time | Dependency on primary cooperation | Tool must document this requirement; acceptable constraint |
+| G2: slot created but no decoded changes for post-creation WAL | Archive replay isn't advancing past slot's LSN (or decoding is silently empty) | Instrumentation / config issue, not scope change |
+| G3: slot invalidated within minutes of replay | Catalog vacuum records invalidate `catalog_xmin` quickly under normal load | Scope shrinks to narrow forensic windows; US-1 continuous use at risk |
+| G4: slot state corrupt after restart | Unexpected; would be a PG bug | Escalate to pgsql-hackers, pause PoC |
 
 ### Sprint 1 — Basic Pipeline (2 weeks)
 
@@ -554,17 +653,19 @@ Each user story has a corresponding manual test runbook. These are also automate
 | S1-6: TDD: output formatters (JSON, SQL) | CLI dev | — | 1 | ∥ with S1-3 |
 | S1-7: CI pipeline — run test matrix on PG16, PG17 | QA | S1-3, S1-4 | 2 | — |
 
-### Sprint 2 — Controlled Replay & Robustness (2 weeks)
+### Sprint 2 — Controlled Replay & Robustness (2.5 weeks)
 
-**Goal:** Handle DDL, prevent slot invalidation, enable step-by-step replay.
+**Goal:** Handle DDL (non-rewriting and rewriting), build a slot-invalidation cookbook, and provide an experimental batched-replay + consistency-check loop (US-4).
 
 | Task | Owner | Depends on | Days | Parallelizable |
 |------|-------|------------|------|----------------|
-| S2-1: Controlled replay script (pause/consume/resume loop) | Internals eng | Sprint 1 ✓ | 3 | — |
-| S2-2: Test: DDL during decode window (ADD COLUMN, DROP COLUMN, ALTER TYPE) | Internals eng | S2-1 | 2 | ∥ with S2-3 |
-| S2-3: Test: slot invalidation scenarios — detect and report gracefully | DBA | S2-1 | 2 | ∥ with S2-2 |
-| S2-4: Step-replay mode with amcheck verification after each record | Internals eng | S2-1 | 3 | — |
-| S2-5: Test: resume-no-promote verification (10+ cycles) | DBA | S2-1 | 1 | ∥ with S2-4 |
+| S2-1: Controlled replay script (pause → consume → resume loop — batch granularity, not per-record; see US-4 correction) | Internals eng | Sprint 1 ✓ | 3 | — |
+| S2-2: Test: DDL during decode window — split into two subtasks | Internals eng | S2-1 | **5** (was 2) | ∥ with S2-3 |
+| &nbsp;&nbsp;S2-2a: Non-rewriting DDL (ADD COLUMN, DROP COLUMN, RENAME) | Internals eng | S2-1 | 2 | — |
+| &nbsp;&nbsp;S2-2b: Rewriting DDL (ALTER TYPE, VACUUM FULL, CLUSTER) — historic catalog snapshot stress; this is where novel risk lives | Internals eng | S2-2a | 3 | — |
+| S2-3: Test: slot invalidation scenarios — detect and report gracefully; build a small invalidation cookbook (which primary ops cause it, on what timescales) | DBA | S2-1 | 3 | ∥ with S2-2 |
+| S2-4: Experimental: controlled-batch replay with amcheck verification between batches (US-4 experimental, not a PoC blocker) | Internals eng | S2-1 | 2 | — |
+| S2-5: Test: resume does not promote — verify `pg_is_in_recovery()` stays `true` across 10+ cycles with no `recovery_target*` set | DBA | S2-1 | 1 | ∥ with S2-4 |
 | S2-6: Integrate PII filter into consumer pipeline | CLI dev | S1-5, S1-6 | 2 | ∥ with S2-1 |
 | S2-7: CLI tool skeleton (`pg-wal-logical-decode` with argument parsing, config loading) | CLI dev | — | 2 | ∥ with S2-1 |
 
@@ -581,18 +682,18 @@ Each user story has a corresponding manual test runbook. These are also automate
 | S3-5: Demo script: end-to-end logical PITR with PII masking | CLI dev | S3-1 | 1 | — |
 | S3-6: Record demo, write blog post draft | All | S3-5 | 2 | — |
 
-### Gantt overview
+### Gantt overview (v0.2 — Sprint 0 expanded to 2 weeks, Sprint 2 to 2.5 weeks)
 
 ```
-Week:     1        2        3        4        5        6        7
-          ├────────┼────────┼────────┼────────┼────────┼────────┤
-Sprint 0: ████████
-Sprint 1:          ████████████████
-Sprint 2:                            ████████████████
-Sprint 3:                                              ██████████
+Week:     1        2        3        4        5        6        7        8
+          ├────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+Sprint 0: ████████████████
+Sprint 1:                  ████████████████
+Sprint 2:                                  ████████████████████
+Sprint 3:                                                      ██████████
 ```
 
-**Total: ~7 weeks to usable PoC.**
+**Total: ~8 weeks to usable PoC** (was ~7; Sprint 0 expanded to absorb investigation time, Sprint 2 expanded for DDL + invalidation testing). If Sprint 0 exits early (all four gates pass cleanly by day 5), revert to the ~7-week timeline.
 
 ---
 
@@ -600,15 +701,17 @@ Sprint 3:                                              ████████�
 
 These are explicitly out of scope for the PoC but documented for roadmap planning:
 
-1. **Core patch: `recovery_target_function`** — @x4m's proposal for function-based recovery target with next-record introspection. RFC for pgsql-hackers.
+1. **Core patch: slot-aware replay throttling** — the revised, reframed version of v0.1's `recovery_target_function` proposal (see §4.2.3). Shape TBD: likely a declarative built-in mode, not user plpgsql. The *need* is pausing replay before applying a WAL record that would invalidate an active logical slot's `catalog_xmin`. Start as a problem statement on pgsql-hackers after the PoC demonstrates the need empirically.
 
-2. **Core patch: walsender `restore_command` integration** — Craig Ringer's 2020 proposal, revived by Kukushkin in 2025. Teach the logical walsender to fetch archived WAL segments when they're missing from `pg_wal`. This solves slot invalidation at the source.
+2. **Core patch: walsender `restore_command` integration — complementary, not foundational.** Craig Ringer's 2020 proposal, revived by Kukushkin in 2025. This patch lets a **primary's walsender** fetch archived segments when a downstream logical replica has fallen behind and the primary has already recycled the segment. It keeps existing logical replication alive across retention gaps. It is **not** the mechanism this PoC uses — we don't run a walsender on the primary at all. The two efforts are complementary (the walsender patch improves robustness of today's logical replication; this PoC decouples replication from the primary entirely) and should not be conflated.
 
 3. **Catalog snapshot export** — Periodically serialize catalog state alongside WAL archives. Enables a true standalone decoder without a running PostgreSQL instance. Multi-year effort.
 
-4. **Integration with DBLab** — Use DBLab Engine's ZFS cloning for instant standby provisioning. Instead of restoring a full backup (slow), clone a thin provision in seconds.
+4. **Integration with DBLab** — Use DBLab Engine's ZFS cloning for instant standby provisioning. Instead of restoring a full backup (slow), clone a thin provision in seconds. If DBLab is available during Sprint 1, pull this forward — it radically accelerates the test matrix.
 
-5. **Managed provider integration** — Work with Supabase, Neon, etc. to expose filtered WAL archives that can be logically decoded without superuser.
+5. **Managed provider integration (aspirational).** If Supabase / Neon / similar chose to expose WAL archives plus a matching base backup, this approach would let them offer a filtered logical stream without granting superuser. This is a cooperation question, not a technical one — listed as strategic upside, not a near-term commitment.
+
+6. **Docs / devrel resourcing.** The 3.5 FTE team composition in §6 has zero allocation for docs, blog posts, conference talks, or the eventual pgsql-hackers RFC. For a tool trying to land in the community, that is a gap. Budget ~1 senior-week of writing time per major milestone (Sprint 0 findings, Sprint 3 launch).
 
 ---
 
