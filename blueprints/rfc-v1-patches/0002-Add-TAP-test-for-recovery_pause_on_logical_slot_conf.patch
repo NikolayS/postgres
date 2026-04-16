@@ -1,6 +1,6 @@
-From ca84bd9a2079e8b2da9ec367dbf8b764261ca3de Mon Sep 17 00:00:00 2001
+From a16bce1f0e95d2540769ab1e3d359f784932b1b7 Mon Sep 17 00:00:00 2001
 From: Nikolay Samokhvalov <nik@postgres.ai>
-Date: Thu, 16 Apr 2026 18:11:48 +0000
+Date: Thu, 16 Apr 2026 18:41:14 +0000
 Subject: [PATCH 2/2] Add TAP test for recovery_pause_on_logical_slot_conflict
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
