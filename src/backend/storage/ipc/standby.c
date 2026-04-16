@@ -597,6 +597,78 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 									1000, WAIT_EVENT_RECOVERY_PAUSE);
 	}
 	ConditionVariableCancelSleep();
+
+	/*
+	 * Operator has resumed. If they drained slot(s) up to (or past) the LSN
+	 * of the about-to-be-replayed conflict record, we trust that the consumer
+	 * downstream has captured everything that needed the pre-conflict catalog
+	 * snapshot. Advance those slots' catalog_xmin past the horizon so the
+	 * subsequent InvalidateObsoleteReplicationSlots() fall-through is a
+	 * no-op. Slots that the operator did NOT drain are left alone and get
+	 * invalidated normally — that is the "I didn't act, just let the slot
+	 * die" path.
+	 *
+	 * "Drained past the conflict LSN" is defined as: the slot's
+	 * confirmed_flush_lsn >= the LSN at which replay has paused, which is
+	 * the current replay position reported by GetXLogReplayRecPtr.
+	 */
+	{
+		XLogRecPtr	conflict_lsn = GetXLogReplayRecPtr(NULL);
+		int			j;
+
+		LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
+		for (j = 0; j < max_replication_slots; j++)
+		{
+			ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[j];
+			bool		advance;
+
+			if (!s->in_use)
+				continue;
+
+			SpinLockAcquire(&s->mutex);
+			advance = (s->data.invalidated == RS_INVAL_NONE &&
+					   s->data.database == dboid &&
+					   s->data.confirmed_flush >= conflict_lsn &&
+					   ((TransactionIdIsValid(s->data.catalog_xmin) &&
+						 TransactionIdPrecedesOrEquals(s->data.catalog_xmin,
+													   snapshotConflictHorizon)) ||
+						(TransactionIdIsValid(s->data.xmin) &&
+						 TransactionIdPrecedesOrEquals(s->data.xmin,
+													   snapshotConflictHorizon))));
+			if (advance)
+			{
+				TransactionId new_xmin = snapshotConflictHorizon;
+
+				TransactionIdAdvance(new_xmin);	/* strictly > horizon */
+				if (TransactionIdIsValid(s->data.catalog_xmin) &&
+					TransactionIdPrecedesOrEquals(s->data.catalog_xmin,
+												  snapshotConflictHorizon))
+				{
+					s->data.catalog_xmin = new_xmin;
+					s->effective_catalog_xmin = new_xmin;
+				}
+				if (TransactionIdIsValid(s->data.xmin) &&
+					TransactionIdPrecedesOrEquals(s->data.xmin,
+												  snapshotConflictHorizon))
+				{
+					s->data.xmin = new_xmin;
+					s->effective_xmin = new_xmin;
+				}
+				s->just_dirtied = true;
+				s->dirty = true;
+			}
+			SpinLockRelease(&s->mutex);
+
+			if (advance)
+				ereport(LOG,
+						(errmsg("advanced catalog_xmin of logical slot \"%s\" past conflict horizon %u",
+								NameStr(s->data.name), snapshotConflictHorizon),
+						 errdetail("Slot's confirmed_flush_lsn %X/%X reached the conflict record at %X/%X; operator drained before resuming.",
+								   LSN_FORMAT_ARGS(s->data.confirmed_flush),
+								   LSN_FORMAT_ARGS(conflict_lsn))));
+		}
+		LWLockRelease(ReplicationSlotControlLock);
+	}
 }
 
 /*
