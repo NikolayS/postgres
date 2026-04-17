@@ -317,6 +317,15 @@ typedef struct XactCallbackItem
 static XactCallbackItem *Xact_callbacks = NULL;
 
 /*
+ * When true, suppress the pg_stat_database xact_commit/xact_rollback bump
+ * for the current transaction end.  Must only be set via
+ * AbortCurrentTransactionWithoutXactStats(); assertions in
+ * StartTransaction() and in the wrapper itself guard against the flag
+ * leaking across transactions.
+ */
+static bool xactSkipXactStats = false;
+
+/*
  * List of add-on start- and end-of-subxact callbacks
  */
 typedef struct SubXactCallbackItem
@@ -2118,6 +2127,7 @@ StartTransaction(void)
 
 	/* check the current transaction state */
 	Assert(s->state == TRANS_DEFAULT);
+	Assert(!xactSkipXactStats);
 
 	/*
 	 * Set the current transaction state information appropriately during
@@ -2514,7 +2524,7 @@ CommitTransaction(void)
 	AtEOXact_Files(true);
 	AtEOXact_ComboCid();
 	AtEOXact_HashTables(true);
-	AtEOXact_PgStat(true, is_parallel_worker);
+	AtEOXact_PgStat(true, is_parallel_worker, true);
 	AtEOXact_Snapshot(true, false);
 	AtEOXact_ApplyLauncher(true);
 	AtEOXact_LogicalRepWorkers(true);
@@ -3039,7 +3049,7 @@ AbortTransaction(void)
 		AtEOXact_Files(false);
 		AtEOXact_ComboCid();
 		AtEOXact_HashTables(false);
-		AtEOXact_PgStat(false, is_parallel_worker);
+		AtEOXact_PgStat(false, is_parallel_worker, !xactSkipXactStats);
 		AtEOXact_ApplyLauncher(false);
 		AtEOXact_LogicalRepWorkers(false);
 		AtEOXact_LogicalCtl();
@@ -3507,6 +3517,31 @@ AbortCurrentTransaction(void)
 	while (!AbortCurrentTransactionInternal())
 	{
 	}
+}
+
+/*
+ * AbortCurrentTransactionWithoutXactStats
+ *
+ * Like AbortCurrentTransaction(), but do not count the transaction abort in
+ * pg_stat_database.xact_rollback.  This is for internal cleanup aborts that
+ * release transaction-local resources but do not represent a user-visible
+ * transaction rollback.
+ */
+void
+AbortCurrentTransactionWithoutXactStats(void)
+{
+	Assert(!xactSkipXactStats);
+
+	xactSkipXactStats = true;
+	PG_TRY();
+	{
+		AbortCurrentTransaction();
+	}
+	PG_FINALLY();
+	{
+		xactSkipXactStats = false;
+	}
+	PG_END_TRY();
 }
 
 /*

@@ -814,7 +814,7 @@ extern PgStat_StatSubEntry *pgstat_fetch_stat_subscription(Oid subid);
  * Functions in pgstat_xact.c
  */
 
-extern void AtEOXact_PgStat(bool isCommit, bool parallel);
+extern void AtEOXact_PgStat(bool isCommit, bool parallel, bool count_xact_stats);
 extern void AtEOSubXact_PgStat(bool isCommit, int nestDepth);
 extern void AtPrepare_PgStat(void);
 extern void PostPrepare_PgStat(void);
