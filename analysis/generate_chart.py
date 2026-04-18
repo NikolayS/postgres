@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(HERE, "commits_by_year_author.txt")
 OUT_PATH = os.path.join(HERE, "top10_activity.png")
+OUT_STACKED_PATH = os.path.join(HERE, "top10_activity_stacked.png")
 CSV_PATH = os.path.join(HERE, "top10_activity.csv")
 
 
@@ -88,7 +89,45 @@ def main() -> None:
 
     fig.tight_layout()
     fig.savefig(OUT_PATH, dpi=150)
+
+    fig2, ax2 = plt.subplots(figsize=(14, 8))
+    series = [
+        [per_author_year[a].get(y, 0) for y in years] for a in top10
+    ]
+    labels = [f"{a} ({author_totals[a]:,})" for a in top10]
+    colors = [cmap(i) for i in range(len(top10))]
+    ax2.stackplot(
+        years,
+        *series,
+        labels=labels,
+        colors=colors,
+        alpha=0.9,
+        edgecolor="black",
+        linewidth=0.3,
+    )
+    ax2.set_title(
+        "PostgreSQL top-10 committers — commits per year (stacked)",
+        fontsize=16,
+        pad=16,
+    )
+    ax2.set_xlabel("Year")
+    ax2.set_ylabel("Commits")
+    ax2.set_xlim(min(years), max(years))
+    ax2.set_ylim(bottom=0)
+    ax2.grid(True, linestyle="--", alpha=0.3)
+    handles, lbls = ax2.get_legend_handles_labels()
+    ax2.legend(
+        handles[::-1],
+        lbls[::-1],
+        loc="upper right",
+        fontsize=9,
+        frameon=False,
+    )
+    fig2.tight_layout()
+    fig2.savefig(OUT_STACKED_PATH, dpi=150)
+
     print(f"wrote {OUT_PATH}")
+    print(f"wrote {OUT_STACKED_PATH}")
     print(f"wrote {CSV_PATH}")
 
 
