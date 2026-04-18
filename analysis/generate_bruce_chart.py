@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(HERE, "bruce_commits.txt")
 
-TOP_N = 8
+TOP_N = 10
 
 
 def parse(path: str) -> list[tuple[int, str, set[str], set[str]]]:
@@ -66,15 +66,48 @@ def parse(path: str) -> list[tuple[int, str, set[str], set[str]]]:
 
 
 CATEGORY_RULES: list[tuple[str, re.Pattern[str]]] = [
-    ("release notes", re.compile(r"relnotes?|release.?notes|pre-release", re.I)),
-    ("pgindent",      re.compile(r"pgindent|reindent|re-indent", re.I)),
-    ("copyright",     re.compile(r"copyright|update.*year", re.I)),
-    ("translation",   re.compile(r"\btranslat|nls\b|gettext", re.I)),
-    ("typo/comment",  re.compile(r"\btypo|spelling|grammar|comment(s|ary)?\b|whitespace|cleanup", re.I)),
-    ("docs",          re.compile(r"\bdoc(s|umentation)?\b|sgml|\bfaq\b", re.I)),
-    ("fix",           re.compile(r"^fix|bug ?fix|\bfix(es|ed)?\b", re.I)),
-    ("revert",        re.compile(r"^revert", re.I)),
-    ("merge",         re.compile(r"^merge ", re.I)),
+    # order matters — first match wins
+    ("release notes",    re.compile(r"relnotes?|release[-. ]?notes|pre-release|major[-. ]features", re.I)),
+    ("pgindent",         re.compile(r"\bpgindent\b|\bre-?indent\b|\breformat\b", re.I)),
+    ("copyright",        re.compile(r"copyright|stamp.*copy|update.*(year|date).*(header|source)", re.I)),
+    ("translation/nls",  re.compile(r"\btranslat|\bnls\b|\bgettext\b|message[- ]?translation|\bpo/|\b[a-z]{2}\.po\b", re.I)),
+    ("TODO list",        re.compile(
+        r"^(add|added|done|update|remove|more|another|new|adjust|mention|move|clarify)[: ]\s*$"
+        r"|^(add|added|done|update|remove|more|another|new|adjust|not done|patch reverted):"
+        r"|\bTODO\s*(list|item|items)?\b"
+        r"|^URL for:"
+        r"|^Another add",
+        re.I,
+    )),
+    ("pg_upgrade",       re.compile(r"\bpg_upgrade\b|\bpg_migrator\b", re.I)),
+    ("win32/port",       re.compile(r"\bwin32\b|\bwindows\b|\bmingw\b|\bcygwin\b|\bmsvc\b|\bport(ability|ing)?\b", re.I)),
+    ("autoconf/build",   re.compile(r"\bautoconf\b|\bautomake\b|\bconfigure\b|\bMakefile\b|build[- ]system|\bccache\b", re.I)),
+    ("revert/backout",   re.compile(r"^revert\b|\bback ?out\b|\bbackout\b|^reverse\s+(?:out\b|number|prior)", re.I)),
+    ("merge",            re.compile(r"^merge ", re.I)),
+    ("typo/comment",     re.compile(r"\btypo\b|spelling|grammar|\bcomment(s|ary)?\b|whitespace", re.I)),
+    ("docs",             re.compile(
+        r"\bdoc(s|ument\w*)?\b|sgml|\bfaq\b|\bmanpage\b|\breadme\b|\bhtml\b"
+        r"|\bclarif\w+|\bmention\b|\bwording\b|\brephras\w+|\bdescription\b",
+        re.I,
+    )),
+    ("fix",              re.compile(r"^fix\b|\bbug[- ]?fix\b|\bfix(es|ed)?\b", re.I)),
+    ("perf/optimize",    re.compile(r"\bperformance\b|\boptimi[sz]\w+\b|\bfaster\b|\bspeed[- ]?up\b", re.I)),
+    ("test",             re.compile(r"^test\b|\bregress(ion)?\b|\bisolation test\b", re.I)),
+    ("cleanup/refactor", re.compile(
+        r"\bcleanup\b|clean[- ]up|\brefactor\b|\breorganiz\w*|\bconsolidat\w+|\bsimplif\w+|\brenam\w+"
+        r"|^move\b|^remove\b|^change\b|^use\b|^mark\b|^adjust\b|^modif\w+",
+        re.I,
+    )),
+    ("feature/change",   re.compile(
+        r"^(add|allow|support|implement|enable|introduc\w+|new|extend|improv\w+"
+        r"|make|have|update|prevent|increase|decrease|reduce|expand|change)\b",
+        re.I,
+    )),
+    ("patch application", re.compile(
+        r"^(attached|here(?:'s)?\b|this\s+(?:patch|change|commit|is)"
+        r"|i\s+(?:have|think|added|added|committed|applied)|>\s|more\b|another\b|new\b)",
+        re.I,
+    )),
 ]
 
 
