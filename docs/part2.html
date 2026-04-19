@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Postgres Decade · Part II — Beyond the Commit Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0B0E14; --ink-2:#111521;
+  --paper:#EDE4D3; --paper-dim:#C9BFA9; --paper-mute:#9A9180;
+  --rule:#2A2A2A; --rule-2:#1c1f27;
+  --c1:#6FB0D9; --c2:#E7B35C; --c3:#D86464; --c4:#7FB185; --c5:#B78CCE;
+  --c6:#D98A4C; --c7:#E0A8B0; --c-other:#8F856E; --grid:#1e222d;
+  --grain-opacity:.08; --grain-blend:overlay;
+}
+html[data-theme="light"]{
+  --ink:#F5EFE1; --ink-2:#EEE6D2;
+  --paper:#1A1612; --paper-dim:#3E372B; --paper-mute:#6E6553;
+  --rule:#D6CCB3; --rule-2:#E3DCC5;
+  --c1:#2B6AA3; --c2:#A36A15; --c3:#9A2E2E; --c4:#3E7B4F; --c5:#6D479A;
+  --c6:#B25A1E; --c7:#7A3B4A; --c-other:#857F72; --grid:#D6CCB3;
+  --grain-opacity:.05; --grain-blend:multiply;
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
+  .reveal,.stagger,.stagger > *{opacity:1!important;transform:none!important}
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ink); color:var(--paper);
+  font-family:"Newsreader", Georgia, serif; font-size:17px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    radial-gradient(ellipse 1200px 600px at 70% -200px, rgba(216,100,100,.06), transparent 60%),
+    radial-gradient(ellipse 900px 420px at 10% 10%, rgba(111,176,217,.05), transparent 70%);
+  background-attachment:fixed;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:1000;
+  opacity:var(--grain-opacity);mix-blend-mode:var(--grain-blend);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.7'/></svg>");
+}
+.wrap{max-width:1280px;margin:0 auto;padding:48px 56px 120px;position:relative;z-index:1}
+.theme-toggle{position:fixed;top:18px;right:22px;z-index:1001;display:flex;gap:0;
+  font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;
+  background:color-mix(in srgb, var(--ink) 70%, transparent);backdrop-filter:blur(6px);
+  border:1px solid var(--rule);border-radius:2px}
+.theme-toggle button{background:transparent;border:0;padding:6px 12px;color:var(--paper-mute);cursor:pointer;letter-spacing:inherit;font:inherit;text-transform:inherit}
+.theme-toggle button[aria-pressed="true"]{color:var(--paper);background:var(--rule-2)}
+.theme-toggle button:focus-visible{outline:2px solid var(--c2);outline-offset:1px}
+.mono{font-family:"JetBrains Mono",monospace;font-size:.78em;letter-spacing:.02em}
+.caps{text-transform:uppercase;letter-spacing:.18em;font-size:.72em;color:var(--paper-mute);font-family:"JetBrains Mono",monospace;font-weight:500}
+.serif-display{font-family:"Fraunces",serif;font-variation-settings:"SOFT" 50,"opsz" 144;letter-spacing:-.02em;line-height:.92}
+/* masthead */
+.masthead{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:24px;padding-bottom:18px;border-bottom:2px solid var(--paper)}
+.masthead .left{text-align:left}
+.masthead .right{text-align:right}
+.masthead .title{font-family:"Fraunces",serif;font-optical-sizing:auto;
+  font-variation-settings:"SOFT" 80,"opsz" 144,"wght" 500;
+  font-size:clamp(32px,5vw,68px);line-height:.88;letter-spacing:-.03em;text-align:center}
+.masthead .title em{font-style:italic;color:var(--c3);font-variation-settings:"SOFT" 100,"opsz" 144,"wght" 400}
+.masthead .title sup{font-family:"JetBrains Mono",monospace;color:var(--c2);font-size:.3em;letter-spacing:.1em;vertical-align:super;font-style:normal;margin-left:.3em}
+.sub-rule{display:flex;justify-content:space-between;align-items:center;padding:10px 0 0;border-top:1px solid var(--rule);margin-top:10px;font-family:"JetBrains Mono",monospace;font-size:.78em;color:var(--paper-mute)}
+.deck{font-family:"Newsreader",serif;font-style:italic;font-size:22px;color:var(--paper-dim);max-width:820px;margin:36px 0 0;line-height:1.4}
+.deck .drop{font-family:"Fraunces",serif;font-style:normal;font-size:72px;line-height:.8;float:left;padding:8px 12px 0 0;color:var(--c3);font-variation-settings:"SOFT" 100,"opsz" 144,"wght" 500}
+section{margin-top:88px;position:relative}
+.section-head{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:end;padding-bottom:14px;border-bottom:1px solid var(--rule)}
+.section-num{font-family:"Fraunces",serif;font-variation-settings:"opsz" 144,"wght" 300;font-size:54px;line-height:.8;color:var(--paper-dim);letter-spacing:-.03em}
+.section-num em{font-style:italic;color:var(--c2);padding-right:6px}
+.section-title{font-family:"Fraunces",serif;font-variation-settings:"SOFT" 60,"opsz" 96,"wght" 600;font-size:clamp(26px,3vw,40px);line-height:1;letter-spacing:-.02em}
+.section-title em{font-style:italic;font-variation-settings:"SOFT" 100,"opsz" 144,"wght" 400;color:var(--c1)}
+.section-kicker{color:var(--paper-mute);text-align:right;font-family:"JetBrains Mono",monospace;font-size:.78em}
+.section-lede{max-width:820px;margin-top:18px;color:var(--paper-dim);font-size:18px}
+.section-lede strong{color:var(--paper);font-weight:600}
+.section-lede em{color:var(--paper)}
+.pull{border-left:2px solid var(--c3);padding:6px 0 6px 18px;font-family:"Fraunces",serif;font-style:italic;font-size:22px;line-height:1.25;color:var(--paper);font-variation-settings:"SOFT" 80,"opsz" 96,"wght" 300;margin-top:28px}
+.annot{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--paper-dim);line-height:1.6}
+.caption{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--paper-mute);letter-spacing:.05em;margin-top:10px;text-transform:uppercase}
+.two-col{display:grid;grid-template-columns:1fr 340px;gap:56px;margin-top:36px;align-items:start}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:44px;margin-top:28px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+hr.rule{border:0;height:1px;background:var(--rule);margin:0}
+
+/* Ribbon disclaimer for affiliation section (key UX note) */
+.disclaimer{border:1px dashed var(--rule);background:color-mix(in srgb, var(--c2) 4%, transparent);padding:14px 18px;margin:22px 0;font-size:14.5px;color:var(--paper-dim);line-height:1.5;border-radius:2px}
+.disclaimer strong{color:var(--c2)}
+
+/* Tables of contents kind of list */
+.bar-row{display:grid;grid-template-columns:26px 1fr 200px 70px;gap:16px;align-items:center;padding:9px 0;border-bottom:1px dashed var(--rule-2)}
+.bar-rank{font-family:"JetBrains Mono",monospace;color:var(--paper-mute);font-size:12px;text-align:right}
+.bar-label{font-family:"Fraunces",serif;font-size:18px;font-variation-settings:"SOFT" 30,"opsz" 72,"wght" 500}
+.bar-label em{font-style:italic;font-family:"Newsreader";font-size:13px;color:var(--paper-dim);margin-left:6px;font-variation-settings:unset}
+.bar-track{height:20px;background:var(--rule-2);border-radius:1px;overflow:hidden;position:relative}
+.bar-fill{height:100%}
+.bar-val{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--paper-dim);text-align:right}
+
+/* Heatmap cell */
+.heat-cell{border:1px solid transparent}
+/* Scroll reveal */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .8s ease, transform .8s ease}
+.reveal.in{opacity:1;transform:none}
+html.no-anim .reveal{opacity:1!important;transform:none!important}
+/* footer */
+footer{margin-top:120px;padding-top:24px;border-top:2px solid var(--paper);font-size:14px;color:var(--paper-dim)}
+footer a{color:var(--c2);text-decoration:none;border-bottom:1px solid rgba(231,179,92,.35)}
+footer a:hover{border-bottom-color:var(--c2)}
+
+.nav-prev{display:inline-block;margin-top:20px;padding:8px 14px;border:1px solid var(--rule);color:var(--paper-dim);font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;text-decoration:none}
+.nav-prev:hover{border-color:var(--c2);color:var(--c2)}
+
+@media (max-width:900px){
+  .wrap{padding:24px 20px 80px}
+  .two-col,.three-col{grid-template-columns:1fr;gap:28px}
+  .masthead{grid-template-columns:1fr;text-align:center}
+}
+</style>
+</head>
+<body>
+<div class="theme-toggle" role="group" aria-label="Theme">
+  <button type="button" data-set-theme="dark" aria-pressed="true">ink</button>
+  <button type="button" data-set-theme="light" aria-pressed="false">paper</button>
+</div>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="left">
+    <div class="caps">Vol. X · № 02</div>
+    <div class="mono" style="color:var(--paper-mute);margin-top:4px">issued 18 apr 2026</div>
+  </div>
+  <h1 class="title">Beyond the <em>commit log</em><sup>II</sup></h1>
+  <div class="right">
+    <div class="caps">A contribution review · part II</div>
+    <div class="mono" style="color:var(--paper-mute);margin-top:4px">five lenses · 2025</div>
+  </div>
+</header>
+<div class="sub-rule">
+  <div>source · git · commitfest.postgresql.org · pgsql-hackers</div>
+  <div>a follow-up to "The Postgres Decade"</div>
+  <div>by <a style="color:inherit;border-bottom:1px solid var(--rule)" href="https://gitlab.com/NikolayS">NikolayS</a></div>
+</div>
+
+<p class="deck"><span class="drop">P</span>art I measured <em>what code landed and who typed it.</em>
+This part asks the questions Robert Haas politely declined to answer:
+<em>who pays the keyboard, where did the patch get stuck, who carries the back-branches,
+and what happens on the list that never becomes a commit.</em></p>
+
+<a class="nav-prev" href="./">← part I · the commit log</a>
+
+<!-- ===== §01 Affiliation ===== -->
+<section id="affiliation">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>01</div>
+    <h2 class="section-title">Who <em>pays the keyboard</em>?</h2>
+    <div class="section-kicker">commit-trailer emails · 2025 · fig 1</div>
+  </div>
+  <p class="section-lede">
+    Robert Haas's dataset intentionally omits employer information. We reconstructed
+    a proxy by parsing <span class="mono">Author:</span> and
+    <span class="mono">Co-Authored-By:</span> trailers from 2025 commit messages
+    on <span class="mono">master</span> — 299 distinct authors, 1,716 credited contributions.
+  </p>
+  <div class="disclaimer">
+    <strong>Caveat:</strong> affiliation is inferred from two sources, roughly equal weight:
+    (1) the <em>domain</em> of the email attached to each trailer, and
+    (2) a best-effort <em>public-knowledge</em> map for contributors using personal
+    addresses (Gmail, Hotmail, etc.). Employment changes faster than commit trailers
+    do; a few mappings may be stale. Where neither signal was confident, the
+    contribution is bucketed as <em>"unmapped / personal"</em>.
+    Treat this as a conversation-starter, not a corporate leaderboard.
+  </div>
+  <div class="two-col" style="grid-template-columns:1fr 1fr;gap:40px">
+    <div>
+      <h3 style="font-family:Fraunces,serif;font-variation-settings:'opsz' 72,'wght' 500;font-size:22px;margin:0 0 10px">By inferred employer</h3>
+      <div id="affil-list"></div>
+      <div class="caption">contributions credited per employer, 2025</div>
+    </div>
+    <div>
+      <h3 style="font-family:Fraunces,serif;font-variation-settings:'opsz' 72,'wght' 500;font-size:22px;margin:0 0 10px">Top 20 individuals</h3>
+      <div id="affil-people"></div>
+      <div class="caption">top-20 credited contributors, with inferred employer chip</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== §02 Code churn ===== -->
+<section id="churn">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>02</div>
+    <h2 class="section-title">Where the <em>patches land</em></h2>
+    <div class="section-kicker">code churn by subdirectory · 2025 · fig 2</div>
+  </div>
+  <p class="section-lede">
+    Insertions + deletions per directory in 2025 on <span class="mono">master</span>,
+    measured from <span class="mono">git log --numstat</span> and bucketed by top-level
+    path. One outlier is kept as a separator: <em>src/backend/po</em> — the single 2025
+    translation-catalog refresh — to show <strong>why Robert's xlines correction
+    matters</strong>.
+  </p>
+  <div class="chart" id="churn-bars" style="margin-top:20px"></div>
+  <div class="caption">bars are linear — total churn (insertions + deletions) per path in 2025</div>
+</section>
+
+<!-- ===== §03 Backports ===== -->
+<section id="backports">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>03</div>
+    <h2 class="section-title">The <em>back-branch shift</em></h2>
+    <div class="section-kicker">commits per release branch · 2025 · fig 3</div>
+  </div>
+  <p class="section-lede">
+    Every bug fix that has to land on older supported releases is a separate commit,
+    cherry-picked by one person. Here's who carries what, in 2025, across the
+    six supported release branches plus <span class="mono">master</span>.
+  </p>
+  <div class="chart" id="backport-stream"></div>
+  <div class="caption">x: release branch (newest → oldest) · y: committer · darker = more commits</div>
+</section>
+
+<!-- ===== §04 Commitfest ===== -->
+<section id="commitfest">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>04</div>
+    <h2 class="section-title">The <em>commitfest funnel</em></h2>
+    <div class="section-kicker">patch lifecycle · 2025-Q1 2026 · fig 4</div>
+  </div>
+  <p class="section-lede">
+    Every official patch submission passes through a 1-month review window called
+    a <em>commitfest</em>. Seven of them ran from January 2025 through early April
+    2026. Most patches don't get committed in the CF they enter — they get
+    <strong>moved</strong> to the next one. Here's the funnel:
+  </p>
+  <div class="chart" id="cf-chart"></div>
+  <div class="caption">each vertical column is one commitfest; heights show patch counts by final status</div>
+</section>
+
+<!-- ===== §05 Thread / list lens ===== -->
+<section id="threads">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>05</div>
+    <h2 class="section-title">Who <em>talks and doesn't ship</em></h2>
+    <div class="section-kicker">pgsql-hackers posters × 2025 commits · fig 5</div>
+  </div>
+  <p class="section-lede">
+    Full thread-graph reconstruction (reply depth, mentorship arcs) needs parsing
+    the mbox archive and is out of scope here — we flag it as
+    <em>"future work"</em> below. As a rough proxy: we cross-tabbed Robert's
+    <span class="mono">hackers_emails_2025</span> posters against 2025 master
+    authorship. The people in <em>the top of the mailing list</em> but the
+    <em>bottom of the commit log</em> are the unsung reviewers, mentors, QA
+    voices, and ops people.
+  </p>
+  <div class="chart" id="talker-chart"></div>
+  <div class="caption">top 40 pgsql-hackers posters in 2025, with their authored-lines bar (log scale)</div>
+</section>
+
+<hr class="rule" style="margin-top:64px">
+
+<!-- Future work -->
+<section id="future" style="margin-top:40px">
+  <div class="section-head">
+    <div class="section-num"><em>№</em>06</div>
+    <h2 class="section-title">Known <em>blind spots</em></h2>
+    <div class="section-kicker">what part III would add</div>
+  </div>
+  <div class="three-col" style="margin-top:24px">
+    <div>
+      <div class="caps">thread reconstruction</div>
+      <p>mbox parse of the full pgsql-hackers archive. Who starts threads, mean reply depth, median response latency per author. Expensive to crawl.</p>
+    </div>
+    <div>
+      <div class="caps">commitfest reviewer graph</div>
+      <p>Who reviews whom, with inferred reciprocity. The CF app has structured reviewer assignments per patch — not scraped here.</p>
+    </div>
+    <div>
+      <div class="caps">affiliation history</div>
+      <p>Same person, different employer, different year. Current mapping flattens to 2025 snapshot.</p>
+    </div>
+    <div>
+      <div class="caps">non-backend contributions</div>
+      <p>Drivers (JDBC, libpq alts), tooling (pgbouncer, PgBadger), extensions (TimescaleDB, Citus) — none in this dataset.</p>
+    </div>
+    <div>
+      <div class="caps">women &amp; first-time contributors</div>
+      <p>The project's diversity signal is nowhere in the commit log. Needs surveys or self-identification.</p>
+    </div>
+    <div>
+      <div class="caps">tenure × throughput over time</div>
+      <p>How long does a new contributor take to become a committer? We have the endpoints but not the arc.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="three-col" style="margin-top:0;gap:32px">
+    <div>
+      <div class="caps">sources</div>
+      <p>Git <span class="mono">master</span> + <span class="mono">REL_13..18_STABLE</span>, shallow-cloned via GitHub mirror.
+        Commitfest state pages at <a href="https://commitfest.postgresql.org/">commitfest.postgresql.org</a>.
+        pgsql-hackers post counts from Robert Haas's <span class="mono">hackers_emails_2025</span> table.</p>
+    </div>
+    <div>
+      <div class="caps">method</div>
+      <p>Author emails extracted from <span class="mono">Author:</span> / <span class="mono">Co-Authored-By:</span> trailers in commit bodies.
+        Subdirectory churn from <span class="mono">git log --numstat</span>.
+        Commitfest patches parsed from per-CF HTML status badges.</p>
+    </div>
+    <div>
+      <div class="caps">colophon</div>
+      <p>Fraunces + Newsreader + JetBrains Mono. Dark / light toggle top-right.
+        Hand-rolled SVG only. Built by <a href="https://gitlab.com/NikolayS">NikolayS</a>.
+        Continued from <a href="./">part I</a>.</p>
+    </div>
+  </div>
+  <hr class="rule" style="margin:32px 0 14px">
+  <div class="mono" style="display:flex;justify-content:space-between;color:var(--paper-mute)">
+    <div>— end of part II —</div>
+    <div>printed ink/paper/terminal · 2026</div>
+  </div>
+</footer>
+
+</div><!-- /wrap -->
+
+<script id="data" type="application/json">{"affiliations2025":{"byEmployer":[{"employer":"Unmapped / personal","commits":576},{"employer":"Microsoft","commits":229},{"employer":"Crunchy Data","commits":228},{"employer":"AWS","commits":147},{"employer":"EDB","commits":126},{"employer":"Independent","commits":103},{"employer":"NTT","commits":72},{"employer":"Fujitsu","commits":71},{"employer":"Highgo","commits":45},{"employer":"Postgres Professional","commits":43},{"employer":"VMware (ex-Pivotal)","commits":40},{"employer":"Tantor Labs","commits":35},{"employer":"SRA OSS","commits":24},{"employer":"Supabase","commits":23},{"employer":"Cybertec","commits":15},{"employer":"Datadog","commits":14},{"employer":"NTT DATA","commits":11},{"employer":"Yandex / Tantor","commits":7},{"employer":"Community / unspecified","commits":5},{"employer":"Amazon","commits":4},{"employer":"Google","commits":3},{"employer":"Neon","commits":2},{"employer":"Percona","commits":1},{"employer":"TimescaleDB","commits":1}],"topPeople":[{"name":"Tom Lane","email":"tgl@sss.pgh.pa.us","domain":"sss.pgh.pa.us","commits":180,"employer":"Crunchy Data"},{"name":"Fujii Masao","email":"masao.fujii@gmail.com","domain":"gmail.com","commits":62,"employer":"NTT"},{"name":"Bertrand Drouvot","email":"bertranddrouvot.pg@gmail.com","domain":"gmail.com","commits":57,"employer":"AWS"},{"name":"David Rowley","email":"dgrowleyml@gmail.com","domain":"gmail.com","commits":57,"employer":"Microsoft"},{"name":"Michael Paquier","email":"michael@paquier.xyz","domain":"paquier.xyz","commits":45,"employer":"AWS"},{"name":"Daniel Gustafsson","email":"daniel@yesql.se","domain":"yesql.se","commits":45,"employer":"Microsoft"},{"name":"Richard Guo","email":"guofenglinux@gmail.com","domain":"gmail.com","commits":40,"employer":"VMware (ex-Pivotal)"},{"name":"Melanie Plageman","email":"melanieplageman@gmail.com","domain":"gmail.com","commits":39,"employer":"Microsoft"},{"name":"Peter Geoghegan","email":"pg@bowt.ie","domain":"bowt.ie","commits":34,"employer":"Independent"},{"name":"jian he","email":"jian.universality@gmail.com","domain":"gmail.com","commits":32,"employer":"Unmapped / personal"},{"name":"Nazir Bilal Yavuz","email":"byavuz81@gmail.com","domain":"gmail.com","commits":31,"employer":"Microsoft"},{"name":"Álvaro Herrera","email":"alvherre@kurilemu.de","domain":"kurilemu.de","commits":30,"employer":"EDB"},{"name":"Corey Huinker","email":"corey.huinker@gmail.com","domain":"gmail.com","commits":28,"employer":"Crunchy Data"},{"name":"Sami Imseih","email":"samimseih@gmail.com","domain":"gmail.com","commits":28,"employer":"AWS"},{"name":"Hayato Kuroda","email":"kuroda.hayato@fujitsu.com","domain":"fujitsu.com","commits":27,"employer":"Fujitsu"},{"name":"Chao Li","email":"li.evan.chao@gmail.com","domain":"gmail.com","commits":26,"employer":"Highgo"},{"name":"Dean Rasheed","email":"dean.a.rasheed@gmail.com","domain":"gmail.com","commits":25,"employer":"Independent"},{"name":"Amul Sul","email":"sulamul@gmail.com","domain":"gmail.com","commits":23,"employer":"EDB"},{"name":"Yugo Nagata","email":"nagata@sraoss.co.jp","domain":"sraoss.co.jp","commits":22,"employer":"SRA OSS"},{"name":"Thomas Munro","email":"thomas.munro@gmail.com","domain":"gmail.com","commits":21,"employer":"Microsoft"},{"name":"Zhijie Hou","email":"houzj.fnst@fujitsu.com","domain":"fujitsu.com","commits":20,"employer":"Fujitsu"},{"name":"Jacob Champion","email":"jacob.champion@enterprisedb.com","domain":"enterprisedb.com","commits":20,"employer":"Crunchy Data"},{"name":"Jelte Fennema-Nio","email":"postgres@jeltef.nl","domain":"jeltef.nl","commits":17,"employer":"Microsoft"},{"name":"Shlok Kyal","email":"shlok.kyal.oss@gmail.com","domain":"gmail.com","commits":17,"employer":"Unmapped / personal"},{"name":"Xuneng Zhou","email":"xunengzhou@gmail.com","domain":"gmail.com","commits":17,"employer":"Unmapped / personal"},{"name":"Alexander Korotkov","email":"aekorotkov@gmail.com","domain":"gmail.com","commits":17,"employer":"Supabase"},{"name":"Tender Wang","email":"tndrwang@gmail.com","domain":"gmail.com","commits":17,"employer":"Unmapped / personal"},{"name":"Andres Freund","email":"andres@anarazel.de","domain":"anarazel.de","commits":17,"employer":"Microsoft"},{"name":"Mark Dilger","email":"mark.dilger@enterprisedb.com","domain":"enterprisedb.com","commits":17,"employer":"EDB"},{"name":"Peter Eisentraut","email":"peter@eisentraut.org","domain":"eisentraut.org","commits":16,"employer":"EDB"},{"name":"Jian He","email":"jian.universality@gmail.com","domain":"gmail.com","commits":16,"employer":"Highgo"},{"name":"Peter Smith","email":"smithpb2250@gmail.com","domain":"gmail.com","commits":16,"employer":"Unmapped / personal"},{"name":"Nathan Bossart","email":"nathandbossart@gmail.com","domain":"gmail.com","commits":16,"employer":"AWS"},{"name":"Andrei Lepikhov","email":"lepihov@gmail.com","domain":"gmail.com","commits":16,"employer":"Unmapped / personal"},{"name":"Aleksander Alekseev","email":"aleksander@timescale.com","domain":"timescale.com","commits":15,"employer":"Tantor Labs"},{"name":"Vignesh C","email":"vignesh21@gmail.com","domain":"gmail.com","commits":15,"employer":"Unmapped / personal"},{"name":"vignesh C","email":"vignesh21@gmail.com","domain":"gmail.com","commits":14,"employer":"Unmapped / personal"},{"name":"Ashutosh Bapat","email":"ashutosh.bapat.oss@gmail.com","domain":"gmail.com","commits":14,"employer":"EDB"},{"name":"Anthonin Bonnefoy","email":"anthonin.bonnefoy@datadoghq.com","domain":"datadoghq.com","commits":14,"employer":"Datadog"},{"name":"Hou Zhijie","email":"houzj.fnst@fujitsu.com","domain":"fujitsu.com","commits":13,"employer":"Fujitsu"}],"totals":{"credited_contributions":1825,"distinct_people":299}},"churn2025":[{"dir":"src/backend/po","insertions":58432,"deletions":49425,"commits":1,"files":7},{"dir":"doc","insertions":54201,"deletions":44659,"commits":595,"files":218},{"dir":"src/test","insertions":68635,"deletions":16563,"commits":664,"files":579},{"dir":"src/backend/utils","insertions":28534,"deletions":51621,"commits":519,"files":213},{"dir":"src/include","insertions":38766,"deletions":20693,"commits":709,"files":434},{"dir":"src/backend/access","insertions":19728,"deletions":13317,"commits":341,"files":143},{"dir":"src/bin/psql","insertions":17160,"deletions":14797,"commits":92,"files":29},{"dir":"src/bin/pg_dump","insertions":14592,"deletions":10097,"commits":131,"files":46},{"dir":"src/backend/storage","insertions":12530,"deletions":4700,"commits":241,"files":56},{"dir":"src/interfaces","insertions":12687,"deletions":4122,"commits":129,"files":101},{"dir":"src/bin/pg_basebackup","insertions":11170,"deletions":5451,"commits":53,"files":25},{"dir":"src/bin/pg_upgrade","insertions":10269,"deletions":5928,"commits":66,"files":38},{"dir":"src/backend/commands","insertions":10250,"deletions":4681,"commits":235,"files":47},{"dir":"src/backend/optimizer","insertions":9636,"deletions":3609,"commits":142,"files":43},{"dir":"src/pl","insertions":4787,"deletions":5009,"commits":54,"files":83},{"dir":"src/backend/snowball","insertions":4957,"deletions":4565,"commits":3,"files":56},{"dir":"src/backend/executor","insertions":6302,"deletions":3165,"commits":136,"files":44},{"dir":"src/backend/replication","insertions":6922,"deletions":2377,"commits":152,"files":33},{"dir":"src/bin/scripts","insertions":4650,"deletions":3957,"commits":29,"files":35},{"dir":"src/bin/pg_combinebackup","insertions":6728,"deletions":838,"commits":27,"files":27},{"dir":"src/bin/initdb","insertions":3179,"deletions":2707,"commits":17,"files":14},{"dir":"src/bin/pg_rewind","insertions":2507,"deletions":2157,"commits":17,"files":26},{"dir":"src/bin/pg_resetwal","insertions":2608,"deletions":1813,"commits":16,"files":11},{"dir":"contrib/postgres_fdw","insertions":2570,"deletions":1476,"commits":60,"files":14},{"dir":"contrib/pg_stat_statements","insertions":3117,"deletions":482,"commits":26,"files":24},{"dir":"src/bin/pg_ctl","insertions":1773,"deletions":1783,"commits":4,"files":13},{"dir":"src/backend/parser","insertions":2127,"deletions":958,"commits":72,"files":22},{"dir":"contrib/btree_gin","insertions":2682,"deletions":150,"commits":6,"files":25},{"dir":"contrib/amcheck","insertions":2022,"deletions":511,"commits":35,"files":17},{"dir":"src/bin/pg_checksums","insertions":1487,"deletions":774,"commits":5,"files":11},{"dir":"src/bin/pg_amcheck","insertions":1485,"deletions":771,"commits":7,"files":14},{"dir":"src/bin/pg_waldump","insertions":1214,"deletions":1023,"commits":8,"files":12},{"dir":"src/backend/statistics","insertions":1090,"deletions":1146,"commits":28,"files":7},{"dir":"src/common","insertions":1671,"deletions":531,"commits":37,"files":33},{"dir":"src/backend/postmaster","insertions":1421,"deletions":645,"commits":77,"files":14},{"dir":"src/port","insertions":1613,"deletions":417,"commits":41,"files":29},{"dir":"src/backend/catalog","insertions":1452,"deletions":490,"commits":111,"files":33},{"dir":"src/bin/pg_verifybackup","insertions":1335,"deletions":592,"commits":16,"files":17},{"dir":"contrib/btree_gist","insertions":1298,"deletions":586,"commits":16,"files":34},{"dir":"configure","insertions":1288,"deletions":569,"commits":36,"files":1},{"dir":"src/bin/pg_controldata","insertions":956,"deletions":868,"commits":9,"files":11},{"dir":"contrib/pgcrypto","insertions":1540,"deletions":62,"commits":16,"files":29},{"dir":"contrib/pg_overexplain","insertions":1486,"deletions":44,"commits":13,"files":6},{"dir":"src/backend/libpq","insertions":1224,"deletions":177,"commits":29,"files":17},{"dir":"src/backend/nodes","insertions":886,"deletions":361,"commits":35,"files":11},{"dir":"src/bin/pg_walsummary","insertions":1205,"deletions":24,"commits":3,"files":9},{"dir":"src/backend/rewrite","insertions":763,"deletions":428,"commits":22,"files":4},{"dir":"contrib/pg_buffercache","insertions":1045,"deletions":119,"commits":16,"files":11},{"dir":"src/backend/partitioning","insertions":1039,"deletions":120,"commits":12,"files":3},{"dir":"src/bin/pg_archivecleanup","insertions":662,"deletions":478,"commits":3,"files":12},{"dir":"config","insertions":832,"deletions":296,"commits":17,"files":6},{"dir":"src/fe_utils","insertions":839,"deletions":284,"commits":23,"files":15},{"dir":"src/tools","insertions":692,"deletions":283,"commits":159,"files":23},{"dir":"meson.build","insertions":617,"deletions":327,"commits":54,"files":1},{"dir":"contrib/dblink","insertions":665,"deletions":229,"commits":16,"files":6},{"dir":"src/backend/regex","insertions":182,"deletions":610,"commits":8,"files":3},{"dir":"src/backend/tcop","insertions":499,"deletions":210,"commits":41,"files":5},{"dir":"src/bin/pg_test_fsync","insertions":358,"deletions":300,"commits":4,"files":9},{"dir":"src/bin/pgbench","insertions":378,"deletions":270,"commits":26,"files":6},{"dir":"contrib/xml2","insertions":335,"deletions":188,"commits":7,"files":2},{"dir":"contrib/pg_prewarm","insertions":367,"deletions":150,"commits":17,"files":7},{"dir":"src/timezone","insertions":311,"deletions":206,"commits":10,"files":7},{"dir":"src/bin/pg_config","insertions":313,"deletions":177,"commits":1,"files":8},{"dir":"contrib/test_decoding","insertions":416,"deletions":70,"commits":13,"files":17},{"dir":".cirrus.tasks.yml","insertions":338,"deletions":110,"commits":29,"files":1},{"dir":"src/backend/jit","insertions":276,"deletions":171,"commits":21,"files":10},{"dir":"contrib/spi","insertions":350,"deletions":15,"commits":7,"files":11},{"dir":"src/bin/pg_test_timing","insertions":286,"deletions":66,"commits":5,"files":9},{"dir":"src/backend/tsearch","insertions":162,"deletions":187,"commits":14,"files":14},{"dir":"configure.ac","insertions":215,"deletions":119,"commits":29,"files":1},{"dir":"contrib/sepgsql","insertions":295,"deletions":27,"commits":10,"files":10},{"dir":"contrib/pg_logicalinspect","insertions":212,"deletions":50,"commits":5,"files":6},{"dir":"contrib/pageinspect","insertions":143,"deletions":66,"commits":14,"files":11},{"dir":"contrib/ltree","insertions":138,"deletions":58,"commits":7,"files":12},{"dir":"contrib/pg_trgm","insertions":139,"deletions":45,"commits":8,"files":7},{"dir":"contrib/intarray","insertions":111,"deletions":70,"commits":7,"files":10},{"dir":"src/backend/port","insertions":37,"deletions":139,"commits":5,"files":6},{"dir":".editorconfig","insertions":172,"deletions":4,"commits":2,"files":1},{"dir":"contrib/bloom","insertions":87,"deletions":85,"commits":15,"files":6},{"dir":"contrib/isn","insertions":105,"deletions":43,"commits":7,"files":9},{"dir":"src/backend/backup","insertions":72,"deletions":67,"commits":14,"files":13},{"dir":"contrib/lo","insertions":114,"deletions":1,"commits":2,"files":3},{"dir":"contrib/auto_explain","insertions":88,"deletions":22,"commits":9,"files":6},{"dir":"src/tutorial","insertions":93,"deletions":9,"commits":4,"files":4},{"dir":".cirrus.star","insertions":85,"deletions":5,"commits":2,"files":1},{"dir":"contrib/hstore","insertions":42,"deletions":42,"commits":6,"files":6},{"dir":"contrib/jsonb_plpython","insertions":45,"deletions":31,"commits":4,"files":1},{"dir":"contrib/jsonb_plperl","insertions":38,"deletions":24,"commits":3,"files":1},{"dir":"src/template","insertions":1,"deletions":51,"commits":1,"files":2},{"dir":".git-blame-ignore-revs","insertions":51,"deletions":0,"commits":17,"files":1},{"dir":"contrib/basebackup_to_shell","insertions":31,"deletions":20,"commits":6,"files":3},{"dir":"contrib/pg_visibility","insertions":19,"deletions":31,"commits":6,"files":2},{"dir":"src/Makefile.global.in","insertions":32,"deletions":17,"commits":12,"files":1},{"dir":"src/backend/foreign","insertions":41,"deletions":7,"commits":3,"files":1},{"dir":"contrib/file_fdw","insertions":28,"deletions":18,"commits":9,"files":3},{"dir":"contrib/pg_walinspect","insertions":23,"deletions":20,"commits":5,"files":2},{"dir":"contrib/pgstattuple","insertions":29,"deletions":14,"commits":3,"files":2},{"dir":"src/backend/lib","insertions":27,"deletions":15,"commits":5,"files":6},{"dir":"contrib/passwordcheck","insertions":36,"deletions":5,"commits":2,"files":4},{"dir":"src/backend/Makefile","insertions":31,"deletions":8,"commits":2,"files":1},{"dir":"src/backend/main","insertions":24,"deletions":14,"commits":3,"files":1},{"dir":"src/makefiles","insertions":17,"deletions":12,"commits":8,"files":2},{"dir":"contrib/tcn","insertions":14,"deletions":10,"commits":2,"files":1},{"dir":"contrib/seg","insertions":11,"deletions":11,"commits":4,"files":2},{"dir":".cirrus.yml","insertions":20,"deletions":2,"commits":2,"files":1},{"dir":"contrib/sslinfo","insertions":6,"deletions":14,"commits":4,"files":2},{"dir":"contrib/cube","insertions":8,"deletions":8,"commits":4,"files":2},{"dir":"contrib/fuzzystrmatch","insertions":9,"deletions":6,"commits":3,"files":2},{"dir":"contrib/pg_freespacemap","insertions":13,"deletions":2,"commits":3,"files":2},{"dir":"contrib/dict_xsyn","insertions":8,"deletions":5,"commits":2,"files":1},{"dir":"contrib/unaccent","insertions":8,"deletions":5,"commits":2,"files":1},{"dir":"contrib/hstore_plpython","insertions":8,"deletions":5,"commits":3,"files":2},{"dir":"contrib/bool_plperl","insertions":8,"deletions":5,"commits":2,"files":3},{"dir":"contrib/hstore_plperl","insertions":8,"deletions":5,"commits":2,"files":3},{"dir":"src/backend/bootstrap","insertions":7,"deletions":5,"commits":3,"files":1},{"dir":".gitattributes","insertions":9,"deletions":3,"commits":3,"files":1},{"dir":"contrib/dict_int","insertions":6,"deletions":3,"commits":2,"files":1},{"dir":"contrib/tablefunc","insertions":6,"deletions":3,"commits":2,"files":1},{"dir":"contrib/pg_surgery","insertions":6,"deletions":3,"commits":2,"files":1},{"dir":"contrib/pgrowlocks","insertions":6,"deletions":3,"commits":2,"files":1},{"dir":"contrib/ltree_plpython","insertions":6,"deletions":3,"commits":3,"files":2},{"dir":"meson_options.txt","insertions":9,"deletions":0,"commits":3,"files":1},{"dir":"contrib/tsm_system_rows","insertions":5,"deletions":2,"commits":2,"files":1},{"dir":"contrib/tsm_system_time","insertions":5,"deletions":2,"commits":2,"files":1},{"dir":"contrib/basic_archive","insertions":5,"deletions":2,"commits":2,"files":1},{"dir":"src/backend/nls.mk","insertions":3,"deletions":3,"commits":2,"files":1},{"dir":"src/nls-global.mk","insertions":5,"deletions":0,"commits":1,"files":1},{"dir":"contrib/auth_delay","insertions":4,"deletions":1,"commits":1,"files":1},{"dir":"contrib/citext","insertions":4,"deletions":1,"commits":1,"files":1},{"dir":"contrib/earthdistance","insertions":4,"deletions":1,"commits":1,"files":1},{"dir":"contrib/uuid-ossp","insertions":4,"deletions":1,"commits":1,"files":1},{"dir":"src/Makefile.shlib","insertions":2,"deletions":2,"commits":1,"files":1},{"dir":"src/backend/meson.build","insertions":1,"deletions":1,"commits":1,"files":1},{"dir":"COPYRIGHT","insertions":1,"deletions":1,"commits":1,"files":1},{"dir":"contrib/Makefile","insertions":1,"deletions":0,"commits":1,"files":1},{"dir":"contrib/meson.build","insertions":1,"deletions":0,"commits":1,"files":1}],"backports2025":{"byBranch":{"master":{"Michael Paquier":358,"Peter Eisentraut":358,"Tom Lane":348,"Nathan Bossart":165,"Andres Freund":144,"Álvaro Herrera":131,"Fujii Masao":108,"Daniel Gustafsson":105,"Amit Kapila":105,"Jeff Davis":101,"David Rowley":91,"Heikki Linnakangas":88,"Bruce Momjian":79,"Masahiko Sawada":65,"Melanie Plageman":65,"Alexander Korotkov":62,"Richard Guo":52,"Thomas Munro":51,"Peter Geoghegan":47,"Tomas Vondra":43,"Robert Haas":39,"Jacob Champion":36,"Dean Rasheed":35,"Andrew Dunstan":33,"John Naylor":28,"Noah Misch":27,"Amit Langote":22,"Etsuro Fujita":12,"Tatsuo Ishii":11,"Magnus Hagander":5,"Joe Conway":3},"REL_13_STABLE":{"Tom Lane":89,"Michael Paquier":37,"Noah Misch":18,"Fujii Masao":17,"Álvaro Herrera":17,"Andres Freund":16,"Nathan Bossart":14,"Peter Eisentraut":12,"Daniel Gustafsson":9,"David Rowley":7,"Alexander Korotkov":7,"Thomas Munro":6,"Etsuro Fujita":6,"Dean Rasheed":6,"Amit Kapila":5,"Heikki Linnakangas":5,"Masahiko Sawada":3,"Andrew Dunstan":3,"Peter Geoghegan":2,"Richard Guo":2,"John Naylor":2,"Jacob Champion":1,"Bruce Momjian":1,"Robert Haas":1,"Tomas Vondra":1},"REL_14_STABLE":{"Tom Lane":95,"Michael Paquier":46,"Noah Misch":22,"Heikki Linnakangas":19,"Álvaro Herrera":19,"Fujii Masao":18,"Nathan Bossart":16,"Andres Freund":15,"Daniel Gustafsson":14,"Peter Eisentraut":13,"David Rowley":11,"Thomas Munro":10,"Dean Rasheed":9,"Etsuro Fujita":7,"Alexander Korotkov":7,"Amit Kapila":6,"Masahiko Sawada":5,"John Naylor":3,"Andrew Dunstan":3,"Robert Haas":2,"Bruce Momjian":2,"Peter Geoghegan":2,"Richard Guo":2,"Tomas Vondra":2,"Jeff Davis":1,"Jacob Champion":1,"Melanie Plageman":1},"REL_15_STABLE":{"Tom Lane":103,"Michael Paquier":46,"Fujii Masao":23,"Noah Misch":23,"Álvaro Herrera":21,"Heikki Linnakangas":20,"Andres Freund":20,"Nathan Bossart":16,"David Rowley":15,"Peter Eisentraut":15,"Dean Rasheed":14,"Daniel Gustafsson":14,"Thomas Munro":11,"Etsuro Fujita":8,"Alexander Korotkov":7,"Masahiko Sawada":6,"Amit Kapila":6,"Richard Guo":3,"John Naylor":3,"Andrew Dunstan":3,"Robert Haas":2,"Bruce Momjian":2,"Peter Geoghegan":2,"Tomas Vondra":2,"Jeff Davis":1,"Jacob Champion":1,"Melanie Plageman":1},"REL_16_STABLE":{"Tom Lane":112,"Michael Paquier":58,"Andres Freund":30,"Fujii Masao":25,"Noah Misch":22,"Heikki Linnakangas":21,"Álvaro Herrera":21,"Daniel Gustafsson":18,"Nathan Bossart":17,"Peter Eisentraut":17,"Thomas Munro":16,"David Rowley":16,"Dean Rasheed":14,"Amit Kapila":12,"Masahiko Sawada":8,"Etsuro Fujita":8,"Alexander Korotkov":7,"Richard Guo":6,"Jeff Davis":3,"John Naylor":3,"Robert Haas":2,"Bruce Momjian":2,"Peter Geoghegan":2,"Melanie Plageman":2,"Tomas Vondra":2,"Jacob Champion":1,"Amit Langote":1,"Andrew Dunstan":1},"REL_17_STABLE":{"Tom Lane":127,"Michael Paquier":72,"Fujii Masao":32,"Andres Freund":32,"Álvaro Herrera":29,"Nathan Bossart":26,"Daniel Gustafsson":26,"Heikki Linnakangas":24,"Noah Misch":24,"Peter Eisentraut":22,"Amit Kapila":21,"David Rowley":19,"Thomas Munro":17,"Dean Rasheed":17,"Alexander Korotkov":14,"Masahiko Sawada":12,"Etsuro Fujita":8,"Richard Guo":8,"Amit Langote":6,"John Naylor":6,"Bruce Momjian":4,"Jeff Davis":4,"Melanie Plageman":3,"Tomas Vondra":3,"Robert Haas":2,"Jacob Champion":2,"Peter Geoghegan":2,"Tatsuo Ishii":1,"Andrew Dunstan":1},"REL_18_STABLE":{"Tom Lane":243,"Peter Eisentraut":219,"Michael Paquier":205,"Andres Freund":119,"Nathan Bossart":102,"Daniel Gustafsson":84,"Álvaro Herrera":82,"Fujii Masao":72,"Jeff Davis":70,"Bruce Momjian":69,"Amit Kapila":66,"Heikki Linnakangas":61,"David Rowley":51,"Thomas Munro":45,"Alexander Korotkov":45,"Melanie Plageman":43,"Tomas Vondra":42,"Masahiko Sawada":41,"Peter Geoghegan":39,"Richard Guo":31,"Andrew Dunstan":30,"Noah Misch":27,"Jacob Champion":27,"Robert Haas":26,"Dean Rasheed":24,"John Naylor":22,"Amit Langote":22,"Etsuro Fujita":11,"Magnus Hagander":5,"Tatsuo Ishii":4,"Joe Conway":3}},"totals":{"master":2817,"REL_13_STABLE":287,"REL_14_STABLE":351,"REL_15_STABLE":388,"REL_16_STABLE":447,"REL_17_STABLE":564,"REL_18_STABLE":1930}},"commitfests":[{"id":51,"name":"2025-01","start":"2025-01-01","end":"2025-01-31","totalPatches":358,"statuses":{"Needs review":23,"Waiting on Author":11,"Ready for Committer":2,"Moved to different CF":211,"Committed":82,"Withdrawn":18,"Returned with feedback":7,"Rejected":4}},{"id":52,"name":"2025-03","start":"2025-03-01","end":"2025-04-08","totalPatches":343,"statuses":{"Moved to different CF":141,"Committed":154,"Withdrawn":23,"Returned with feedback":19,"Rejected":6}},{"id":53,"name":"PG19-1","start":"2025-07-01","end":"2025-07-31","totalPatches":388,"statuses":{"Needs review":23,"Ready for Committer":1,"Waiting on Author":2,"Moved to different CF":192,"Returned with feedback":9,"Committed":139,"Withdrawn":21,"Rejected":1}},{"id":55,"name":"PG19-2","start":"2025-09-01","end":"2025-09-30","totalPatches":307,"statuses":{"Ready for Committer":2,"Needs review":13,"Moved to different CF":210,"Committed":69,"Returned with feedback":4,"Rejected":2,"Withdrawn":7}},{"id":56,"name":"PG19-3","start":"2025-11-01","end":"2025-11-30","totalPatches":407,"statuses":{"Waiting on Author":6,"Needs review":24,"Moved to different CF":238,"Committed":120,"Withdrawn":16,"Rejected":2,"Returned with feedback":1}},{"id":57,"name":"PG19-4","start":"2026-01-01","end":"2026-01-31","totalPatches":379,"statuses":{"Needs review":17,"Waiting on Author":1,"Ready for Committer":1,"Moved to different CF":255,"Committed":91,"Withdrawn":13,"Rejected":1}},{"id":58,"name":"PG19-Final","start":"2026-03-01","end":"2026-04-09","totalPatches":501,"statuses":{"Ready for Committer":10,"Waiting on Author":19,"Needs review":75,"Moved to different CF":172,"Committed":182,"Returned with feedback":11,"Withdrawn":26,"Rejected":6}}],"topPosters2025":[{"name":"Tom Lane","emails":1978,"xlines":17120,"commits":259},{"name":"Andres Freund","emails":1490,"xlines":15486,"commits":124},{"name":"Michael Paquier","emails":1356,"xlines":2658,"commits":106},{"name":"Nathan Bossart","emails":1292,"xlines":4286,"commits":116},{"name":"Bertrand Drouvot","emails":818,"xlines":3395,"commits":60},{"name":"Amit Kapila","emails":752,"xlines":4,"commits":2},{"name":"Masahiko Sawada","emails":707,"xlines":2687,"commits":25},{"name":"Peter Eisentraut","emails":673,"xlines":12066,"commits":250},{"name":"Robert Haas","emails":670,"xlines":4727,"commits":25},{"name":"Chao Li","emails":648,"xlines":452,"commits":28},{"name":"Jian He","emails":582,"xlines":2229,"commits":44},{"name":"Sami Imseih","emails":554,"xlines":4151,"commits":26},{"name":"Álvaro Herrera","emails":542,"xlines":0,"commits":0},{"name":"Tomas Vondra","emails":538,"xlines":2729,"commits":22},{"name":"Jacob Champion","emails":497,"xlines":12173,"commits":47},{"name":"Fujii Masao","emails":495,"xlines":623,"commits":50},{"name":"Daniel Gustafsson","emails":482,"xlines":825,"commits":52},{"name":"Peter Smith","emails":470,"xlines":611,"commits":18},{"name":"David Rowley","emails":430,"xlines":2354,"commits":60},{"name":"Thomas Munro","emails":407,"xlines":2465,"commits":52},{"name":"Ashutosh Bapat","emails":398,"xlines":924,"commits":17},{"name":"Melanie Plageman","emails":392,"xlines":4399,"commits":58},{"name":"Shveta Malik","emails":387,"xlines":85,"commits":5},{"name":"Alvaro Herrera","emails":369,"xlines":1581,"commits":63},{"name":"Jeff Davis","emails":369,"xlines":5918,"commits":85},{"name":"Vignesh C","emails":361,"xlines":4505,"commits":31},{"name":"Peter Geoghegan","emails":335,"xlines":6768,"commits":47},{"name":"David G. Johnston","emails":330,"xlines":322,"commits":7},{"name":"Hayato Kuroda","emails":311,"xlines":850,"commits":25},{"name":"Jelte Fennema-Nio","emails":284,"xlines":1131,"commits":17},{"name":"Dilip Kumar","emails":278,"xlines":70,"commits":3},{"name":"Yugo Nagata","emails":274,"xlines":505,"commits":21},{"name":"Richard Guo","emails":257,"xlines":9120,"commits":43},{"name":"Zhijie Hou","emails":254,"xlines":0,"commits":0},{"name":"Bruce Momjian","emails":253,"xlines":4558,"commits":65},{"name":"Heikki Linnakangas","emails":248,"xlines":2298,"commits":58},{"name":"Alexander Korotkov","emails":244,"xlines":881,"commits":20},{"name":"Nazir Bilal Yavuz","emails":235,"xlines":2398,"commits":33},{"name":"Andrew Dunstan","emails":228,"xlines":244,"commits":16},{"name":"Kirill Reshke","emails":225,"xlines":147,"commits":10},{"name":"Corey Huinker","emails":220,"xlines":6870,"commits":29},{"name":"John Naylor","emails":219,"xlines":129,"commits":15},{"name":"Pavel Stehule","emails":216,"xlines":28,"commits":2},{"name":"Aleksander Alekseev","emails":209,"xlines":1178,"commits":15},{"name":"Andrei Lepikhov","emails":206,"xlines":4171,"commits":13},{"name":"Xuneng Zhou","emails":200,"xlines":147,"commits":13},{"name":"Antonin Houska","emails":189,"xlines":113,"commits":3},{"name":"Noah Misch","emails":179,"xlines":2381,"commits":30},{"name":"Japin Li","emails":170,"xlines":643,"commits":12},{"name":"Shlok Kyal","emails":166,"xlines":639,"commits":15},{"name":"Christoph Berg","emails":165,"xlines":583,"commits":9},{"name":"Matheus Alcantara","emails":161,"xlines":1702,"commits":11},{"name":"Jim Jones","emails":153,"xlines":211,"commits":2},{"name":"Andrey Borodin","emails":149,"xlines":715,"commits":8},{"name":"Tatsuo Ishii","emails":148,"xlines":243,"commits":8},{"name":"Sutou Kouhei","emails":145,"xlines":694,"commits":3},{"name":"Mihail Nikalayeu","emails":140,"xlines":2198,"commits":11},{"name":"Dagfinn Ilmari MannsÃ¥ker","emails":134,"xlines":0,"commits":0},{"name":"Ilia Evdokimov","emails":132,"xlines":511,"commits":7},{"name":"Ranier Vilela","emails":130,"xlines":172,"commits":10},{"name":"Laurenz Albe","emails":128,"xlines":447,"commits":12},{"name":"Amit Langote","emails":127,"xlines":2053,"commits":13},{"name":"Dean Rasheed","emails":124,"xlines":6450,"commits":31},{"name":"Jakub Wartak","emails":124,"xlines":1236,"commits":6},{"name":"Matthias Van De Meent","emails":123,"xlines":0,"commits":0},{"name":"Greg Burd","emails":121,"xlines":3641,"commits":7},{"name":"Joel Jacobson","emails":119,"xlines":81,"commits":1},{"name":"Shubham Khanna","emails":119,"xlines":558,"commits":5},{"name":"Alexander Lakhin","emails":114,"xlines":118,"commits":3},{"name":"Greg Sabino Mullane","emails":105,"xlines":129,"commits":2},{"name":"Nisha Moond","emails":105,"xlines":726,"commits":5},{"name":"Dmitry Dolgov","emails":104,"xlines":937,"commits":1},{"name":"Euler Taveira","emails":102,"xlines":325,"commits":6},{"name":"Ajin Cherian","emails":100,"xlines":376,"commits":4},{"name":"Alena Rybakina","emails":99,"xlines":690,"commits":4},{"name":"David Wheeler","emails":98,"xlines":0,"commits":0},{"name":"Rahila Syed","emails":94,"xlines":1799,"commits":6},{"name":"Yura Sokolov","emails":92,"xlines":325,"commits":3},{"name":"Daniil Davydov","emails":88,"xlines":64,"commits":4},{"name":"Robert Treat","emails":88,"xlines":102,"commits":6},{"name":"Wenhui Qiu","emails":87,"xlines":0,"commits":0},{"name":"Amul Sul","emails":87,"xlines":2721,"commits":22},{"name":"Arseniy Mukhin","emails":84,"xlines":411,"commits":7},{"name":"Bryan Green","emails":84,"xlines":542,"commits":7},{"name":"Mahendra Singh Thalor","emails":84,"xlines":1231,"commits":4},{"name":"Tender Wang","emails":83,"xlines":183,"commits":15},{"name":"Atsushi Torikoshi","emails":80,"xlines":70,"commits":6},{"name":"Hannu Krosing","emails":78,"xlines":251,"commits":1},{"name":"Michael Banck","emails":77,"xlines":47,"commits":6},{"name":"Florents Tselai","emails":77,"xlines":868,"commits":6},{"name":"Shinya Kato","emails":77,"xlines":571,"commits":10},{"name":"Konstantin Knizhnik","emails":75,"xlines":29,"commits":1},{"name":"Marcos Pegoraro","emails":72,"xlines":74,"commits":2},{"name":"Junwang Zhao","emails":72,"xlines":442,"commits":5},{"name":"Paul A. Jungwirth","emails":71,"xlines":2297,"commits":17},{"name":"Maxim Orlov","emails":70,"xlines":1889,"commits":6},{"name":"Etsuro Fujita","emails":66,"xlines":848,"commits":10},{"name":"Srinath Reddy Sadipiralla","emails":66,"xlines":0,"commits":0},{"name":"David Geier","emails":64,"xlines":1737,"commits":8},{"name":"ChangAo Chen","emails":64,"xlines":19,"commits":5}]}</script>
+<script>
+(function(){
+if(new URLSearchParams(location.search).has('noanim')) document.documentElement.classList.add('no-anim');
+const D = JSON.parse(document.getElementById('data').textContent);
+const fmtN = n => n.toLocaleString('en-US');
+const fmtK = n => n>=1000 ? Math.round(n/1000)+'k' : String(n);
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+// ======================= §01 Affiliation =======================
+(function affiliation(){
+  const A = D.affiliations2025;
+  // Employer bars
+  const rows = A.byEmployer;
+  const max = rows[0].commits;
+  const EMP_PALETTE = {
+    'Unmapped / personal': 'var(--c-other)',
+    'Microsoft': 'var(--c1)',
+    'Crunchy Data': 'var(--c2)',
+    'AWS': 'var(--c6)',
+    'EDB': 'var(--c3)',
+    'Independent': 'var(--paper-dim)',
+    'NTT': 'var(--c5)',
+    'Fujitsu': 'var(--c4)',
+    'Highgo': 'var(--c7)',
+  };
+  const colorFor = e => EMP_PALETTE[e] || 'var(--paper-dim)';
+  document.getElementById('affil-list').innerHTML = rows.map((r,i)=>{
+    const w = (r.commits/max*100).toFixed(2);
+    return `<div class="bar-row" style="grid-template-columns:26px 1fr 60px">
+      <div class="bar-rank">${String(i+1).padStart(2,'0')}</div>
+      <div>
+        <div class="bar-label">${esc(r.employer)}</div>
+        <div class="bar-track" aria-label="${r.commits} credited contributions">
+          <div class="bar-fill" style="width:${w}%;background:${colorFor(r.employer)}"></div>
+        </div>
+      </div>
+      <div class="bar-val">${r.commits}</div>
+    </div>`;
+  }).join('');
+  // People list
+  const ppl = A.topPeople.slice(0,20);
+  const pmax = ppl[0].commits;
+  document.getElementById('affil-people').innerHTML = ppl.map((p,i)=>{
+    const w = (p.commits/pmax*100).toFixed(2);
+    return `<div class="bar-row" style="grid-template-columns:26px 1fr 60px">
+      <div class="bar-rank">${String(i+1).padStart(2,'0')}</div>
+      <div>
+        <div class="bar-label">${esc(p.name)} <em>${esc(p.employer)}</em></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${colorFor(p.employer)}"></div></div>
+      </div>
+      <div class="bar-val">${p.commits}</div>
+    </div>`;
+  }).join('');
+})();
+
+// ======================= §02 Churn =======================
+(function churn(){
+  const W=1180,H=580,L=260,R=80,T=24,B=30;
+  // Top 24 by total churn; sort desc
+  const data = D.churn2025.slice().sort((a,b)=>(b.insertions+b.deletions)-(a.insertions+a.deletions)).slice(0,24);
+  const maxT = Math.max(...data.map(d=>d.insertions+d.deletions));
+  const rowH = (H-T-B)/data.length;
+  const x = v => L + (v/maxT)*(W-L-R);
+  let bars = '';
+  data.forEach((d,i)=>{
+    const y = T + i*rowH + 3;
+    const h = rowH - 6;
+    const wIns = (d.insertions/maxT)*(W-L-R);
+    const wDel = (d.deletions/maxT)*(W-L-R);
+    const isPo = d.dir === 'src/backend/po';
+    bars += `
+      <rect x="${L}" y="${y}" width="${wIns}" height="${h}" fill="${isPo?'var(--c-other)':'var(--c4)'}" opacity="${isPo?0.6:0.85}"/>
+      <rect x="${L+wIns}" y="${y}" width="${wDel}" height="${h}" fill="${isPo?'var(--c-other)':'var(--c3)'}" opacity="${isPo?0.6:0.7}"/>
+      <text x="${L-12}" y="${y+h/2+4}" text-anchor="end" font-family="JetBrains Mono" font-size="11" fill="${isPo?'var(--paper-mute)':'var(--paper)'}">${esc(d.dir)}${isPo?' ★':''}</text>
+      <text x="${L+wIns+wDel+6}" y="${y+h/2+4}" font-family="JetBrains Mono" font-size="10" fill="var(--paper-dim)">+${d.insertions.toLocaleString()} −${d.deletions.toLocaleString()} · ${d.commits} cm</text>`;
+  });
+  // legend / note
+  const ticks = [0, Math.round(maxT/4), Math.round(maxT/2), Math.round(3*maxT/4), maxT];
+  let grid = '';
+  ticks.forEach(v => {
+    const xx = x(v);
+    grid += `<line x1="${xx}" x2="${xx}" y1="${T}" y2="${H-B}" stroke="var(--grid)" stroke-dasharray="2 3"/>
+             <text x="${xx}" y="${H-B+16}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="var(--paper-mute)">${fmtK(v)}</text>`;
+  });
+  document.getElementById('churn-bars').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Code churn (insertions+deletions) by subdirectory on PostgreSQL master, 2025">
+      <text x="${L}" y="${T-4}" font-family="JetBrains Mono" font-size="10.5" fill="var(--paper-mute)" letter-spacing="1.1">INSERTIONS &nbsp;|&nbsp; DELETIONS · 2025 MASTER</text>
+      ${grid}
+      ${bars}
+      <text x="${W-R}" y="${H-B+16}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="var(--paper-mute)">★ SINGLE TRANSLATION-CATALOG COMMIT — WHY XLINES ADJUSTMENT EXISTS</text>
+    </svg>`;
+})();
+
+// ======================= §03 Backports =======================
+(function backports(){
+  const W=1180,H=560,L=160,R=100,T=36,B=40;
+  const branches = ['master','REL_18_STABLE','REL_17_STABLE','REL_16_STABLE','REL_15_STABLE','REL_14_STABLE','REL_13_STABLE'];
+  const by = D.backports2025.byBranch;
+  // committers: union of top-14 across all branches, then sort by master total desc
+  const all = new Set();
+  branches.forEach(br => Object.keys(by[br]||{}).forEach(c => all.add(c)));
+  const totals = {};
+  [...all].forEach(c => totals[c] = branches.reduce((a,br)=>a+(by[br]?.[c]||0), 0));
+  const order = [...all].sort((a,b)=>totals[b]-totals[a]).slice(0,18);
+  const rowH = (H-T-B)/order.length;
+  const colW = (W-L-R)/branches.length;
+  // max cell for color scale
+  const maxCell = Math.max(...order.flatMap(c => branches.map(br => by[br]?.[c]||0)));
+  const cells = [];
+  order.forEach((c, i) => {
+    branches.forEach((br, j) => {
+      const v = by[br]?.[c] || 0;
+      const alpha = v === 0 ? 0 : 0.12 + 0.78 * (v/maxCell);
+      const x = L + j*colW + 2, y = T + i*rowH + 2;
+      const w = colW - 4, h = rowH - 4;
+      cells.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="var(--c1)" opacity="${alpha.toFixed(2)}"/>`);
+      if (v > 0) cells.push(`<text x="${x+w/2}" y="${y+h/2+4}" text-anchor="middle" font-family="JetBrains Mono" font-size="${v>=100?12:11}" fill="${alpha>0.5?'var(--ink)':'var(--paper-dim)'}" font-weight="${v>=100?600:400}">${v}</text>`);
+    });
+  });
+  // row labels
+  const rowLabels = order.map((c,i)=>
+    `<text x="${L-10}" y="${T + i*rowH + rowH/2 + 4}" text-anchor="end" font-family="JetBrains Mono" font-size="11" fill="var(--paper)">${esc(c)}</text>`
+  ).join('');
+  // column labels
+  const colLabels = branches.map((br,j)=>{
+    const label = br === 'master' ? 'master' : br.replace('REL_','PG').replace('_STABLE','');
+    const total = D.backports2025.totals[br];
+    return `<text x="${L + j*colW + colW/2}" y="${T-12}" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="var(--paper)">${label}</text>
+            <text x="${L + j*colW + colW/2}" y="${H-B+18}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="var(--paper-mute)">${total.toLocaleString()} total</text>`;
+  }).join('');
+  document.getElementById('backport-stream').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Heatmap of commits per committer per release branch in 2025">
+      ${cells.join('')}
+      ${rowLabels}
+      ${colLabels}
+    </svg>`;
+})();
+
+// ======================= §04 Commitfest =======================
+(function cf(){
+  const W=1180,H=460,L=60,R=40,T=36,B=60;
+  const order = ['Committed','Moved to different CF','Needs review','Ready for Committer','Waiting on Author','Withdrawn','Returned with feedback','Rejected'];
+  const colors = {
+    'Committed':'var(--c4)','Moved to different CF':'var(--c1)',
+    'Needs review':'var(--c2)','Ready for Committer':'var(--c2)','Waiting on Author':'var(--c6)',
+    'Withdrawn':'var(--paper-dim)','Returned with feedback':'var(--c5)','Rejected':'var(--c3)'
+  };
+  const items = D.commitfests;
+  const maxT = Math.max(...items.map(c => Object.values(c.statuses).reduce((a,b)=>a+b,0)));
+  const colW = (W-L-R) / items.length;
+  const barW = colW * 0.72;
+  let bars = '';
+  items.forEach((cf, i) => {
+    const total = Object.values(cf.statuses).reduce((a,b)=>a+b,0);
+    let acc = 0;
+    const bx = L + i*colW + (colW - barW)/2;
+    order.forEach(s => {
+      const v = cf.statuses[s] || 0;
+      if (!v) return;
+      const h = (v/maxT) * (H-T-B);
+      const y = H-B - ((acc+v)/maxT) * (H-T-B);
+      bars += `<rect x="${bx.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${colors[s]}" opacity="0.88"><title>${cf.name} · ${s}: ${v}</title></rect>`;
+      // in-bar label for large segments
+      if (h > 18) bars += `<text x="${(bx+barW/2).toFixed(1)}" y="${(y+h/2+4).toFixed(1)}" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="var(--ink)" font-weight="600">${v}</text>`;
+      acc += v;
+    });
+    // x-axis label
+    bars += `<text x="${(bx+barW/2).toFixed(1)}" y="${H-B+16}" text-anchor="middle" font-family="JetBrains Mono" font-size="10.5" fill="var(--paper)">${esc(cf.name)}</text>
+             <text x="${(bx+barW/2).toFixed(1)}" y="${H-B+32}" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="var(--paper-mute)">${total} patches</text>`;
+  });
+  // legend
+  const legend = order.map((s,i) => {
+    const x = L + (i%4)*220;
+    const y = T - 20 + Math.floor(i/4)*14;
+    return `<circle cx="${x}" cy="${y}" r="4" fill="${colors[s]}"/>
+            <text x="${x+10}" y="${y+4}" font-family="JetBrains Mono" font-size="10" fill="var(--paper-dim)">${s}</text>`;
+  }).join('');
+  document.getElementById('cf-chart').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H+40}" role="img" aria-label="Stacked bar chart of commitfest patch outcomes by status, 2025-Q1 2026">
+      ${bars}
+      <line x1="${L}" x2="${W-R}" y1="${H-B}" y2="${H-B}" stroke="var(--paper)"/>
+    </svg>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--paper-dim)">
+      ${order.map(s=>`<span><i style="display:inline-block;width:10px;height:10px;background:${colors[s]};margin-right:6px;vertical-align:middle;border-radius:1px"></i>${s}</span>`).join(' · ')}
+    </div>`;
+})();
+
+// ======================= §05 Talkers =======================
+(function talkers(){
+  const W=1180,H=620,L=240,R=100,T=28,B=40;
+  // top 40 by emails
+  const data = D.topPosters2025.slice(0,40);
+  const maxE = Math.max(...data.map(d=>d.emails));
+  const maxX = Math.max(...data.map(d=>d.xlines), 1);
+  const rowH = (H-T-B)/data.length;
+  // two side-by-side bars per row: emails (left, paper-dim), xlines (right, amber)
+  const split = L + (W-L-R)/2;
+  const leftW = (W-L-R)/2 - 10;
+  const rightW = (W-L-R)/2 - 10;
+  let out = '';
+  data.forEach((d,i) => {
+    const y = T + i*rowH + 2;
+    const h = rowH - 4;
+    const we = (d.emails/maxE)*leftW;
+    const wx = (d.xlines/maxX)*rightW;
+    const doer = d.xlines > 0;
+    out += `
+      <rect x="${split - we}" y="${y}" width="${we}" height="${h}" fill="var(--c5)" opacity="0.75"/>
+      <rect x="${split + 10}" y="${y}" width="${wx}" height="${h}" fill="${doer?'var(--c2)':'var(--c-other)'}" opacity="0.8"/>
+      <text x="${L-12}" y="${y+h/2+4}" text-anchor="end" font-family="JetBrains Mono" font-size="11" fill="var(--paper)">${esc(d.name)}</text>
+      <text x="${split-we-4}" y="${y+h/2+4}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="var(--paper-dim)">${d.emails}</text>
+      <text x="${split+10+wx+4}" y="${y+h/2+4}" font-family="JetBrains Mono" font-size="10" fill="${doer?'var(--paper)':'var(--paper-mute)'}">${doer?d.xlines.toLocaleString()+' lines':'— no merged code —'}</text>`;
+  });
+  // center labels
+  out += `
+    <text x="${split-8}" y="${T-8}" text-anchor="end" font-family="JetBrains Mono" font-size="10.5" fill="var(--paper-mute)" letter-spacing="1.1">← pgsql-hackers EMAILS 2025</text>
+    <text x="${split+18}" y="${T-8}" font-family="JetBrains Mono" font-size="10.5" fill="var(--paper-mute)" letter-spacing="1.1">LINES OF CODE AUTHORED, 2025 →</text>
+    <line x1="${split}" x2="${split}" y1="${T}" y2="${H-B}" stroke="var(--rule)"/>`;
+  document.getElementById('talker-chart').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Top 40 pgsql-hackers posters in 2025, with lines of code authored alongside">
+      ${out}
+    </svg>`;
+})();
+
+// ======================= theme toggle =======================
+(function theme(){
+  const root = document.documentElement;
+  const saved = localStorage.getItem('pgc-theme');
+  const qs = new URLSearchParams(location.search).get('theme');
+  if(saved==='light' || qs==='light') root.setAttribute('data-theme','light');
+  const apply = () => {
+    const cur = root.getAttribute('data-theme') || 'dark';
+    document.querySelectorAll('[data-set-theme]').forEach(b=>{
+      b.setAttribute('aria-pressed', b.dataset.setTheme===cur ? 'true':'false');
+    });
+  };
+  document.querySelectorAll('[data-set-theme]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const t = b.dataset.setTheme;
+      if(t==='dark') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t);
+      localStorage.setItem('pgc-theme', t);
+      apply();
+    });
+  });
+  apply();
+})();
+
+// reveal
+const io = new IntersectionObserver((es)=>{
+  es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }});
+}, {threshold:0.12});
+document.querySelectorAll('.reveal, section').forEach(el=>{ el.classList.add('reveal'); io.observe(el); });
+
+})();
+</script>
+</body>
+</html>
