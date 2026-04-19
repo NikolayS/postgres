@@ -1,0 +1,13 @@
+# Minimal GitLab Pages job — publishes docs/ from contrib-review only.
+# Does NOT interfere with upstream postgres builds (that repo has no CI here).
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - mkdir -p public
+    - cp -r docs/* public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "contrib-review"'
