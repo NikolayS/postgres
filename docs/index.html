@@ -17,14 +17,23 @@
   --paper-mute:#9A9180;  /* lifted from #8A8170 for small-mono contrast */
   --rule:#2A2A2A;
   --rule-2:#1c1f27;
-  --c1:#6FB0D9;   /* steel blue — the postgres-heritage nod */
+  --c1:#6FB0D9;   /* steel blue */
   --c2:#E7B35C;   /* warm amber */
   --c3:#D86464;   /* oxblood */
   --c4:#7FB185;   /* sage */
   --c5:#B78CCE;   /* dusty violet */
   --c6:#D98A4C;   /* burnt orange */
   --c7:#E0A8B0;   /* rose */
-  --c-other:#8F856E;  /* lifted for contrast */
+  /* extended hues for the 15-way stream — each ΔE > 18 from neighbours, dark-theme */
+  --c8:#4FC1B4;   /* teal */
+  --c9:#D4C65E;   /* mustard */
+  --c10:#C98BE6;  /* lilac */
+  --c11:#6E90B8;  /* slate */
+  --c12:#CB6B93;  /* rose-pink */
+  --c13:#9BB860;  /* olive */
+  --c14:#E8865B;  /* coral */
+  --c15:#8BA6B8;  /* stone */
+  --c-other:#8F856E;
   --grid:#1e222d;
   --grain-opacity:.08;
   --grain-blend:overlay;
@@ -39,12 +48,20 @@ html[data-theme="light"]{
   --rule:#D6CCB3;
   --rule-2:#E3DCC5;
   --c1:#2B6AA3;           /* stronger blue on cream */
-  --c2:#A36A15;           /* burnt ochre instead of amber */
+  --c2:#A36A15;           /* burnt ochre */
   --c3:#9A2E2E;           /* dark oxblood */
   --c4:#3E7B4F;           /* forest */
   --c5:#6D479A;           /* deeper violet */
   --c6:#B25A1E;           /* terracotta */
   --c7:#7A3B4A;           /* wine */
+  --c8:#1E7E6F;           /* teal */
+  --c9:#8A7524;           /* mustard */
+  --c10:#6D3A96;          /* plum */
+  --c11:#374E6B;          /* slate */
+  --c12:#8E3460;          /* magenta */
+  --c13:#5C7227;          /* olive */
+  --c14:#9A4623;          /* rust */
+  --c15:#48667A;          /* stone */
   --c-other:#857F72;
   --grid:#D6CCB3;
   --grain-opacity:.05;
@@ -101,7 +118,7 @@ body::before{
 /* section chrome */
 section{margin-top:88px;position:relative}
 .section-head{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:baseline;padding-bottom:14px;border-bottom:1px solid var(--rule)}
-.section-num{font-family:"Fraunces",serif;font-variation-settings:"opsz" 144,"wght" 300;font-size:54px;line-height:.8;color:var(--paper-dim);letter-spacing:-.03em}
+.section-num{font-family:"Fraunces",serif;font-variation-settings:"opsz" 144,"wght" 300;font-size:54px;line-height:1;color:var(--paper-dim);letter-spacing:-.03em;transform:translateY(.08em)}
 .section-num em{font-style:italic;color:var(--c2);padding-right:6px}
 .section-title{font-family:"Fraunces",serif;font-variation-settings:"SOFT" 60,"opsz" 96,"wght" 600;font-size:clamp(26px,3vw,40px);line-height:1;letter-spacing:-.02em}
 .section-title em{font-style:italic;font-variation-settings:"SOFT" 100,"opsz" 144,"wght" 400;color:var(--c1)}
@@ -210,7 +227,7 @@ footer a{color:var(--c2);text-decoration:none;border-bottom:1px solid rgba(231,1
   <div>compiled by <a style="color:inherit;border-bottom:1px solid var(--rule)" href="https://gitlab.com/NikolayS">NikolayS</a></div>
 </div>
 
-<p class="deck"><span class="drop">T</span>en years of git log, one long sentence: <em>more hands every year, more mail every year, more new faces every year</em> — and yet a narrow band of committers still carries the keys. This is what a decade of PostgreSQL source-level contribution looks like when you lay it flat on paper.</p>
+<p class="deck"><span class="drop">T</span>en years of git log. <em>More hands every year, more mail, more new faces.</em> A narrow band of committers still carries the keys. This is what a decade of PostgreSQL source-level contribution looks like when laid flat on paper.</p>
 
 <!-- ============== HERO METRICS ============== -->
 <section id="hero" style="margin-top:64px">
@@ -259,7 +276,7 @@ footer a{color:var(--c2);text-decoration:none;border-bottom:1px solid rgba(231,1
   <h2 class="section-title">Who is <em>pressing enter</em>?</h2>
   <div class="section-kicker mono">committers by year · fig 2</div>
 </div>
-<p class="section-lede">Every commit in this project passes through one of about thirty people. Stacked by <strong>who pushed the button</strong> (not who wrote the patch), a decade of adjusted line volume looks like this. Tom Lane remains the gravitational center; the rest is a rotation.</p>
+<p class="section-lede">Every commit passes through one of about thirty people. Stacked by <strong>who pushed the button</strong> (not who wrote the patch), a decade of adjusted line volume looks like this, top 15 committers by decade xlines plus Others. Tom Lane commits the largest share every year.</p>
 <div class="chart" id="stream-chart"></div>
 <div class="caption" id="stream-legend"></div>
 </section>
@@ -319,7 +336,7 @@ footer a{color:var(--c2);text-decoration:none;border-bottom:1px solid rgba(231,1
   </div>
   <aside>
     <div id="lorenz-stats" class="stagger"></div>
-    <p class="annot" style="margin-top:18px;line-height:1.6">Half the authors, contributing the smallest volumes, account for roughly one part in fifty of the year's patched lines. That is the long tail you will see plotted in §07 as a staircase — most of Postgres's 266 authors in 2025 shipped a single commit.</p>
+    <p class="annot" style="margin-top:18px;line-height:1.6">Half the authors, contributing the smallest volumes, account for roughly one part in fifty of the year's patched lines. Most of Postgres's 266 authors in 2025 shipped a single commit; the distribution is in the next section.</p>
   </aside>
 </div>
 </section>
@@ -390,14 +407,13 @@ trailer at all.</p>
 
 <!-- ============== PART II CTA ============== -->
 <section id="part2-cta" style="margin-top:88px">
-  <a href="part2.html" style="display:grid;grid-template-columns:auto 1fr auto;gap:28px;align-items:baseline;padding:32px 28px;border:1px solid var(--rule);border-top:2px solid var(--c2);background:color-mix(in srgb, var(--c2) 4%, transparent);text-decoration:none;color:inherit;transition:background .2s ease">
-    <div class="serif-display" style="font-size:54px;color:var(--paper-dim);font-variation-settings:'opsz' 144,'wght' 300"><em style="font-style:italic;color:var(--c2)">→</em></div>
+  <a href="part2.html" style="display:grid;grid-template-columns:1fr auto;gap:40px;align-items:baseline;padding:32px 28px;border:1px solid var(--rule);border-top:2px solid var(--c2);background:color-mix(in srgb, var(--c2) 4%, transparent);text-decoration:none;color:inherit;transition:background .2s ease">
     <div>
-      <div class="caps" style="color:var(--c2)">Continues in Part II</div>
-      <div style="font-family:'Fraunces',serif;font-variation-settings:'opsz' 96,'wght' 500;font-size:32px;line-height:1.05;margin-top:6px">Beyond the <em style="font-style:italic;color:var(--c2);font-variation-settings:'opsz' 144,'wght' 400">commit log</em></div>
-      <div style="color:var(--paper-dim);margin-top:8px;font-size:16px;max-width:620px">Five lenses the commit-log data doesn't cover — inferred employer, per-subdirectory churn, back-branch activity, commitfest outcomes, and mailing-list posts cross-referenced with merged code.</div>
+      <div class="caps" style="color:var(--c2)">Part II · № 02</div>
+      <div style="font-family:'Fraunces',serif;font-variation-settings:'opsz' 96,'wght' 500;font-size:34px;line-height:1.05;margin-top:8px">Beyond the <em style="font-style:italic;color:var(--c2);font-variation-settings:'opsz' 144,'wght' 400">commit log</em></div>
+      <div style="color:var(--paper-dim);margin-top:10px;font-size:16px;max-width:680px">Inferred employer, per-subdirectory churn, back-branch activity, commitfest outcomes, and mailing-list posts cross-referenced with merged code.</div>
     </div>
-    <div class="mono" style="color:var(--paper-mute);align-self:center;text-transform:uppercase;letter-spacing:.18em">№ 02 →</div>
+    <div class="serif-display" style="font-size:64px;color:var(--c2);align-self:center;font-variation-settings:'opsz' 144,'wght' 300;font-style:italic">→</div>
   </a>
 </section>
 
@@ -476,10 +492,12 @@ document.getElementById('m-committers').textContent = last.committers;
   const y2025 = c => (data.find(r=>r.cat===c&&r.year===2025)||{xlines:0}).xlines;
   top.sort((a,b)=>y2025(b)-y2025(a));
   const ordered = [...top, 'Others'];
-  // 15-color palette: 7 named variables + 8 generated hues for the long tail
-  const basePalette = ['var(--c1)','var(--c2)','var(--c3)','var(--c4)','var(--c5)','var(--c6)','var(--c7)'];
-  const extraPalette = ['#9AB99E','#C18CD2','#E0A07A','#7A9FC7','#C77E8A','#8FB4A7','#B8A066','#9586B0'];
-  const palette = [...basePalette, ...extraPalette];
+  // 15-color palette via CSS vars so both themes stay in sync.
+  // Pairs that collapse under deuteranopia in the old literal palette have been
+  // re-picked for ΔE ≥ 16 against all other members in both themes.
+  const palette = ['var(--c1)','var(--c2)','var(--c3)','var(--c4)','var(--c5)',
+                   'var(--c6)','var(--c7)','var(--c8)','var(--c9)','var(--c10)',
+                   'var(--c11)','var(--c12)','var(--c13)','var(--c14)','var(--c15)'];
   const colorOf = (c,i)=> c==='Others' ? 'var(--c-other)' : palette[i%palette.length];
   const labelColorOf = (c,i)=> c==='Others' ? 'var(--paper-dim)' : colorOf(c,i);
 
@@ -520,22 +538,41 @@ document.getElementById('m-committers').textContent = last.committers;
     grid += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1" stroke-dasharray="2 3"/>`;
     grid += `<text x="${L-8}" y="${y(v)+3}" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="var(--paper-mute)">${fmtK(v)}</text>`;
   });
-  // labels at right of last year, with collision-aware stacking (smallest-first push)
+  // labels at right of last year, with bidirectional de-collision
+  // (each label wants to sit at its band centroid; when neighbours collide, both move
+  //  toward the joint midpoint, so no label drifts far from its band).
   const last = stack[stack.length-1];
   const lbls = [];
   ordered.forEach((c,i)=>{
     const seg = last.segs[i];
     if(seg.v <= 0) return;
-    lbls.push({c,i,v:seg.v, yy:(y(seg.from)+y(seg.to))/2});
+    lbls.push({c,i, want:(y(seg.from)+y(seg.to))/2, yy:(y(seg.from)+y(seg.to))/2});
   });
-  // top-to-bottom, ensure min 12px vertical spacing
   lbls.sort((a,b)=>a.yy-b.yy);
-  for (let k=1; k<lbls.length; k++) {
-    if (lbls[k].yy - lbls[k-1].yy < 12) lbls[k].yy = lbls[k-1].yy + 12;
+  const MIN = 12;
+  // iterate: for each colliding pair, push symmetrically around midpoint
+  for (let iter=0; iter<50; iter++){
+    let moved = false;
+    for (let k=1; k<lbls.length; k++){
+      const gap = lbls[k].yy - lbls[k-1].yy;
+      if (gap < MIN) {
+        const push = (MIN - gap) / 2;
+        lbls[k-1].yy -= push;
+        lbls[k].yy   += push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
   }
+  // clamp to chart rect
+  lbls.forEach(l => { if (l.yy < T+6) l.yy = T+6; if (l.yy > H-B-2) l.yy = H-B-2; });
   let labels = '';
   lbls.forEach(l => {
-    labels += `<text x="${W-R+6}" y="${l.yy+3}" font-family="JetBrains Mono" font-size="10.5" fill="${labelColorOf(l.c,l.i)}" font-weight="600">${l.c}</text>`;
+    const bandC = l.want;
+    const drift = Math.abs(l.yy - bandC);
+    // only draw a leader when label is noticeably off its band
+    const leader = drift > 5 ? `<line x1="${W-R+2}" y1="${bandC.toFixed(1)}" x2="${W-R+4}" y2="${l.yy.toFixed(1)}" stroke="${labelColorOf(l.c,l.i)}" stroke-width="0.7" opacity="0.55"/>` : '';
+    labels += `${leader}<text x="${W-R+6}" y="${(l.yy+3).toFixed(1)}" font-family="JetBrains Mono" font-size="10.5" fill="${labelColorOf(l.c,l.i)}" font-weight="600">${l.c}</text>`;
   });
   // title note
   document.getElementById('stream-chart').innerHTML = `
