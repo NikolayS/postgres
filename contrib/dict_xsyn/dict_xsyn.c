@@ -3,7 +3,7 @@
  * dict_xsyn.c
  *	  Extended synonym dictionary
  *
- * Copyright (c) 2007-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2007-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/dict_xsyn/dict_xsyn.c
@@ -109,9 +109,9 @@ read_dictionary(DictSyn *d, const char *filename)
 			{
 				d->len = (d->len > 0) ? 2 * d->len : 16;
 				if (d->syn)
-					d->syn = (Syn *) repalloc(d->syn, sizeof(Syn) * d->len);
+					d->syn = repalloc_array(d->syn, Syn, d->len);
 				else
-					d->syn = (Syn *) palloc(sizeof(Syn) * d->len);
+					d->syn = palloc_array(Syn, d->len);
 			}
 
 			/* Save first word only if we will match it */
@@ -150,7 +150,7 @@ dxsyn_init(PG_FUNCTION_ARGS)
 	ListCell   *l;
 	char	   *filename = NULL;
 
-	d = (DictSyn *) palloc0(sizeof(DictSyn));
+	d = palloc0_object(DictSyn);
 	d->len = 0;
 	d->syn = NULL;
 	d->matchorig = true;
@@ -235,7 +235,7 @@ dxsyn_lexize(PG_FUNCTION_ARGS)
 		char	   *end;
 		int			nsyns = 0;
 
-		res = palloc(sizeof(TSLexeme));
+		res = palloc_object(TSLexeme);
 
 		pos = value;
 		while ((syn = find_word(pos, &end)) != NULL)

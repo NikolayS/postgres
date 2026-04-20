@@ -3,7 +3,7 @@
  * nodeSeqscan.c
  *	  Support routines for sequential scans of relations.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -131,8 +131,12 @@ ExecSeqScanWithQual(PlanState *pstate)
 {
 	SeqScanState *node = castNode(SeqScanState, pstate);
 
+	/*
+	 * Use pg_assume() for != NULL tests to make the compiler realize no
+	 * runtime check for the field is needed in ExecScanExtended().
+	 */
 	Assert(pstate->state->es_epq_active == NULL);
-	Assert(pstate->qual != NULL);
+	pg_assume(pstate->qual != NULL);
 	Assert(pstate->ps_ProjInfo == NULL);
 
 	return ExecScanExtended(&node->ss,
@@ -153,7 +157,7 @@ ExecSeqScanWithProject(PlanState *pstate)
 
 	Assert(pstate->state->es_epq_active == NULL);
 	Assert(pstate->qual == NULL);
-	Assert(pstate->ps_ProjInfo != NULL);
+	pg_assume(pstate->ps_ProjInfo != NULL);
 
 	return ExecScanExtended(&node->ss,
 							(ExecScanAccessMtd) SeqNext,
@@ -173,8 +177,8 @@ ExecSeqScanWithQualProject(PlanState *pstate)
 	SeqScanState *node = castNode(SeqScanState, pstate);
 
 	Assert(pstate->state->es_epq_active == NULL);
-	Assert(pstate->qual != NULL);
-	Assert(pstate->ps_ProjInfo != NULL);
+	pg_assume(pstate->qual != NULL);
+	pg_assume(pstate->ps_ProjInfo != NULL);
 
 	return ExecScanExtended(&node->ss,
 							(ExecScanAccessMtd) SeqNext,

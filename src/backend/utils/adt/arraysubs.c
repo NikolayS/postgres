@@ -3,7 +3,7 @@
  * arraysubs.c
  *	  Subscripting support functions for arrays.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -140,7 +140,7 @@ array_subscript_transform(SubscriptingRef *sbsref,
 		upperIndexpr = lappend(upperIndexpr, subexpr);
 	}
 
-	/* ... and store the transformed lists into the SubscriptRef node */
+	/* ... and store the transformed lists into the SubscriptingRef node */
 	sbsref->refupperindexpr = upperIndexpr;
 	sbsref->reflowerindexpr = lowerIndexpr;
 
@@ -497,7 +497,7 @@ array_exec_setup(const SubscriptingRef *sbsref,
 	/*
 	 * Allocate type-specific workspace.
 	 */
-	workspace = (ArraySubWorkspace *) palloc(sizeof(ArraySubWorkspace));
+	workspace = palloc_object(ArraySubWorkspace);
 	sbsrefstate->workspace = workspace;
 
 	/*

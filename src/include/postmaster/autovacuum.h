@@ -4,7 +4,7 @@
  *	  header file for integrated autovacuum daemon
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/postmaster/autovacuum.h
@@ -48,6 +48,7 @@ extern PGDLLIMPORT int autovacuum_vac_cost_limit;
 extern PGDLLIMPORT int AutovacuumLauncherPid;
 
 extern PGDLLIMPORT int Log_autovacuum_min_duration;
+extern PGDLLIMPORT int Log_autoanalyze_min_duration;
 
 /* Status inquiry functions */
 extern bool AutoVacuumingActive(void);

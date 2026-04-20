@@ -5,7 +5,7 @@
  * Archive streamer for verification of a tar format backup (including
  * compressed tar format backups).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * src/bin/pg_verifybackup/astreamer_verify.c
  *
@@ -69,7 +69,7 @@ astreamer_verify_content_new(astreamer *next, verifier_context *context,
 {
 	astreamer_verify *streamer;
 
-	streamer = palloc0(sizeof(astreamer_verify));
+	streamer = palloc0_object(astreamer_verify);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_verify_ops;
 

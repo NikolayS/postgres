@@ -7,7 +7,7 @@
  * support for xadd and cmpxchg. Given that the 386 isn't supported anywhere
  * anymore that's not much of a restriction luckily.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES:
@@ -241,6 +241,6 @@ pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64 *ptr, int64 add_)
  */
 #if defined(__i568__) || defined(__i668__) || /* gcc i586+ */  \
 	(defined(_M_IX86) && _M_IX86 >= 500) || /* msvc i586+ */ \
-	defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) /* gcc, sunpro, msvc */
+	defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) /* gcc, msvc */
 #define PG_HAVE_8BYTE_SINGLE_COPY_ATOMICITY
 #endif /* 8 byte single-copy atomicity */

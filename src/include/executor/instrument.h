@@ -4,7 +4,7 @@
  *	  definitions for run-time statistics collection
  *
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  * src/include/executor/instrument.h
  *
@@ -53,6 +53,7 @@ typedef struct WalUsage
 	int64		wal_records;	/* # of WAL records produced */
 	int64		wal_fpi;		/* # of WAL full page images produced */
 	uint64		wal_bytes;		/* size of WAL records produced */
+	uint64		wal_fpi_bytes;	/* size of WAL full page images produced */
 	int64		wal_buffers_full;	/* # of times the WAL buffers became full */
 } WalUsage;
 

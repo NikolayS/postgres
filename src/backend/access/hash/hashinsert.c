@@ -3,7 +3,7 @@
  * hashinsert.c
  *	  Item insertion in hash tables for Postgres.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -310,10 +310,8 @@ _hash_pgaddtup(Relation rel, Buffer buf, Size itemsize, IndexTuple itup,
 		itup_off = _hash_binsearch(page, hashkey);
 	}
 
-	if (PageAddItem(page, (Item) itup, itemsize, itup_off, false, false)
-		== InvalidOffsetNumber)
-		elog(ERROR, "failed to add index item to \"%s\"",
-			 RelationGetRelationName(rel));
+	if (PageAddItem(page, itup, itemsize, itup_off, false, false) == InvalidOffsetNumber)
+		elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(rel));
 
 	return itup_off;
 }
@@ -352,10 +350,8 @@ _hash_pgaddmultitup(Relation rel, Buffer buf, IndexTuple *itups,
 
 		itup_offsets[i] = itup_off;
 
-		if (PageAddItem(page, (Item) itups[i], itemsize, itup_off, false, false)
-			== InvalidOffsetNumber)
-			elog(ERROR, "failed to add index item to \"%s\"",
-				 RelationGetRelationName(rel));
+		if (PageAddItem(page, itups[i], itemsize, itup_off, false, false) == InvalidOffsetNumber)
+			elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(rel));
 	}
 }
 

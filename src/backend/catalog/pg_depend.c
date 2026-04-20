@@ -3,7 +3,7 @@
  * pg_depend.c
  *	  routines to support manipulation of the pg_depend relation
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -88,7 +88,7 @@ recordMultipleDependencies(const ObjectAddress *depender,
 	 */
 	max_slots = Min(nreferenced,
 					MAX_CATALOG_MULTI_INSERT_BYTES / sizeof(FormData_pg_depend));
-	slot = palloc(sizeof(TupleTableSlot *) * max_slots);
+	slot = palloc_array(TupleTableSlot *, max_slots);
 
 	/* Don't open indexes unless we need to make an update */
 	indstate = NULL;

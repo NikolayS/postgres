@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 tests += {
   'name': 'test_misc',
@@ -16,6 +16,11 @@ tests += {
       't/005_timeouts.pl',
       't/006_signal_autovacuum.pl',
       't/007_catcache_inval.pl',
+      't/008_replslot_single_user.pl',
+      't/009_log_temp_files.pl',
+      't/010_index_concurrently_upsert.pl',
     ],
+    # The injection points are cluster-wide, so disable installcheck
+    'runningcheck': false,
   },
 }

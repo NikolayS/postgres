@@ -7,7 +7,7 @@
  * store values of named composite types, domains over named composite types,
  * and record types (registered or anonymous).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -547,7 +547,7 @@ expanded_record_set_tuple(ExpandedRecordHeader *erh,
 		for (i = 0; i < erh->nfields; i++)
 		{
 			if (!erh->dnulls[i] &&
-				!(TupleDescAttr(tupdesc, i)->attbyval))
+				!(TupleDescCompactAttr(tupdesc, i)->attbyval))
 			{
 				char	   *oldValue = (char *) DatumGetPointer(erh->dvalues[i]);
 

@@ -3,7 +3,7 @@
  * nodeIndexonlyscan.c
  *	  Routines to support index-only scans
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -693,8 +693,7 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 		 * Now create an array to mark the attribute numbers of the keys that
 		 * need to be converted from cstring to name.
 		 */
-		indexstate->ioss_NameCStringAttNums = (AttrNumber *)
-			palloc(sizeof(AttrNumber) * namecount);
+		indexstate->ioss_NameCStringAttNums = palloc_array(AttrNumber, namecount);
 
 		for (int attnum = 0; attnum < indnkeyatts; attnum++)
 		{

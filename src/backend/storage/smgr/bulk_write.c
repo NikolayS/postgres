@@ -25,7 +25,7 @@
  * even if a checkpoint happens concurrently.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -101,7 +101,7 @@ smgr_bulk_start_smgr(SMgrRelation smgr, ForkNumber forknum, bool use_wal)
 {
 	BulkWriteState *state;
 
-	state = palloc(sizeof(BulkWriteState));
+	state = palloc_object(BulkWriteState);
 	state->smgr = smgr;
 	state->forknum = forknum;
 	state->use_wal = use_wal;

@@ -2,7 +2,7 @@
  * bgworker.c
  *		POSTGRES pluggable background workers implementation
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/postmaster/bgworker.c
@@ -26,6 +26,7 @@
 #include "storage/lwlock.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/shmem.h"
 #include "tcop/tcopprot.h"
@@ -131,7 +132,10 @@ static const struct
 		"ParallelApplyWorkerMain", ParallelApplyWorkerMain
 	},
 	{
-		"TablesyncWorkerMain", TablesyncWorkerMain
+		"TableSyncWorkerMain", TableSyncWorkerMain
+	},
+	{
+		"SequenceSyncWorkerMain", SequenceSyncWorkerMain
 	}
 };
 
@@ -613,6 +617,7 @@ ResetBackgroundWorkerCrashTimes(void)
 			 * resetting.
 			 */
 			rw->rw_crashed_at = 0;
+			rw->rw_pid = 0;
 
 			/*
 			 * If there was anyone waiting for it, they're history.
@@ -659,6 +664,17 @@ SanityCheckBackgroundWorker(BackgroundWorker *worker, int elevel)
 		}
 
 		/* XXX other checks? */
+	}
+
+	/* Interruptible workers require a database connection */
+	if ((worker->bgw_flags & BGWORKER_INTERRUPTIBLE) &&
+		!(worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION))
+	{
+		ereport(elevel,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("background worker \"%s\": cannot make background workers interruptible without database access",
+						worker->bgw_name)));
+		return false;
 	}
 
 	if ((worker->bgw_restart_time < 0 &&
@@ -1128,7 +1144,7 @@ RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
 	 */
 	if (success && handle)
 	{
-		*handle = palloc(sizeof(BackgroundWorkerHandle));
+		*handle = palloc_object(BackgroundWorkerHandle);
 		(*handle)->slot = slotno;
 		(*handle)->generation = generation;
 	}
@@ -1394,4 +1410,43 @@ GetBackgroundWorkerTypeByPid(pid_t pid)
 		return NULL;
 
 	return result;
+}
+
+/*
+ * Terminate all background workers connected to the given database, if the
+ * workers can be interrupted.
+ */
+void
+TerminateBackgroundWorkersForDatabase(Oid databaseId)
+{
+	bool		signal_postmaster = false;
+
+	LWLockAcquire(BackgroundWorkerLock, LW_EXCLUSIVE);
+
+	/*
+	 * Iterate through slots, looking for workers connected to the given
+	 * database.
+	 */
+	for (int slotno = 0; slotno < BackgroundWorkerData->total_slots; slotno++)
+	{
+		BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
+
+		if (slot->in_use &&
+			(slot->worker.bgw_flags & BGWORKER_INTERRUPTIBLE))
+		{
+			PGPROC	   *proc = BackendPidGetProc(slot->pid);
+
+			if (proc && proc->databaseId == databaseId)
+			{
+				slot->terminate = true;
+				signal_postmaster = true;
+			}
+		}
+	}
+
+	LWLockRelease(BackgroundWorkerLock);
+
+	/* Make sure the postmaster notices the change to shared memory. */
+	if (signal_postmaster)
+		SendPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE);
 }

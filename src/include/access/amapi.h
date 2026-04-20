@@ -3,7 +3,7 @@
  * amapi.h
  *	  API for Postgres index access methods.
  *
- * Copyright (c) 2015-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2015-2026, PostgreSQL Global Development Group
  *
  * src/include/access/amapi.h
  *
@@ -15,17 +15,19 @@
 #include "access/cmptype.h"
 #include "access/genam.h"
 #include "access/stratnum.h"
+#include "nodes/nodes.h"
+#include "nodes/pg_list.h"
 
 /*
  * We don't wish to include planner header files here, since most of an index
  * AM's implementation isn't concerned with those data structures.  To allow
  * declaring amcostestimate_function here, use forward struct references.
  */
-struct PlannerInfo;
-struct IndexPath;
+typedef struct PlannerInfo PlannerInfo;
+typedef struct IndexPath IndexPath;
 
 /* Likewise, this file shouldn't depend on execnodes.h. */
-struct IndexInfo;
+typedef struct IndexInfo IndexInfo;
 
 
 /*
@@ -110,7 +112,7 @@ typedef StrategyNumber (*amtranslate_cmptype_function) (CompareType cmptype, Oid
 /* build new index */
 typedef IndexBuildResult *(*ambuild_function) (Relation heapRelation,
 											   Relation indexRelation,
-											   struct IndexInfo *indexInfo);
+											   IndexInfo *indexInfo);
 
 /* build empty index */
 typedef void (*ambuildempty_function) (Relation indexRelation);
@@ -123,11 +125,11 @@ typedef bool (*aminsert_function) (Relation indexRelation,
 								   Relation heapRelation,
 								   IndexUniqueCheck checkUnique,
 								   bool indexUnchanged,
-								   struct IndexInfo *indexInfo);
+								   IndexInfo *indexInfo);
 
 /* cleanup after insert */
 typedef void (*aminsertcleanup_function) (Relation indexRelation,
-										  struct IndexInfo *indexInfo);
+										  IndexInfo *indexInfo);
 
 /* bulk delete */
 typedef IndexBulkDeleteResult *(*ambulkdelete_function) (IndexVacuumInfo *info,
@@ -143,8 +145,8 @@ typedef IndexBulkDeleteResult *(*amvacuumcleanup_function) (IndexVacuumInfo *inf
 typedef bool (*amcanreturn_function) (Relation indexRelation, int attno);
 
 /* estimate cost of an indexscan */
-typedef void (*amcostestimate_function) (struct PlannerInfo *root,
-										 struct IndexPath *path,
+typedef void (*amcostestimate_function) (PlannerInfo *root,
+										 IndexPath *path,
 										 double loop_count,
 										 Cost *indexStartupCost,
 										 Cost *indexTotalCost,
@@ -224,8 +226,8 @@ typedef void (*aminitparallelscan_function) (void *target);
 typedef void (*amparallelrescan_function) (IndexScanDesc scan);
 
 /*
- * API struct for an index AM.  Note this must be stored in a single palloc'd
- * chunk of memory.
+ * API struct for an index AM.  Note we expect index AMs to allocate these
+ * structs statically; the core code never copies nor frees them.
  */
 typedef struct IndexAmRoutine
 {
@@ -293,7 +295,7 @@ typedef struct IndexAmRoutine
 	ambuild_function ambuild;
 	ambuildempty_function ambuildempty;
 	aminsert_function aminsert;
-	aminsertcleanup_function aminsertcleanup;
+	aminsertcleanup_function aminsertcleanup;	/* can be NULL */
 	ambulkdelete_function ambulkdelete;
 	amvacuumcleanup_function amvacuumcleanup;
 	amcanreturn_function amcanreturn;	/* can be NULL */
@@ -324,8 +326,8 @@ typedef struct IndexAmRoutine
 
 
 /* Functions in access/index/amapi.c */
-extern IndexAmRoutine *GetIndexAmRoutine(Oid amhandler);
-extern IndexAmRoutine *GetIndexAmRoutineByAmId(Oid amoid, bool noerror);
+extern const IndexAmRoutine *GetIndexAmRoutine(Oid amhandler);
+extern const IndexAmRoutine *GetIndexAmRoutineByAmId(Oid amoid, bool noerror);
 extern CompareType IndexAmTranslateStrategy(StrategyNumber strategy, Oid amoid, Oid opfamily, bool missing_ok);
 extern StrategyNumber IndexAmTranslateCompareType(CompareType cmptype, Oid amoid, Oid opfamily, bool missing_ok);
 

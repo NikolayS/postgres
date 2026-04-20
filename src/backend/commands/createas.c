@@ -13,7 +13,7 @@
  * we must return a tuples-processed count in the QueryCompletion.  (We no
  * longer do that for CTAS ... WITH NO DATA, however.)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -321,7 +321,7 @@ ExecCreateTableAs(ParseState *pstate, CreateTableAsStmt *stmt,
 
 		/* plan the query */
 		plan = pg_plan_query(query, pstate->p_sourcetext,
-							 CURSOR_OPT_PARALLEL_OK, params);
+							 CURSOR_OPT_PARALLEL_OK, params, NULL);
 
 		/*
 		 * Use a snapshot with an updated command ID to ensure this query sees
@@ -439,7 +439,7 @@ CreateTableAsRelExists(CreateTableAsStmt *ctas)
 DestReceiver *
 CreateIntoRelDestReceiver(IntoClause *intoClause)
 {
-	DR_intorel *self = (DR_intorel *) palloc0(sizeof(DR_intorel));
+	DR_intorel *self = palloc0_object(DR_intorel);
 
 	self->pub.receiveSlot = intorel_receive;
 	self->pub.rStartup = intorel_startup;

@@ -4,7 +4,7 @@
  *	  routines for fast build of inverted index
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -93,7 +93,7 @@ ginAllocEntryAccumulator(void *arg)
 	 */
 	if (accum->entryallocator == NULL || accum->eas_used >= DEF_NENTRY)
 	{
-		accum->entryallocator = palloc(sizeof(GinEntryAccumulator) * DEF_NENTRY);
+		accum->entryallocator = palloc_array(GinEntryAccumulator, DEF_NENTRY);
 		accum->allocatedMemory += GetMemoryChunkSpace(accum->entryallocator);
 		accum->eas_used = 0;
 	}
@@ -177,8 +177,7 @@ ginInsertBAEntry(BuildAccumulator *accum,
 		ea->maxcount = DEF_NPTR;
 		ea->count = 1;
 		ea->shouldSort = false;
-		ea->list =
-			(ItemPointerData *) palloc(sizeof(ItemPointerData) * DEF_NPTR);
+		ea->list = palloc_array(ItemPointerData, DEF_NPTR);
 		ea->list[0] = *heapptr;
 		accum->allocatedMemory += GetMemoryChunkSpace(ea->list);
 	}

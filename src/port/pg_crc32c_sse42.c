@@ -3,7 +3,7 @@
  * pg_crc32c_sse42.c
  *	  Compute CRC-32C checksum using Intel SSE 4.2 or AVX-512 instructions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -123,7 +123,7 @@ pg_comp_crc32c_avx512(pg_crc32c crc, const void *data, size_t len)
 		__m512i		k;
 
 		k = _mm512_broadcast_i32x4(_mm_setr_epi32(0x740eef02, 0, 0x9e4addf8, 0));
-		x0 = _mm512_xor_si512(_mm512_castsi128_si512(_mm_cvtsi32_si128(crc0)), x0);
+		x0 = _mm512_xor_si512(_mm512_zextsi128_si512(_mm_cvtsi32_si128(crc0)), x0);
 		buf += 64;
 
 		/* Main loop. */

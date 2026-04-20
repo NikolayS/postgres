@@ -3,7 +3,7 @@
  * globals.c
  *	  global variable declarations
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -140,6 +140,8 @@ int			max_parallel_maintenance_workers = 2;
  * register background workers.
  */
 int			NBuffers = 16384;
+int			SharedBuffersGUC = 16384;
+int			MaxNBuffers = 0;
 int			MaxConnections = 100;
 int			max_worker_processes = 8;
 int			max_parallel_workers = 8;

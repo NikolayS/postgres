@@ -1,4 +1,4 @@
-# Copyright (c) 2025, PostgreSQL Global Development Group
+# Copyright (c) 2025-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -67,8 +67,9 @@ sub change_number_of_io_workers
 
 	if ($expect_failure)
 	{
-		ok( $stderr =~
-			  /$worker_count is outside the valid range for parameter "io_workers"/,
+		like(
+			$stderr,
+			qr/$worker_count is outside the valid range for parameter "io_workers"/,
 			"updating number of io_workers to $worker_count failed, as expected"
 		);
 

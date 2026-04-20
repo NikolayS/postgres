@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 psql_sources = files(
   'command.c',
@@ -77,6 +77,7 @@ tests += {
       't/001_basic.pl',
       't/010_tab_completion.pl',
       't/020_cancel.pl',
+      't/030_pager.pl',
     ],
   },
 }

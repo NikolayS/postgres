@@ -8,7 +8,7 @@
  * signal handler sets a flag variable.  See latch.h for more information
  * on how to use them.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -187,9 +187,11 @@ WaitLatch(Latch *latch, int wakeEvents, long timeout,
 	if (!(wakeEvents & WL_LATCH_SET))
 		latch = NULL;
 	ModifyWaitEvent(LatchWaitSet, LatchWaitSetLatchPos, WL_LATCH_SET, latch);
-	ModifyWaitEvent(LatchWaitSet, LatchWaitSetPostmasterDeathPos,
-					(wakeEvents & (WL_EXIT_ON_PM_DEATH | WL_POSTMASTER_DEATH)),
-					NULL);
+
+	if (IsUnderPostmaster)
+		ModifyWaitEvent(LatchWaitSet, LatchWaitSetPostmasterDeathPos,
+						(wakeEvents & (WL_EXIT_ON_PM_DEATH | WL_POSTMASTER_DEATH)),
+						NULL);
 
 	if (WaitEventSetWait(LatchWaitSet,
 						 (wakeEvents & WL_TIMEOUT) ? timeout : -1,

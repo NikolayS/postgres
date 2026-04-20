@@ -3,7 +3,7 @@
  * collationcmds.c
  *	  collation-related commands support code
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -13,6 +13,10 @@
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
+
+#ifdef USE_ICU
+#include <unicode/uloc.h>
+#endif
 
 #include "access/htup_details.h"
 #include "access/table.h"

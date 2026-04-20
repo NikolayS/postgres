@@ -4,7 +4,7 @@
  *	  definition of the "database" system catalog (pg_database)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_database.h
@@ -123,6 +123,7 @@ DECLARE_OID_DEFINING_MACRO(PostgresDbOid, 5);
  */
 #define		  DATCONNLIMIT_INVALID_DB	-2
 
+extern Oid	get_database_oid(const char *dbname, bool missing_ok);
 extern bool database_is_invalid_form(Form_pg_database datform);
 extern bool database_is_invalid_oid(Oid dboid);
 

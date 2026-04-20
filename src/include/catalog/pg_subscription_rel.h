@@ -4,7 +4,7 @@
  *	  definition of the system catalog containing the state for each
  *	  replicated table in each subscription (pg_subscription_rel)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_subscription_rel.h
@@ -82,14 +82,40 @@ typedef struct SubscriptionRelState
 	char		state;
 } SubscriptionRelState;
 
+/*
+ * Holds local sequence identity and corresponding publisher values used during
+ * sequence synchronization.
+ */
+typedef struct LogicalRepSequenceInfo
+{
+	/* Sequence information retrieved from the local node */
+	char	   *seqname;
+	char	   *nspname;
+	Oid			localrelid;
+
+	/* Sequence information retrieved from the publisher node */
+	XLogRecPtr	page_lsn;
+	int64		last_value;
+	bool		is_called;
+
+	/*
+	 * True if the sequence identified by nspname + seqname exists on the
+	 * publisher.
+	 */
+	bool		found_on_pub;
+} LogicalRepSequenceInfo;
+
 extern void AddSubscriptionRelState(Oid subid, Oid relid, char state,
 									XLogRecPtr sublsn, bool retain_lock);
 extern void UpdateSubscriptionRelState(Oid subid, Oid relid, char state,
-									   XLogRecPtr sublsn);
+									   XLogRecPtr sublsn, bool already_locked);
 extern char GetSubscriptionRelState(Oid subid, Oid relid, XLogRecPtr *sublsn);
 extern void RemoveSubscriptionRel(Oid subid, Oid relid);
 
-extern bool HasSubscriptionRelations(Oid subid);
-extern List *GetSubscriptionRelations(Oid subid, bool not_ready);
+extern bool HasSubscriptionTables(Oid subid);
+extern List *GetSubscriptionRelations(Oid subid, bool tables, bool sequences,
+									  bool not_ready);
+
+extern void UpdateDeadTupleRetentionStatus(Oid subid, bool active);
 
 #endif							/* PG_SUBSCRIPTION_REL_H */

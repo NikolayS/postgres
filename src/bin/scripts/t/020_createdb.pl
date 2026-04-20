@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -351,9 +351,9 @@ $node->issues_sql_like(
 	'create database with owner role_foobar');
 ($ret, $stdout, $stderr) =
   $node->psql('foobar2', 'DROP OWNED BY role_foobar;', on_error_die => 1,);
-ok($ret == 0, "DROP OWNED BY role_foobar");
+is($ret, 0, "DROP OWNED BY role_foobar");
 ($ret, $stdout, $stderr) =
   $node->psql('foobar2', 'DROP DATABASE foobar8;', on_error_die => 1,);
-ok($ret == 0, "DROP DATABASE foobar8");
+is($ret, 0, "DROP DATABASE foobar8");
 
 done_testing();

@@ -13,7 +13,7 @@
  *
  * Author: Andreas Pflug <pgadmin@pse-consulting.de>
  *
- * Copyright (c) 2004-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2004-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -960,7 +960,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 						 * Need a free slot, but there isn't one in the list,
 						 * so create a new one and extend the list with it.
 						 */
-						free_slot = palloc(sizeof(save_buffer));
+						free_slot = palloc_object(save_buffer);
 						buffer_list = lappend(buffer_list, free_slot);
 						buffer_lists[p.pid % NBUFFER_LISTS] = buffer_list;
 					}

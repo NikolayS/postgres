@@ -6,7 +6,7 @@
  * Attribute options are cached separately from the fixed-size portion of
  * pg_attribute entries, which are handled by the relcache.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -86,7 +86,7 @@ relatt_cache_syshash(const void *key, Size keysize)
 	const AttoptCacheKey *ckey = key;
 
 	Assert(keysize == sizeof(*ckey));
-	return GetSysCacheHashValue2(ATTNUM, ckey->attrelid, ckey->attnum);
+	return GetSysCacheHashValue2(ATTNUM, ObjectIdGetDatum(ckey->attrelid), Int32GetDatum(ckey->attnum));
 }
 
 /*

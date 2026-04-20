@@ -3,7 +3,7 @@
  * nodeHashjoin.c
  *	  Routines to handle hash join nodes
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -899,7 +899,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 		 */
 		if (OidIsValid(hash->skewTable))
 		{
-			hashstate->skew_hashfunction = palloc0(sizeof(FmgrInfo));
+			hashstate->skew_hashfunction = palloc0_object(FmgrInfo);
 			hashstate->skew_collation = linitial_oid(node->hashcollations);
 			fmgr_info(outer_hashfuncid[0], hashstate->skew_hashfunction);
 		}
@@ -1541,8 +1541,7 @@ ExecReScanHashJoin(HashJoinState *node)
 			/* accumulate stats from old hash table, if wanted */
 			/* (this should match ExecShutdownHash) */
 			if (hashNode->ps.instrument && !hashNode->hinstrument)
-				hashNode->hinstrument = (HashInstrumentation *)
-					palloc0(sizeof(HashInstrumentation));
+				hashNode->hinstrument = palloc0_object(HashInstrumentation);
 			if (hashNode->hinstrument)
 				ExecHashAccumInstrumentation(hashNode->hinstrument,
 											 hashNode->hashtable);

@@ -4,7 +4,7 @@
  *	  Routines to attempt to prove logical implications between predicate
  *	  expressions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -967,7 +967,7 @@ arrayconst_startup_fn(Node *clause, PredIterInfo info)
 	char		elmalign;
 
 	/* Create working state struct */
-	state = (ArrayConstIterState *) palloc(sizeof(ArrayConstIterState));
+	state = palloc_object(ArrayConstIterState);
 	info->state = state;
 
 	/* Deconstruct the array literal */
@@ -1046,7 +1046,7 @@ arrayexpr_startup_fn(Node *clause, PredIterInfo info)
 	ArrayExpr  *arrayexpr;
 
 	/* Create working state struct */
-	state = (ArrayExprIterState *) palloc(sizeof(ArrayExprIterState));
+	state = palloc_object(ArrayExprIterState);
 	info->state = state;
 
 	/* Set up a dummy OpExpr to return as the per-item node */

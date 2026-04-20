@@ -3,7 +3,7 @@
  * pgoutput.c
  *		Logical Replication output plugin
  *
- * Copyright (c) 2012-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/backend/replication/pgoutput/pgoutput.c
@@ -235,6 +235,7 @@ static bool get_schema_sent_in_streamed_txn(RelationSyncEntry *entry,
 											TransactionId xid);
 static void init_tuple_slot(PGOutputData *data, Relation relation,
 							RelationSyncEntry *entry);
+static void pgoutput_memory_context_reset(void *arg);
 
 /* row filter routines */
 static EState *create_estate_for_relation(Relation rel);
@@ -297,10 +298,12 @@ parse_output_parameters(List *options, PGOutputData *data)
 	bool		two_phase_option_given = false;
 	bool		origin_option_given = false;
 
+	/* Initialize optional parameters to defaults */
 	data->binary = false;
 	data->streaming = LOGICALREP_STREAM_OFF;
 	data->messages = false;
 	data->two_phase = false;
+	data->publish_no_origin = false;
 
 	foreach(lc, options)
 	{
@@ -343,7 +346,11 @@ parse_output_parameters(List *options, PGOutputData *data)
 						 errmsg("conflicting or redundant options")));
 			publication_names_given = true;
 
-			if (!SplitIdentifierString(strVal(defel->arg), ',',
+			/*
+			 * Pass a copy of the DefElem->arg since SplitIdentifierString
+			 * modifies its input.
+			 */
+			if (!SplitIdentifierString(pstrdup(strVal(defel->arg)), ',',
 									   &data->publication_names))
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_NAME),
@@ -425,14 +432,28 @@ parse_output_parameters(List *options, PGOutputData *data)
 }
 
 /*
+ * Memory context reset callback of PGOutputData->context.
+ */
+static void
+pgoutput_memory_context_reset(void *arg)
+{
+	if (RelationSyncCache)
+	{
+		hash_destroy(RelationSyncCache);
+		RelationSyncCache = NULL;
+	}
+}
+
+/*
  * Initialize this plugin
  */
 static void
 pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *opt,
 				 bool is_init)
 {
-	PGOutputData *data = palloc0(sizeof(PGOutputData));
+	PGOutputData *data = palloc0_object(PGOutputData);
 	static bool publication_callback_registered = false;
+	MemoryContextCallback *mcallback;
 
 	/* Create our memory context for private allocations. */
 	data->context = AllocSetContextCreate(ctx->context,
@@ -446,6 +467,14 @@ pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *opt,
 	data->pubctx = AllocSetContextCreate(ctx->context,
 										 "logical replication publication list context",
 										 ALLOCSET_SMALL_SIZES);
+
+	/*
+	 * Ensure to cleanup RelationSyncCache even when logical decoding invoked
+	 * via SQL interface ends up with an error.
+	 */
+	mcallback = palloc0_object(MemoryContextCallback);
+	mcallback->func = pgoutput_memory_context_reset;
+	MemoryContextRegisterResetCallback(ctx->context, mcallback);
 
 	ctx->output_plugin_private = data;
 
@@ -1044,7 +1073,7 @@ check_and_init_gencol(PGOutputData *data, List *publications,
 	/* Check if there is any generated column present. */
 	for (int i = 0; i < desc->natts; i++)
 	{
-		Form_pg_attribute att = TupleDescAttr(desc, i);
+		CompactAttribute *att = TupleDescCompactAttr(desc, i);
 
 		if (att->attgenerated)
 		{
@@ -1112,9 +1141,9 @@ pgoutput_column_list_init(PGOutputData *data, List *publications,
 	 *
 	 * Note that we don't support the case where the column list is different
 	 * for the same table when combining publications. See comments atop
-	 * fetch_table_list. But one can later change the publication so we still
-	 * need to check all the given publication-table mappings and report an
-	 * error if any publications have a different column list.
+	 * fetch_relation_list. But one can later change the publication so we
+	 * still need to check all the given publication-table mappings and report
+	 * an error if any publications have a different column list.
 	 */
 	foreach(lc, publications)
 	{
@@ -1372,8 +1401,8 @@ pgoutput_row_filter(Relation relation, TupleTableSlot *old_slot,
 		 * VARTAG_INDIRECT. See ReorderBufferToastReplace.
 		 */
 		if (att->attlen == -1 &&
-			VARATT_IS_EXTERNAL_ONDISK(new_slot->tts_values[i]) &&
-			!VARATT_IS_EXTERNAL_ONDISK(old_slot->tts_values[i]))
+			VARATT_IS_EXTERNAL_ONDISK(DatumGetPointer(new_slot->tts_values[i])) &&
+			!VARATT_IS_EXTERNAL_ONDISK(DatumGetPointer(old_slot->tts_values[i])))
 		{
 			if (!tmp_new_slot)
 			{
@@ -1758,11 +1787,7 @@ pgoutput_origin_filter(LogicalDecodingContext *ctx,
 static void
 pgoutput_shutdown(LogicalDecodingContext *ctx)
 {
-	if (RelationSyncCache)
-	{
-		hash_destroy(RelationSyncCache);
-		RelationSyncCache = NULL;
-	}
+	pgoutput_memory_context_reset(NULL);
 }
 
 /*
@@ -1789,7 +1814,7 @@ LoadPublications(List *pubnames)
 		else
 			ereport(WARNING,
 					errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					errmsg("skipped loading publication: %s", pubname),
+					errmsg("skipped loading publication \"%s\"", pubname),
 					errdetail("The publication does not exist at this point in the WAL."),
 					errhint("Create the publication if it does not exist."));
 	}
@@ -1886,7 +1911,7 @@ pgoutput_stream_abort(struct LogicalDecodingContext *ctx,
 
 	OutputPluginPrepareWrite(ctx, true);
 	logicalrep_write_stream_abort(ctx->out, toptxn->xid, txn->xid, abort_lsn,
-								  txn->xact_time.abort_time, write_abort_info);
+								  txn->abort_time, write_abort_info);
 
 	OutputPluginWrite(ctx, true);
 

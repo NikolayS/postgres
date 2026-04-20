@@ -3,7 +3,7 @@
  * array_expanded.c
  *	  Basic functions for manipulating expanded arrays.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -271,8 +271,8 @@ EA_get_flat_size(ExpandedObjectHeader *eohptr)
 		if (!AllocSizeIsValid(nbytes))
 			ereport(ERROR,
 					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-					 errmsg("array size exceeds the maximum allowed (%d)",
-							(int) MaxAllocSize)));
+					 errmsg("array size exceeds the maximum allowed (%zu)",
+							MaxAllocSize)));
 	}
 
 	if (dnulls)

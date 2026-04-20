@@ -7,7 +7,7 @@
  * from pgstat.c to enforce the line between the statistics access / storage
  * implementation and the details about individual types of statistics.
  *
- * Copyright (c) 2021-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2021-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/activity/pgstat_io.c
@@ -80,6 +80,7 @@ pgstat_count_io_op(IOObject io_object, IOContext io_context, IOOp io_op,
 	pgstat_count_backend_io_op(io_object, io_context, io_op, cnt, bytes);
 
 	have_iostats = true;
+	pgstat_report_fixed = true;
 }
 
 /*
@@ -165,15 +166,6 @@ pgstat_fetch_stat_io(void)
 	pgstat_snapshot_fixed(PGSTAT_KIND_IO);
 
 	return &pgStatLocal.snapshot.io;
-}
-
-/*
- * Check if there any IO stats waiting for flush.
- */
-bool
-pgstat_io_have_pending_cb(void)
-{
-	return have_iostats;
 }
 
 /*

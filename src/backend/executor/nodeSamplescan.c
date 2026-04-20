@@ -3,7 +3,7 @@
  * nodeSamplescan.c
  *	  Support routines for sample scans of relations (table sampling).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -228,7 +228,7 @@ tablesample_init(SampleScanState *scanstate)
 	ListCell   *arg;
 
 	scanstate->donetuples = 0;
-	params = (Datum *) palloc(list_length(scanstate->args) * sizeof(Datum));
+	params = palloc_array(Datum, list_length(scanstate->args));
 
 	i = 0;
 	foreach(arg, scanstate->args)

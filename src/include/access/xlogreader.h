@@ -3,7 +3,7 @@
  * xlogreader.h
  *		Definitions for the generic XLog reading facility
  *
- * Portions Copyright (c) 2013-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2013-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/include/access/xlogreader.h
@@ -145,7 +145,6 @@ typedef struct
 	bool		has_data;
 	char	   *data;
 	uint16		data_len;
-	uint16		data_bufsz;
 } DecodedBkpBlock;
 
 /*

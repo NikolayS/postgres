@@ -3,7 +3,7 @@
  * reconstruct.c
  *		Reconstruct full file from incremental file and backup chain.
  *
- * Copyright (c) 2017-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2017-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/bin/pg_combinebackup/reconstruct.c
@@ -370,6 +370,7 @@ reconstruct_from_incremental_file(char *input_filename,
 		if (s->relative_block_numbers != NULL)
 			pfree(s->relative_block_numbers);
 		pg_free(s->filename);
+		pg_free(s);
 	}
 	pfree(sourcemap);
 	pfree(offsetmap);
@@ -517,6 +518,7 @@ make_rfile(char *filename, bool missing_ok)
 	{
 		if (missing_ok && errno == ENOENT)
 		{
+			pg_free(rf->filename);
 			pg_free(rf);
 			return NULL;
 		}

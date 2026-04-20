@@ -3,7 +3,7 @@
  * backup_manifest.c
  *	  code for generating and sending a backup manifest
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/backup/backup_manifest.c
@@ -242,7 +242,7 @@ AddWALInfoToBackupManifest(backup_manifest_info *manifest, XLogRecPtr startptr,
 		 * entry->end is InvalidXLogRecPtr, it means that the timeline has not
 		 * yet ended.)
 		 */
-		if (!XLogRecPtrIsInvalid(entry->end) && entry->end < startptr)
+		if (XLogRecPtrIsValid(entry->end) && entry->end < startptr)
 			continue;
 
 		/*
@@ -274,14 +274,14 @@ AddWALInfoToBackupManifest(backup_manifest_info *manifest, XLogRecPtr startptr,
 			 * better have arrived at the expected starting TLI. If not,
 			 * something's gone horribly wrong.
 			 */
-			if (XLogRecPtrIsInvalid(entry->begin))
+			if (!XLogRecPtrIsValid(entry->begin))
 				ereport(ERROR,
 						errmsg("expected start timeline %u but found timeline %u",
 							   starttli, entry->tli));
 		}
 
 		AppendToManifest(manifest,
-						 "%s{ \"Timeline\": %u, \"Start-LSN\": \"%X/%X\", \"End-LSN\": \"%X/%X\" }",
+						 "%s{ \"Timeline\": %u, \"Start-LSN\": \"%X/%08X\", \"End-LSN\": \"%X/%08X\" }",
 						 first_wal_range ? "" : ",\n",
 						 entry->tli,
 						 LSN_FORMAT_ARGS(tl_beginptr),

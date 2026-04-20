@@ -5,7 +5,7 @@
  *	  next base backup sink in the chain at a rate no greater than the
  *	  configured maximum.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/backup/basebackup_throttle.c
@@ -72,7 +72,7 @@ bbsink_throttle_new(bbsink *next, uint32 maxrate)
 	Assert(next != NULL);
 	Assert(maxrate > 0);
 
-	sink = palloc0(sizeof(bbsink_throttle));
+	sink = palloc0_object(bbsink_throttle);
 	*((const bbsink_ops **) &sink->base.bbs_ops) = &bbsink_throttle_ops;
 	sink->base.bbs_next = next;
 

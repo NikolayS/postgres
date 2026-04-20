@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * src/bin/psql/copy.c
  */
@@ -33,7 +33,7 @@
  *	\copy ( query stmt ) to filename [options]
  *
  * where 'filename' can be one of the following:
- *	'<file path>' | PROGRAM '<command>' | stdin | stdout | pstdout | pstdout
+ *	'<file path>' | PROGRAM '<command>' | stdin | stdout | pstdin | pstdout
  * and 'query' can be one of the following:
  *	SELECT | UPDATE | INSERT | DELETE
  *

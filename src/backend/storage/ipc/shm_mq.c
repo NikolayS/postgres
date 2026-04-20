@@ -8,7 +8,7 @@
  * and only the receiver may receive.  This is intended to allow a user
  * backend to communicate with worker backends that it has registered.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/storage/ipc/shm_mq.c
@@ -289,7 +289,7 @@ shm_mq_get_sender(shm_mq *mq)
 shm_mq_handle *
 shm_mq_attach(shm_mq *mq, dsm_segment *seg, BackgroundWorkerHandle *handle)
 {
-	shm_mq_handle *mqh = palloc(sizeof(shm_mq_handle));
+	shm_mq_handle *mqh = palloc_object(shm_mq_handle);
 
 	Assert(mq->mq_receiver == MyProc || mq->mq_sender == MyProc);
 	mqh->mqh_queue = mq;

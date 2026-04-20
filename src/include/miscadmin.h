@@ -10,7 +10,7 @@
  *	  Over time, this has also become the preferred place for widely known
  *	  resource-limitation stuff, such as work_mem and check_stack_depth().
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/miscadmin.h
@@ -114,7 +114,8 @@ extern void ProcessInterrupts(void);
 	(unlikely(InterruptPending))
 #else
 #define INTERRUPTS_PENDING_CONDITION() \
-	(unlikely(UNBLOCKED_SIGNAL_QUEUE()) ? pgwin32_dispatch_queued_signals() : 0, \
+	(unlikely(UNBLOCKED_SIGNAL_QUEUE()) ? \
+	 pgwin32_dispatch_queued_signals() : (void) 0, \
 	 unlikely(InterruptPending))
 #endif
 
@@ -173,6 +174,8 @@ extern PGDLLIMPORT char *DataDir;
 extern PGDLLIMPORT int data_directory_mode;
 
 extern PGDLLIMPORT int NBuffers;
+extern PGDLLIMPORT int SharedBuffersGUC;
+extern PGDLLIMPORT int MaxNBuffers;
 extern PGDLLIMPORT int MaxBackends;
 extern PGDLLIMPORT int MaxConnections;
 extern PGDLLIMPORT int max_worker_processes;

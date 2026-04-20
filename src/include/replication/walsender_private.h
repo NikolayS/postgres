@@ -3,7 +3,7 @@
  * walsender_private.h
  *	  Private definitions from replication/walsender.c.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * src/include/replication/walsender_private.h
  *
@@ -141,10 +141,7 @@ extern void WalSndSetState(WalSndState state);
  * repl_scanner.l
  */
 union YYSTYPE;
-#ifndef YY_TYPEDEF_YY_SCANNER_T
-#define YY_TYPEDEF_YY_SCANNER_T
 typedef void *yyscan_t;
-#endif
 extern int	replication_yyparse(Node **replication_parse_result_p, yyscan_t yyscanner);
 extern int	replication_yylex(union YYSTYPE *yylval_param, yyscan_t yyscanner);
 pg_noreturn extern void replication_yyerror(Node **replication_parse_result_p, yyscan_t yyscanner, const char *message);

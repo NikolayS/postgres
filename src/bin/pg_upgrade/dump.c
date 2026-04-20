@@ -3,7 +3,7 @@
  *
  *	dump functions
  *
- *	Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/dump.c
  */
 
@@ -58,7 +58,7 @@ generate_old_dump(void)
 						   (user_opts.transfer_mode == TRANSFER_MODE_SWAP) ?
 						   "" : "--sequence-data",
 						   log_opts.verbose ? "--verbose" : "",
-						   user_opts.do_statistics ? "" : "--no-statistics",
+						   user_opts.do_statistics ? "--statistics" : "--no-statistics",
 						   log_opts.dumpdir,
 						   sql_file_name, escaped_connstr.data);
 

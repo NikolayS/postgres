@@ -3,7 +3,7 @@
  * varchar.c
  *	  Functions for the built-in types char(n) and varchar(n).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -158,8 +158,8 @@ bpchar_input(const char *s, size_t len, int32 atttypmod, Node *escontext)
 				if (s[j] != ' ')
 					ereturn(escontext, NULL,
 							(errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-							 errmsg("value too long for type character(%d)",
-									(int) maxlen)));
+							 errmsg("value too long for type character(%zu)",
+									maxlen)));
 			}
 
 			/*
@@ -472,8 +472,8 @@ varchar_input(const char *s, size_t len, int32 atttypmod, Node *escontext)
 			if (s[j] != ' ')
 				ereturn(escontext, NULL,
 						(errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-						 errmsg("value too long for type character varying(%d)",
-								(int) maxlen)));
+						 errmsg("value too long for type character varying(%zu)",
+								maxlen)));
 		}
 
 		len = mbmaxlen;

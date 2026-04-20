@@ -4,7 +4,7 @@
  *	  Utility routines for the Postgres inverted index access method.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -37,60 +37,61 @@
 Datum
 ginhandler(PG_FUNCTION_ARGS)
 {
-	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = 0,
+		.amsupport = GINNProcs,
+		.amoptsprocnum = GIN_OPTIONS_PROC,
+		.amcanorder = false,
+		.amcanorderbyop = false,
+		.amcanhash = false,
+		.amconsistentequality = false,
+		.amconsistentordering = false,
+		.amcanbackward = false,
+		.amcanunique = false,
+		.amcanmulticol = true,
+		.amoptionalkey = true,
+		.amsearcharray = false,
+		.amsearchnulls = false,
+		.amstorage = true,
+		.amclusterable = false,
+		.ampredlocks = true,
+		.amcanparallel = false,
+		.amcanbuildparallel = true,
+		.amcaninclude = false,
+		.amusemaintenanceworkmem = true,
+		.amsummarizing = false,
+		.amparallelvacuumoptions =
+		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_CLEANUP,
+		.amkeytype = InvalidOid,
 
-	amroutine->amstrategies = 0;
-	amroutine->amsupport = GINNProcs;
-	amroutine->amoptsprocnum = GIN_OPTIONS_PROC;
-	amroutine->amcanorder = false;
-	amroutine->amcanorderbyop = false;
-	amroutine->amcanhash = false;
-	amroutine->amconsistentequality = false;
-	amroutine->amconsistentordering = false;
-	amroutine->amcanbackward = false;
-	amroutine->amcanunique = false;
-	amroutine->amcanmulticol = true;
-	amroutine->amoptionalkey = true;
-	amroutine->amsearcharray = false;
-	amroutine->amsearchnulls = false;
-	amroutine->amstorage = true;
-	amroutine->amclusterable = false;
-	amroutine->ampredlocks = true;
-	amroutine->amcanparallel = false;
-	amroutine->amcanbuildparallel = true;
-	amroutine->amcaninclude = false;
-	amroutine->amusemaintenanceworkmem = true;
-	amroutine->amsummarizing = false;
-	amroutine->amparallelvacuumoptions =
-		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_CLEANUP;
-	amroutine->amkeytype = InvalidOid;
+		.ambuild = ginbuild,
+		.ambuildempty = ginbuildempty,
+		.aminsert = gininsert,
+		.aminsertcleanup = NULL,
+		.ambulkdelete = ginbulkdelete,
+		.amvacuumcleanup = ginvacuumcleanup,
+		.amcanreturn = NULL,
+		.amcostestimate = gincostestimate,
+		.amgettreeheight = NULL,
+		.amoptions = ginoptions,
+		.amproperty = NULL,
+		.ambuildphasename = ginbuildphasename,
+		.amvalidate = ginvalidate,
+		.amadjustmembers = ginadjustmembers,
+		.ambeginscan = ginbeginscan,
+		.amrescan = ginrescan,
+		.amgettuple = NULL,
+		.amgetbitmap = gingetbitmap,
+		.amendscan = ginendscan,
+		.ammarkpos = NULL,
+		.amrestrpos = NULL,
+		.amestimateparallelscan = NULL,
+		.aminitparallelscan = NULL,
+		.amparallelrescan = NULL,
+	};
 
-	amroutine->ambuild = ginbuild;
-	amroutine->ambuildempty = ginbuildempty;
-	amroutine->aminsert = gininsert;
-	amroutine->aminsertcleanup = NULL;
-	amroutine->ambulkdelete = ginbulkdelete;
-	amroutine->amvacuumcleanup = ginvacuumcleanup;
-	amroutine->amcanreturn = NULL;
-	amroutine->amcostestimate = gincostestimate;
-	amroutine->amgettreeheight = NULL;
-	amroutine->amoptions = ginoptions;
-	amroutine->amproperty = NULL;
-	amroutine->ambuildphasename = ginbuildphasename;
-	amroutine->amvalidate = ginvalidate;
-	amroutine->amadjustmembers = ginadjustmembers;
-	amroutine->ambeginscan = ginbeginscan;
-	amroutine->amrescan = ginrescan;
-	amroutine->amgettuple = NULL;
-	amroutine->amgetbitmap = gingetbitmap;
-	amroutine->amendscan = ginendscan;
-	amroutine->ammarkpos = NULL;
-	amroutine->amrestrpos = NULL;
-	amroutine->amestimateparallelscan = NULL;
-	amroutine->aminitparallelscan = NULL;
-	amroutine->amparallelrescan = NULL;
-
-	PG_RETURN_POINTER(amroutine);
+	PG_RETURN_POINTER(&amroutine);
 }
 
 /*
@@ -500,9 +501,9 @@ ginExtractEntries(GinState *ginstate, OffsetNumber attnum,
 	if (isNull)
 	{
 		*nentries = 1;
-		entries = (Datum *) palloc(sizeof(Datum));
+		entries = palloc_object(Datum);
 		entries[0] = (Datum) 0;
-		*categories = (GinNullCategory *) palloc(sizeof(GinNullCategory));
+		*categories = palloc_object(GinNullCategory);
 		(*categories)[0] = GIN_CAT_NULL_ITEM;
 		return entries;
 	}
@@ -522,9 +523,9 @@ ginExtractEntries(GinState *ginstate, OffsetNumber attnum,
 	if (entries == NULL || *nentries <= 0)
 	{
 		*nentries = 1;
-		entries = (Datum *) palloc(sizeof(Datum));
+		entries = palloc_object(Datum);
 		entries[0] = (Datum) 0;
-		*categories = (GinNullCategory *) palloc(sizeof(GinNullCategory));
+		*categories = palloc_object(GinNullCategory);
 		(*categories)[0] = GIN_CAT_EMPTY_ITEM;
 		return entries;
 	}
@@ -548,7 +549,7 @@ ginExtractEntries(GinState *ginstate, OffsetNumber attnum,
 		keyEntryData *keydata;
 		cmpEntriesArg arg;
 
-		keydata = (keyEntryData *) palloc(*nentries * sizeof(keyEntryData));
+		keydata = palloc_array(keyEntryData, *nentries);
 		for (i = 0; i < *nentries; i++)
 		{
 			keydata[i].datum = entries[i];

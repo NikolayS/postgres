@@ -154,7 +154,7 @@ gettoken_query(QPRS_STATE *state, int32 *val, int32 *lenval, char **strval, uint
 static bool
 pushquery(QPRS_STATE *state, int32 type, int32 val, int32 distance, int32 lenval, uint16 flag)
 {
-	NODE	   *tmp = (NODE *) palloc(sizeof(NODE));
+	NODE	   *tmp = palloc_object(NODE);
 
 	tmp->type = type;
 	tmp->val = val;
@@ -337,11 +337,6 @@ queryin(char *buf, struct Node *escontext)
 	ITEM	   *ptr;
 	NODE	   *tmp;
 	int32		pos = 0;
-
-#ifdef BS_DEBUG
-	char		pbuf[16384],
-			   *cur;
-#endif
 
 	/* init state */
 	state.buf = buf;
@@ -543,7 +538,7 @@ infix(INFIX *in, bool first)
 		nrm.curpol = in->curpol;
 		nrm.op = in->op;
 		nrm.buflen = 16;
-		nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+		nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 
 		/* get right operand */
 		infix(&nrm, false);
@@ -582,7 +577,7 @@ ltxtq_out(PG_FUNCTION_ARGS)
 
 	nrm.curpol = GETQUERY(query);
 	nrm.buflen = 32;
-	nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+	nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 	*(nrm.cur) = '\0';
 	nrm.op = GETOPERAND(query);
 	infix(&nrm, true);
@@ -615,7 +610,7 @@ ltxtq_send(PG_FUNCTION_ARGS)
 
 	nrm.curpol = GETQUERY(query);
 	nrm.buflen = 32;
-	nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+	nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 	*(nrm.cur) = '\0';
 	nrm.op = GETOPERAND(query);
 	infix(&nrm, true);

@@ -285,7 +285,7 @@ DELETE FROM films WHERE kind &lt;&gt; 'Musical';
   </para>
 
   <para>
-   Clear the table <literal>films</literal>:
+   Clear the table <structname>films</structname>:
 <programlisting>
 DELETE FROM films;
 </programlisting>
@@ -323,6 +323,9 @@ DELETE FROM user_logs AS dl
   USING delete_batch AS del
   WHERE dl.ctid = del.ctid;
 </programlisting>
+   This use of <structfield>ctid</structfield> is only safe because
+   the query is repeatedly run, avoiding the problem of changed
+   <structfield>ctid</structfield>s.
   </para>
  </refsect1>
 

@@ -3,7 +3,7 @@
  * ipci.c
  *	  POSTGRES inter-process communication initialization code.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -24,6 +24,7 @@
 #include "access/twophase.h"
 #include "access/xlogprefetcher.h"
 #include "access/xlogrecovery.h"
+#include "access/xlogwait.h"
 #include "commands/async.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -38,6 +39,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/aio_subsys.h"
+#include "storage/buf_resize.h"
 #include "storage/bufmgr.h"
 #include "storage/dsm.h"
 #include "storage/dsm_registry.h"
@@ -80,23 +82,12 @@ RequestAddinShmemSpace(Size size)
 
 /*
  * CalculateShmemSize
- *		Calculates the amount of shared memory and number of semaphores needed.
- *
- * If num_semaphores is not NULL, it will be set to the number of semaphores
- * required.
+ *		Calculates the amount of shared memory needed.
  */
 Size
-CalculateShmemSize(int *num_semaphores)
+CalculateShmemSize(void)
 {
 	Size		size;
-	int			numSemas;
-
-	/* Compute number of semaphores we'll need */
-	numSemas = ProcGlobalSemas();
-
-	/* Return the number of semaphores if requested by the caller */
-	if (num_semaphores)
-		*num_semaphores = numSemas;
 
 	/*
 	 * Size of the Postgres shared-memory block is estimated via moderately-
@@ -108,12 +99,12 @@ CalculateShmemSize(int *num_semaphores)
 	 * during the actual allocation phase.
 	 */
 	size = 100000;
-	size = add_size(size, PGSemaphoreShmemSize(numSemas));
 	size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
 											 sizeof(ShmemIndexEnt)));
 	size = add_size(size, dsm_estimate_size());
 	size = add_size(size, DSMRegistryShmemSize());
 	size = add_size(size, BufferManagerShmemSize());
+	size = add_size(size, BufPoolResizeShmemSize());
 	size = add_size(size, LockManagerShmemSize());
 	size = add_size(size, PredicateLockShmemSize());
 	size = add_size(size, ProcGlobalShmemSize());
@@ -150,6 +141,8 @@ CalculateShmemSize(int *num_semaphores)
 	size = add_size(size, InjectionPointShmemSize());
 	size = add_size(size, SlotSyncShmemSize());
 	size = add_size(size, AioShmemSize());
+	size = add_size(size, WaitLSNShmemSize());
+	size = add_size(size, LogicalDecodingCtlShmemSize());
 
 	/* include additional requested shmem from preload libraries */
 	size = add_size(size, total_addin_request);
@@ -202,13 +195,20 @@ CreateSharedMemoryAndSemaphores(void)
 	PGShmemHeader *shim;
 	PGShmemHeader *seghdr;
 	Size		size;
-	int			numSemas;
 
 	Assert(!IsUnderPostmaster);
 
 	/* Compute the size of the shared-memory block */
-	size = CalculateShmemSize(&numSemas);
+	size = CalculateShmemSize();
 	elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
+
+	/*
+	 * If max_shared_buffers is configured, reserve virtual address space
+	 * for the buffer pool arrays before creating the main shmem segment.
+	 * This sets up the global pointers (BufferDescriptors, BufferBlocks,
+	 * etc.) pointing to separately-mapped memory regions that can grow.
+	 */
+	BufferPoolReserveMemory();
 
 	/*
 	 * Create the shmem segment
@@ -223,11 +223,6 @@ CreateSharedMemoryAndSemaphores(void)
 				  GetConfigOption("huge_pages_status", false, false)) != 0);
 
 	InitShmemAccess(seghdr);
-
-	/*
-	 * Create semaphores
-	 */
-	PGReserveSemaphores(numSemas);
 
 	/*
 	 * Set up shared memory allocation mechanism
@@ -291,6 +286,7 @@ CreateOrAttachShmemStructs(void)
 	SUBTRANSShmemInit();
 	MultiXactShmemInit();
 	BufferManagerShmemInit();
+	BufPoolResizeShmemInit();
 
 	/*
 	 * Set up lock manager
@@ -343,6 +339,8 @@ CreateOrAttachShmemStructs(void)
 	WaitEventCustomShmemInit();
 	InjectionPointShmemInit();
 	AioShmemInit();
+	WaitLSNShmemInit();
+	LogicalDecodingCtlShmemInit();
 }
 
 /*
@@ -358,12 +356,11 @@ InitializeShmemGUCs(void)
 	Size		size_b;
 	Size		size_mb;
 	Size		hp_size;
-	int			num_semas;
 
 	/*
 	 * Calculate the shared memory size and round up to the nearest megabyte.
 	 */
-	size_b = CalculateShmemSize(&num_semas);
+	size_b = CalculateShmemSize();
 	size_mb = add_size(size_b, (1024 * 1024) - 1) / (1024 * 1024);
 	sprintf(buf, "%zu", size_mb);
 	SetConfigOption("shared_memory_size", buf,
@@ -383,6 +380,6 @@ InitializeShmemGUCs(void)
 						PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 	}
 
-	sprintf(buf, "%d", num_semas);
+	sprintf(buf, "%d", ProcGlobalSemas());
 	SetConfigOption("num_os_semaphores", buf, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 }

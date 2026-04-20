@@ -3,7 +3,7 @@
  * nodeMergeAppend.c
  *	  routines to handle MergeAppend nodes.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -122,11 +122,11 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 		mergestate->ms_prune_state = NULL;
 	}
 
-	mergeplanstates = (PlanState **) palloc(nplans * sizeof(PlanState *));
+	mergeplanstates = palloc_array(PlanState *, nplans);
 	mergestate->mergeplans = mergeplanstates;
 	mergestate->ms_nplans = nplans;
 
-	mergestate->ms_slots = (TupleTableSlot **) palloc0(sizeof(TupleTableSlot *) * nplans);
+	mergestate->ms_slots = palloc0_array(TupleTableSlot *, nplans);
 	mergestate->ms_heap = binaryheap_allocate(nplans, heap_compare_slots,
 											  mergestate);
 
@@ -174,7 +174,7 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 	 * initialize sort-key information
 	 */
 	mergestate->ms_nkeys = node->numCols;
-	mergestate->ms_sortkeys = palloc0(sizeof(SortSupportData) * node->numCols);
+	mergestate->ms_sortkeys = palloc0_array(SortSupportData, node->numCols);
 
 	for (i = 0; i < node->numCols; i++)
 	{

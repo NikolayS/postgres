@@ -3,7 +3,7 @@
  * pg_popcount_aarch64.c
  *	  Holds the AArch64 popcount implementations.
  *
- * Copyright (c) 2025, PostgreSQL Global Development Group
+ * Copyright (c) 2025-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/port/pg_popcount_aarch64.c
@@ -23,6 +23,10 @@
 
 #if defined(HAVE_ELF_AUX_INFO) || defined(HAVE_GETAUXVAL)
 #include <sys/auxv.h>
+/* Ancient glibc releases don't include the HWCAPxxx macros in sys/auxv.h */
+#if defined(__linux__) && !defined(HWCAP_SVE)
+#include <asm/hwcap.h>
+#endif
 #endif
 #endif
 

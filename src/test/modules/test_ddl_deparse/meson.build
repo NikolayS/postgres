@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 test_ddl_deparse_sources = files(
   'test_ddl_deparse.c',
@@ -33,7 +33,7 @@ tests += {
       'create_type',
       'create_conversion',
       'create_domain',
-      'create_sequence_1',
+      'create_sequence',
       'create_table',
       'create_transform',
       'alter_table',

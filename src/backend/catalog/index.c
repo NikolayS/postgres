@@ -3,7 +3,7 @@
  * index.c
  *	  code to create and destroy POSTGRES index relations
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -289,7 +289,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	int			numkeyatts = indexInfo->ii_NumIndexKeyAttrs;
 	ListCell   *colnames_item = list_head(indexColNames);
 	ListCell   *indexpr_item = list_head(indexInfo->ii_Expressions);
-	IndexAmRoutine *amroutine;
+	const IndexAmRoutine *amroutine;
 	TupleDesc	heapTupDesc;
 	TupleDesc	indexTupDesc;
 	int			natts;			/* #atts in heap rel --- for error checks */
@@ -480,8 +480,6 @@ ConstructTupleDescriptor(Relation heapRelation,
 
 		populate_compact_attribute(indexTupDesc, i);
 	}
-
-	pfree(amroutine);
 
 	return indexTupDesc;
 }
@@ -800,11 +798,11 @@ index_create(Relation heapRelation,
 				 errmsg("user-defined indexes on system catalog tables are not supported")));
 
 	/*
-	 * Btree text_pattern_ops uses text_eq as the equality operator, which is
-	 * fine as long as the collation is deterministic; text_eq then reduces to
+	 * Btree text_pattern_ops uses texteq as the equality operator, which is
+	 * fine as long as the collation is deterministic; texteq then reduces to
 	 * bitwise equality and so it is semantically compatible with the other
 	 * operators and functions in that opclass.  But with a nondeterministic
-	 * collation, text_eq could yield results that are incompatible with the
+	 * collation, texteq could yield results that are incompatible with the
 	 * actual behavior of the index (which is determined by the opclass's
 	 * comparison function).  We prevent such problems by refusing creation of
 	 * an index with that opclass and a nondeterministic collation.
@@ -814,7 +812,7 @@ index_create(Relation heapRelation,
 	 * opclasses as incompatible with nondeterminism; but for now, this small
 	 * hack suffices.
 	 *
-	 * Another solution is to use a special operator, not text_eq, as the
+	 * Another solution is to use a special operator, not texteq, as the
 	 * equality opclass member; but that is undesirable because it would
 	 * prevent index usage in many queries that work fine today.
 	 */
@@ -1414,7 +1412,7 @@ index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId,
 	}
 
 	/* Extract opclass options for each attribute */
-	opclassOptions = palloc0(sizeof(Datum) * newInfo->ii_NumIndexAttrs);
+	opclassOptions = palloc0_array(Datum, newInfo->ii_NumIndexAttrs);
 	for (int i = 0; i < newInfo->ii_NumIndexAttrs; i++)
 		opclassOptions[i] = get_attoptions(oldIndexId, i + 1);
 
@@ -2678,9 +2676,9 @@ BuildSpeculativeIndexInfo(Relation index, IndexInfo *ii)
 	 */
 	Assert(ii->ii_Unique);
 
-	ii->ii_UniqueOps = (Oid *) palloc(sizeof(Oid) * indnkeyatts);
-	ii->ii_UniqueProcs = (Oid *) palloc(sizeof(Oid) * indnkeyatts);
-	ii->ii_UniqueStrats = (uint16 *) palloc(sizeof(uint16) * indnkeyatts);
+	ii->ii_UniqueOps = palloc_array(Oid, indnkeyatts);
+	ii->ii_UniqueProcs = palloc_array(Oid, indnkeyatts);
+	ii->ii_UniqueStrats = palloc_array(uint16, indnkeyatts);
 
 	/*
 	 * We have to look up the operator's strategy number.  This provides a
@@ -3014,13 +3012,13 @@ index_build(Relation heapRelation,
 	 * sanity checks
 	 */
 	Assert(RelationIsValid(indexRelation));
-	Assert(PointerIsValid(indexRelation->rd_indam));
-	Assert(PointerIsValid(indexRelation->rd_indam->ambuild));
-	Assert(PointerIsValid(indexRelation->rd_indam->ambuildempty));
+	Assert(indexRelation->rd_indam);
+	Assert(indexRelation->rd_indam->ambuild);
+	Assert(indexRelation->rd_indam->ambuildempty);
 
 	/*
 	 * Determine worker process details for parallel CREATE INDEX.  Currently,
-	 * only btree and BRIN have support for parallel builds.
+	 * only btree, GIN, and BRIN have support for parallel builds.
 	 *
 	 * Note that planner considers parallel safety for us.
 	 */
@@ -3077,7 +3075,7 @@ index_build(Relation heapRelation,
 	 */
 	stats = indexRelation->rd_indam->ambuild(heapRelation, indexRelation,
 											 indexInfo);
-	Assert(PointerIsValid(stats));
+	Assert(stats);
 
 	/*
 	 * If this is an unlogged index, we may need to write out an init fork for

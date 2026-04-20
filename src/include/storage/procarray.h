@@ -4,7 +4,7 @@
  *	  POSTGRES process array definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/procarray.h
@@ -53,10 +53,10 @@ extern bool ProcArrayInstallRestoredXmin(TransactionId xmin, PGPROC *proc);
 extern RunningTransactions GetRunningTransactionData(void);
 
 extern bool TransactionIdIsInProgress(TransactionId xid);
-extern bool TransactionIdIsActive(TransactionId xid);
 extern TransactionId GetOldestNonRemovableTransactionId(Relation rel);
 extern TransactionId GetOldestTransactionIdConsideredRunning(void);
-extern TransactionId GetOldestActiveTransactionId(void);
+extern TransactionId GetOldestActiveTransactionId(bool inCommitOnly,
+												  bool allDbs);
 extern TransactionId GetOldestSafeDecodingTransactionId(bool catalogOnly);
 extern void GetReplicationHorizons(TransactionId *xmin, TransactionId *catalog_xmin);
 

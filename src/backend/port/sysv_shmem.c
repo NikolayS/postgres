@@ -9,7 +9,7 @@
  * exist, though, because mmap'd shmem provides no way to find out how
  * many processes are attached, which we need for interlocking purposes.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -206,7 +206,7 @@ InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
 				 */
 				if (shmctl(shmid, IPC_RMID, NULL) < 0)
 					elog(LOG, "shmctl(%d, %d, 0) failed: %m",
-						 (int) shmid, IPC_RMID);
+						 shmid, IPC_RMID);
 			}
 		}
 

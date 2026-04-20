@@ -4,7 +4,7 @@
  *	  POSTGRES index tuple definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/itup.h
@@ -131,7 +131,7 @@ IndexInfoFindDataOffset(unsigned short t_info)
 static inline Datum
 index_getattr(IndexTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
 {
-	Assert(PointerIsValid(isnull));
+	Assert(isnull);
 	Assert(attnum > 0);
 
 	*isnull = false;
@@ -154,7 +154,7 @@ index_getattr(IndexTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
 		if (att_isnull(attnum - 1, (bits8 *) tup + sizeof(IndexTupleData)))
 		{
 			*isnull = true;
-			return (Datum) NULL;
+			return (Datum) 0;
 		}
 		else
 			return nocache_index_getattr(tup, attnum, tupleDesc);

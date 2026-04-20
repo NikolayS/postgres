@@ -3,7 +3,7 @@
  * sinvaladt.c
  *	  POSTGRES shared cache invalidation data manager.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -331,7 +331,7 @@ CleanupInvalidationState(int status, Datum arg)
 	ProcState  *stateP;
 	int			i;
 
-	Assert(PointerIsValid(segP));
+	Assert(segP);
 
 	LWLockAcquire(SInvalWriteLock, LW_EXCLUSIVE);
 

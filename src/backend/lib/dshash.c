@@ -20,7 +20,7 @@
  * Future versions may support iterators and incremental resizing; for now
  * the implementation is minimalist.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -30,6 +30,8 @@
  */
 
 #include "postgres.h"
+
+#include <limits.h>
 
 #include "common/hashfn.h"
 #include "lib/dshash.h"
@@ -209,7 +211,7 @@ dshash_create(dsa_area *area, const dshash_parameters *params, void *arg)
 	dsa_pointer control;
 
 	/* Allocate the backend-local object representing the hash table. */
-	hash_table = palloc(sizeof(dshash_table));
+	hash_table = palloc_object(dshash_table);
 
 	/* Allocate the control object in shared memory. */
 	control = dsa_allocate(area, sizeof(dshash_table_control));
@@ -274,7 +276,7 @@ dshash_attach(dsa_area *area, const dshash_parameters *params,
 	dsa_pointer control;
 
 	/* Allocate the backend-local object representing the hash table. */
-	hash_table = palloc(sizeof(dshash_table));
+	hash_table = palloc_object(dshash_table);
 
 	/* Find the control object in shared memory. */
 	control = handle;

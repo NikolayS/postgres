@@ -3,7 +3,7 @@
  * postmaster.h
  *	  Exports from postmaster/postmaster.c.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/postmaster/postmaster.h
@@ -108,7 +108,7 @@ extern PGDLLIMPORT struct ClientSocket *MyClientSocket;
 /* prototypes for functions in launch_backend.c */
 extern pid_t postmaster_child_launch(BackendType child_type,
 									 int child_slot,
-									 const void *startup_data,
+									 void *startup_data,
 									 size_t startup_data_len,
 									 struct ClientSocket *client_sock);
 const char *PostmasterChildName(BackendType child_type);

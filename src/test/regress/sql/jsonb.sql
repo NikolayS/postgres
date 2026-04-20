@@ -402,6 +402,12 @@ SELECT jsonb_build_object('{1,2,3}'::int[], 3);
 SELECT jsonb_object_agg(1, NULL::jsonb);
 SELECT jsonb_object_agg(NULL, '{"a":1}');
 
+SELECT jsonb_object_agg_unique(i, null) OVER (ORDER BY i)
+  FROM generate_series(1, 10) g(i);
+
+SELECT jsonb_object_agg_unique_strict(i, null) OVER (ORDER BY i)
+  FROM generate_series(1, 10) g(i);
+
 CREATE TEMP TABLE foo (serial_num int, name text, type text);
 INSERT INTO foo VALUES (847001,'t15','GE1043');
 INSERT INTO foo VALUES (847002,'t16','GE1043');
@@ -1590,3 +1596,21 @@ select '12345.0000000000000000000000000000000000000000000005'::jsonb::float8;
 select '12345.0000000000000000000000000000000000000000000005'::jsonb::int2;
 select '12345.0000000000000000000000000000000000000000000005'::jsonb::int4;
 select '12345.0000000000000000000000000000000000000000000005'::jsonb::int8;
+
+-- single argument jsonb functions as jsonb_function(jsonb) and jsonb.jsonb_function
+select jsonb_typeof('{"a":1}'::jsonb);
+select ('{"a":1}'::jsonb).jsonb_typeof;
+select jsonb_array_length('["a", "b", "c"]'::jsonb);
+select ('["a", "b", "c"]'::jsonb).jsonb_array_length;
+select jsonb_object_keys('{"a":1, "b":2}'::jsonb);
+select ('{"a":1, "b":2}'::jsonb).jsonb_object_keys;
+
+-- cast jsonb to other types as (jsonb)::type and (jsonb).type
+select ('123.45'::jsonb)::numeric;
+select ('123.45'::jsonb).numeric;
+select ('[{"name": "alice"}, {"name": "bob"}]'::jsonb)::name;
+select ('[{"name": "alice"}, {"name": "bob"}]'::jsonb).name;
+select ('true'::jsonb)::bool;
+select ('true'::jsonb).bool;
+select ('{"text": "hello"}'::jsonb)::text;
+select ('{"text": "hello"}'::jsonb).text;

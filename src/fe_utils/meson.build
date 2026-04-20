@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 fe_utils_sources = files(
   'archive.c',
@@ -18,6 +18,7 @@ fe_utils_sources = files(
   'recovery_gen.c',
   'simple_list.c',
   'string_utils.c',
+  'version.c',
 )
 
 psqlscan = custom_target('psqlscan',
@@ -29,7 +30,7 @@ generated_sources += psqlscan
 fe_utils_sources += psqlscan
 
 fe_utils = static_library('libpgfeutils',
-  fe_utils_sources + generated_headers,
+  fe_utils_sources,
   c_pch: pch_postgres_fe_h,
   include_directories: [postgres_inc, libpq_inc],
   c_args: host_system == 'windows' ? ['-DFD_SETSIZE=1024'] : [],

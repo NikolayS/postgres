@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_build_deps = [backend_code]
 backend_sources = []
@@ -169,7 +169,7 @@ backend_mod_code = declare_dependency(
   compile_args: pg_mod_c_args,
   include_directories: postgres_inc,
   link_args: pg_mod_link_args,
-  sources: generated_headers + generated_backend_headers,
+  sources: generated_backend_headers_stamp,
   dependencies: backend_mod_deps,
 )
 

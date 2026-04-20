@@ -3,7 +3,7 @@
  * aio_init.c
  *    AIO - Subsystem Initialization
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -30,12 +30,8 @@
 static Size
 AioCtlShmemSize(void)
 {
-	Size		sz;
-
 	/* pgaio_ctl itself */
-	sz = offsetof(PgAioCtl, io_handles);
-
-	return sz;
+	return sizeof(PgAioCtl);
 }
 
 static uint32
@@ -43,8 +39,8 @@ AioProcs(void)
 {
 	/*
 	 * While AIO workers don't need their own AIO context, we can't currently
-	 * guarantee nothing gets assigned to the a ProcNumber for an IO worker if
-	 * we just subtracted MAX_IO_WORKERS.
+	 * guarantee that nothing gets assigned to an IO worker's ProcNumber if we
+	 * just subtracted MAX_IO_WORKERS.
 	 */
 	return MaxBackends + NUM_AUXILIARY_PROCS;
 }

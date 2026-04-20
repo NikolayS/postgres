@@ -52,7 +52,7 @@
  * other, more complicated, problems would need to be fixed for that to be
  * viable (e.g. smgr.c is often called with interrupts already held).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -561,7 +561,7 @@ smgrdounlinkall(SMgrRelation *rels, int nrels, bool isRedo)
 	 * create an array which contains all relations to be dropped, and close
 	 * each relation's forks at the smgr level while at it
 	 */
-	rlocators = palloc(sizeof(RelFileLocatorBackend) * nrels);
+	rlocators = palloc_array(RelFileLocatorBackend, nrels);
 	for (i = 0; i < nrels; i++)
 	{
 		RelFileLocatorBackend rlocator = rels[i]->smgr_rlocator;

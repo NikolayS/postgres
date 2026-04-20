@@ -4,7 +4,7 @@
  *	  various support functions for SP-GiST
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -43,62 +43,63 @@
 Datum
 spghandler(PG_FUNCTION_ARGS)
 {
-	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = 0,
+		.amsupport = SPGISTNProc,
+		.amoptsprocnum = SPGIST_OPTIONS_PROC,
+		.amcanorder = false,
+		.amcanorderbyop = true,
+		.amcanhash = false,
+		.amconsistentequality = false,
+		.amconsistentordering = false,
+		.amcanbackward = false,
+		.amcanunique = false,
+		.amcanmulticol = false,
+		.amoptionalkey = true,
+		.amsearcharray = false,
+		.amsearchnulls = true,
+		.amstorage = true,
+		.amclusterable = false,
+		.ampredlocks = false,
+		.amcanparallel = false,
+		.amcanbuildparallel = false,
+		.amcaninclude = true,
+		.amusemaintenanceworkmem = false,
+		.amsummarizing = false,
+		.amparallelvacuumoptions =
+		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP,
+		.amkeytype = InvalidOid,
 
-	amroutine->amstrategies = 0;
-	amroutine->amsupport = SPGISTNProc;
-	amroutine->amoptsprocnum = SPGIST_OPTIONS_PROC;
-	amroutine->amcanorder = false;
-	amroutine->amcanorderbyop = true;
-	amroutine->amcanhash = false;
-	amroutine->amconsistentequality = false;
-	amroutine->amconsistentordering = false;
-	amroutine->amcanbackward = false;
-	amroutine->amcanunique = false;
-	amroutine->amcanmulticol = false;
-	amroutine->amoptionalkey = true;
-	amroutine->amsearcharray = false;
-	amroutine->amsearchnulls = true;
-	amroutine->amstorage = true;
-	amroutine->amclusterable = false;
-	amroutine->ampredlocks = false;
-	amroutine->amcanparallel = false;
-	amroutine->amcanbuildparallel = false;
-	amroutine->amcaninclude = true;
-	amroutine->amusemaintenanceworkmem = false;
-	amroutine->amsummarizing = false;
-	amroutine->amparallelvacuumoptions =
-		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP;
-	amroutine->amkeytype = InvalidOid;
+		.ambuild = spgbuild,
+		.ambuildempty = spgbuildempty,
+		.aminsert = spginsert,
+		.aminsertcleanup = NULL,
+		.ambulkdelete = spgbulkdelete,
+		.amvacuumcleanup = spgvacuumcleanup,
+		.amcanreturn = spgcanreturn,
+		.amcostestimate = spgcostestimate,
+		.amgettreeheight = NULL,
+		.amoptions = spgoptions,
+		.amproperty = spgproperty,
+		.ambuildphasename = NULL,
+		.amvalidate = spgvalidate,
+		.amadjustmembers = spgadjustmembers,
+		.ambeginscan = spgbeginscan,
+		.amrescan = spgrescan,
+		.amgettuple = spggettuple,
+		.amgetbitmap = spggetbitmap,
+		.amendscan = spgendscan,
+		.ammarkpos = NULL,
+		.amrestrpos = NULL,
+		.amestimateparallelscan = NULL,
+		.aminitparallelscan = NULL,
+		.amparallelrescan = NULL,
+		.amtranslatestrategy = NULL,
+		.amtranslatecmptype = NULL,
+	};
 
-	amroutine->ambuild = spgbuild;
-	amroutine->ambuildempty = spgbuildempty;
-	amroutine->aminsert = spginsert;
-	amroutine->aminsertcleanup = NULL;
-	amroutine->ambulkdelete = spgbulkdelete;
-	amroutine->amvacuumcleanup = spgvacuumcleanup;
-	amroutine->amcanreturn = spgcanreturn;
-	amroutine->amcostestimate = spgcostestimate;
-	amroutine->amgettreeheight = NULL;
-	amroutine->amoptions = spgoptions;
-	amroutine->amproperty = spgproperty;
-	amroutine->ambuildphasename = NULL;
-	amroutine->amvalidate = spgvalidate;
-	amroutine->amadjustmembers = spgadjustmembers;
-	amroutine->ambeginscan = spgbeginscan;
-	amroutine->amrescan = spgrescan;
-	amroutine->amgettuple = spggettuple;
-	amroutine->amgetbitmap = spggetbitmap;
-	amroutine->amendscan = spgendscan;
-	amroutine->ammarkpos = NULL;
-	amroutine->amrestrpos = NULL;
-	amroutine->amestimateparallelscan = NULL;
-	amroutine->aminitparallelscan = NULL;
-	amroutine->amparallelrescan = NULL;
-	amroutine->amtranslatestrategy = NULL;
-	amroutine->amtranslatecmptype = NULL;
-
-	PG_RETURN_POINTER(amroutine);
+	PG_RETURN_POINTER(&amroutine);
 }
 
 /*
@@ -785,7 +786,7 @@ SpGistGetInnerTypeSize(SpGistTypeDesc *att, Datum datum)
 	else if (att->attlen > 0)
 		size = att->attlen;
 	else
-		size = VARSIZE_ANY(datum);
+		size = VARSIZE_ANY(DatumGetPointer(datum));
 
 	return MAXALIGN(size);
 }
@@ -804,7 +805,7 @@ memcpyInnerDatum(void *target, SpGistTypeDesc *att, Datum datum)
 	}
 	else
 	{
-		size = (att->attlen > 0) ? att->attlen : VARSIZE_ANY(datum);
+		size = (att->attlen > 0) ? att->attlen : VARSIZE_ANY(DatumGetPointer(datum));
 		memcpy(target, DatumGetPointer(datum), size);
 	}
 }
@@ -868,7 +869,7 @@ SpGistGetLeafTupleSize(TupleDesc tupleDescriptor,
  * Construct a leaf tuple containing the given heap TID and datum values
  */
 SpGistLeafTuple
-spgFormLeafTuple(SpGistState *state, ItemPointer heapPtr,
+spgFormLeafTuple(SpGistState *state, const ItemPointerData *heapPtr,
 				 const Datum *datums, const bool *isnulls)
 {
 	SpGistLeafTuple tup;
@@ -1177,7 +1178,7 @@ spgExtractNodeLabels(SpGistState *state, SpGistInnerTuple innerTuple)
 	}
 	else
 	{
-		nodeLabels = (Datum *) palloc(sizeof(Datum) * innerTuple->nNodes);
+		nodeLabels = palloc_array(Datum, innerTuple->nNodes);
 		SGITITERATE(innerTuple, i, node)
 		{
 			if (IndexTupleHasNulls(node))
@@ -1200,7 +1201,7 @@ spgExtractNodeLabels(SpGistState *state, SpGistInnerTuple innerTuple)
  * rather than returning InvalidOffsetNumber.
  */
 OffsetNumber
-SpGistPageAddNewItem(SpGistState *state, Page page, Item item, Size size,
+SpGistPageAddNewItem(SpGistState *state, Page page, const void *item, Size size,
 					 OffsetNumber *startOffset, bool errorOK)
 {
 	SpGistPageOpaque opaque = SpGistPageGetOpaque(page);

@@ -4,7 +4,7 @@
  *
  * PostgreSQL object comments utility code.
  *
- * Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/commands/comment.c
@@ -20,10 +20,10 @@
 #include "access/table.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaddress.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_description.h"
 #include "catalog/pg_shdescription.h"
 #include "commands/comment.h"
-#include "commands/dbcommands.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"

@@ -4,7 +4,7 @@
  *	  Standard POSTGRES buffer page definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/bufpage.h
@@ -16,7 +16,6 @@
 
 #include "access/xlogdefs.h"
 #include "storage/block.h"
-#include "storage/item.h"
 #include "storage/off.h"
 
 /* GUC variable */
@@ -351,13 +350,13 @@ PageValidateSpecialPointer(const PageData *page)
  *		This does not change the status of any of the resources passed.
  *		The semantics may change in the future.
  */
-static inline Item
-PageGetItem(const PageData *page, const ItemIdData *itemId)
+static inline void *
+PageGetItem(PageData *page, const ItemIdData *itemId)
 {
 	Assert(page);
 	Assert(ItemIdHasStorage(itemId));
 
-	return (Item) (((const char *) page) + ItemIdGetOffset(itemId));
+	return (char *) page + ItemIdGetOffset(itemId);
 }
 
 /*
@@ -488,7 +487,7 @@ StaticAssertDecl(BLCKSZ == ((BLCKSZ / sizeof(size_t)) * sizeof(size_t)),
 extern void PageInit(Page page, Size pageSize, Size specialSize);
 extern bool PageIsVerified(PageData *page, BlockNumber blkno, int flags,
 						   bool *checksum_failure_p);
-extern OffsetNumber PageAddItemExtended(Page page, Item item, Size size,
+extern OffsetNumber PageAddItemExtended(Page page, const void *item, Size size,
 										OffsetNumber offsetNumber, int flags);
 extern Page PageGetTempPage(const PageData *page);
 extern Page PageGetTempPageCopy(const PageData *page);
@@ -504,7 +503,7 @@ extern void PageIndexTupleDelete(Page page, OffsetNumber offnum);
 extern void PageIndexMultiDelete(Page page, OffsetNumber *itemnos, int nitems);
 extern void PageIndexTupleDeleteNoCompact(Page page, OffsetNumber offnum);
 extern bool PageIndexTupleOverwrite(Page page, OffsetNumber offnum,
-									Item newtup, Size newsize);
+									const void *newtup, Size newsize);
 extern char *PageSetChecksumCopy(Page page, BlockNumber blkno);
 extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
 

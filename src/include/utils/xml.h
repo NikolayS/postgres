@@ -4,7 +4,7 @@
  *	  Declarations for XML data type support.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/xml.h
@@ -71,8 +71,8 @@ extern void xml_ereport(PgXmlErrorContext *errcxt, int level, int sqlcode,
 
 extern xmltype *xmlconcat(List *args);
 extern xmltype *xmlelement(XmlExpr *xexpr,
-						   Datum *named_argvalue, bool *named_argnull,
-						   Datum *argvalue, bool *argnull);
+						   const Datum *named_argvalue, const bool *named_argnull,
+						   const Datum *argvalue, const bool *argnull);
 extern xmltype *xmlparse(text *data, XmlOptionType xmloption_arg, bool preserve_whitespace);
 extern xmltype *xmlpi(const char *target, text *arg, bool arg_is_null, bool *result_is_null);
 extern xmltype *xmlroot(xmltype *data, text *version, int standalone);

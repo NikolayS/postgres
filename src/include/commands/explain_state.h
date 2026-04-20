@@ -3,7 +3,7 @@
  * explain_state.h
  *	  prototypes for explain_state.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  * src/include/commands/explain_state.h
@@ -79,7 +79,7 @@ typedef struct ExplainState
 typedef void (*ExplainOptionHandler) (ExplainState *, DefElem *, ParseState *);
 
 /* Hook to perform additional EXPLAIN options validation */
-typedef void (*explain_validate_options_hook_type) (struct ExplainState *es, List *options,
+typedef void (*explain_validate_options_hook_type) (ExplainState *es, List *options,
 													ParseState *pstate);
 extern PGDLLIMPORT explain_validate_options_hook_type explain_validate_options_hook;
 

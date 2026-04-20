@@ -4,7 +4,7 @@
  *	  Declarations for Postgres range types.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/rangetypes.h
@@ -164,5 +164,7 @@ extern RangeType *make_empty_range(TypeCacheEntry *typcache);
 extern bool range_split_internal(TypeCacheEntry *typcache, const RangeType *r1,
 								 const RangeType *r2, RangeType **output1,
 								 RangeType **output2);
+extern void range_minus_multi_internal(TypeCacheEntry *typcache, RangeType *r1,
+									   RangeType *r2, RangeType **outputs, int *outputn);
 
 #endif							/* RANGETYPES_H */

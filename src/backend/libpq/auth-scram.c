@@ -80,7 +80,7 @@
  * general, after logging in, but let's do what we can here.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/libpq/auth-scram.c
@@ -133,8 +133,6 @@ typedef enum
 typedef struct
 {
 	scram_state_enum state;
-
-	const char *username;		/* username from startup packet */
 
 	Port	   *port;
 	bool		channel_binding_in_use;
@@ -242,7 +240,7 @@ scram_init(Port *port, const char *selected_mech, const char *shadow_pass)
 	scram_state *state;
 	bool		got_secret;
 
-	state = (scram_state *) palloc0(sizeof(scram_state));
+	state = palloc0_object(scram_state);
 	state->port = port;
 	state->state = SCRAM_AUTH_INIT;
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -174,6 +174,7 @@ my $dump2 = $backupdir . '/pitr2.dump';
 $pitr1->command_ok(
 	[
 		'pg_dumpall',
+		'--restrict-key' => 'test',
 		'--no-sync',
 		'--no-unlogged-table-data',
 		'--file' => $dump1,
@@ -183,6 +184,7 @@ $pitr1->command_ok(
 $pitr2->command_ok(
 	[
 		'pg_dumpall',
+		'--restrict-key' => 'test',
 		'--no-sync',
 		'--no-unlogged-table-data',
 		'--file' => $dump2,

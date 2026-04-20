@@ -6,7 +6,7 @@
  *	  changes should be made with care.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/gist.h
@@ -40,7 +40,7 @@
 #define GIST_FETCH_PROC					9
 #define GIST_OPTIONS_PROC				10
 #define GIST_SORTSUPPORT_PROC			11
-#define GIST_STRATNUM_PROC				12
+#define GIST_TRANSLATE_CMPTYPE_PROC		12
 #define GISTNProcs					12
 
 /*

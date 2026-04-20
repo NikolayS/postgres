@@ -3,7 +3,7 @@
  * ip.c
  *	  IPv6-aware network access.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -48,6 +48,9 @@ static int	getnameinfo_unix(const struct sockaddr_un *sa, int salen,
 
 /*
  *	pg_getaddrinfo_all - get address info for Unix, IPv4 and IPv6 sockets
+ *
+ * The API of this routine differs from the standard getaddrinfo() definition
+ * in that it requires a valid hintp, a null pointer is not allowed.
  */
 int
 pg_getaddrinfo_all(const char *hostname, const char *servname,

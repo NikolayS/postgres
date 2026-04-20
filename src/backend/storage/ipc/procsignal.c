@@ -4,7 +4,7 @@
  *	  Routines for interprocess signaling
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -576,6 +576,9 @@ ProcessProcSignalBarrier(void)
 					case PROCSIGNAL_BARRIER_SMGRRELEASE:
 						processed = ProcessBarrierSmgrRelease();
 						break;
+					case PROCSIGNAL_BARRIER_UPDATE_XLOG_LOGICAL_INFO:
+						processed = ProcessBarrierUpdateXLogLogicalInfo();
+						break;
 				}
 
 				/*
@@ -728,7 +731,11 @@ procsignal_sigusr1_handler(SIGNAL_ARGS)
 void
 SendCancelRequest(int backendPID, const uint8 *cancel_key, int cancel_key_len)
 {
-	Assert(backendPID != 0);
+	if (backendPID == 0)
+	{
+		ereport(LOG, (errmsg("invalid cancel request with PID 0")));
+		return;
+	}
 
 	/*
 	 * See if we have a matching backend. Reading the pss_pid and

@@ -5,7 +5,7 @@
  *
  * Access-method specific inspection functions are in separate files.
  *
- * Copyright (c) 2007-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2007-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/pageinspect/rawpage.c
@@ -282,7 +282,7 @@ page_header(PG_FUNCTION_ARGS)
 	{
 		char		lsnchar[64];
 
-		snprintf(lsnchar, sizeof(lsnchar), "%X/%X", LSN_FORMAT_ARGS(lsn));
+		snprintf(lsnchar, sizeof(lsnchar), "%X/%08X", LSN_FORMAT_ARGS(lsn));
 		values[0] = CStringGetTextDatum(lsnchar);
 	}
 	else

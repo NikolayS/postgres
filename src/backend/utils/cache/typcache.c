@@ -31,7 +31,7 @@
  * constraint changes are also tracked properly.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1171,9 +1171,6 @@ load_domaintype_info(TypeCacheEntry *typentry)
 				elog(ERROR, "domain \"%s\" constraint \"%s\" has NULL conbin",
 					 NameStr(typTup->typname), NameStr(c->conname));
 
-			/* Convert conbin to C string in caller context */
-			constring = TextDatumGetCString(val);
-
 			/* Create the DomainConstraintCache object and context if needed */
 			if (dcc == NULL)
 			{
@@ -1189,9 +1186,8 @@ load_domaintype_info(TypeCacheEntry *typentry)
 				dcc->dccRefCount = 0;
 			}
 
-			/* Create node trees in DomainConstraintCache's context */
-			oldcxt = MemoryContextSwitchTo(dcc->dccContext);
-
+			/* Convert conbin to a node tree, still in caller's context */
+			constring = TextDatumGetCString(val);
 			check_expr = (Expr *) stringToNode(constring);
 
 			/*
@@ -1206,10 +1202,13 @@ load_domaintype_info(TypeCacheEntry *typentry)
 			 */
 			check_expr = expression_planner(check_expr);
 
+			/* Create only the minimally needed stuff in dccContext */
+			oldcxt = MemoryContextSwitchTo(dcc->dccContext);
+
 			r = makeNode(DomainConstraintState);
 			r->constrainttype = DOM_CONSTRAINT_CHECK;
 			r->name = pstrdup(NameStr(c->conname));
-			r->check_expr = check_expr;
+			r->check_expr = copyObject(check_expr);
 			r->check_exprstate = NULL;
 
 			MemoryContextSwitchTo(oldcxt);
@@ -2430,7 +2429,7 @@ TypeCacheRelCallback(Datum arg, Oid relid)
 		RelIdToTypeIdCacheEntry *relentry;
 
 		/*
-		 * Find an RelIdToTypeIdCacheHash entry, which should exist as soon as
+		 * Find a RelIdToTypeIdCacheHash entry, which should exist as soon as
 		 * corresponding typcache entry has something to clean.
 		 */
 		relentry = (RelIdToTypeIdCacheEntry *) hash_search(RelIdToTypeIdCacheHash,
@@ -2765,7 +2764,7 @@ load_enum_cache_data(TypeCacheEntry *tcache)
 	 * through.
 	 */
 	maxitems = 64;
-	items = (EnumItem *) palloc(sizeof(EnumItem) * maxitems);
+	items = palloc_array(EnumItem, maxitems);
 	numitems = 0;
 
 	/* Scan pg_enum for the members of the target enum type. */

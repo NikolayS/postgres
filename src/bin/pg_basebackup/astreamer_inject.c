@@ -2,7 +2,7 @@
  *
  * astreamer_inject.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_basebackup/astreamer_inject.c
@@ -68,7 +68,7 @@ astreamer_recovery_injector_new(astreamer *next,
 {
 	astreamer_recovery_injector *streamer;
 
-	streamer = palloc0(sizeof(astreamer_recovery_injector));
+	streamer = palloc0_object(astreamer_recovery_injector);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_recovery_injector_ops;
 	streamer->base.bbs_next = next;

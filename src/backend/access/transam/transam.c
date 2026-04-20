@@ -3,7 +3,7 @@
  * transam.c
  *	  postgres transaction (commit) log interface routines
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -271,70 +271,6 @@ TransactionIdAbortTree(TransactionId xid, int nxids, TransactionId *xids)
 {
 	TransactionIdSetTreeStatus(xid, nxids, xids,
 							   TRANSACTION_STATUS_ABORTED, InvalidXLogRecPtr);
-}
-
-/*
- * TransactionIdPrecedes --- is id1 logically < id2?
- */
-bool
-TransactionIdPrecedes(TransactionId id1, TransactionId id2)
-{
-	/*
-	 * If either ID is a permanent XID then we can just do unsigned
-	 * comparison.  If both are normal, do a modulo-2^32 comparison.
-	 */
-	int32		diff;
-
-	if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-		return (id1 < id2);
-
-	diff = (int32) (id1 - id2);
-	return (diff < 0);
-}
-
-/*
- * TransactionIdPrecedesOrEquals --- is id1 logically <= id2?
- */
-bool
-TransactionIdPrecedesOrEquals(TransactionId id1, TransactionId id2)
-{
-	int32		diff;
-
-	if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-		return (id1 <= id2);
-
-	diff = (int32) (id1 - id2);
-	return (diff <= 0);
-}
-
-/*
- * TransactionIdFollows --- is id1 logically > id2?
- */
-bool
-TransactionIdFollows(TransactionId id1, TransactionId id2)
-{
-	int32		diff;
-
-	if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-		return (id1 > id2);
-
-	diff = (int32) (id1 - id2);
-	return (diff > 0);
-}
-
-/*
- * TransactionIdFollowsOrEquals --- is id1 logically >= id2?
- */
-bool
-TransactionIdFollowsOrEquals(TransactionId id1, TransactionId id2)
-{
-	int32		diff;
-
-	if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-		return (id1 >= id2);
-
-	diff = (int32) (id1 - id2);
-	return (diff >= 0);
 }
 
 

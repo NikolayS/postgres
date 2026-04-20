@@ -4,7 +4,7 @@
  *	  prototypes for tablecmds.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/tablecmds.h
@@ -21,7 +21,8 @@
 #include "storage/lock.h"
 #include "utils/relcache.h"
 
-struct AlterTableUtilityContext;	/* avoid including tcop/utility.h here */
+typedef struct AlterTableUtilityContext AlterTableUtilityContext;	/* avoid including
+																	 * tcop/utility.h here */
 
 
 extern ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
@@ -34,7 +35,7 @@ extern void RemoveRelations(DropStmt *drop);
 extern Oid	AlterTableLookupRelation(AlterTableStmt *stmt, LOCKMODE lockmode);
 
 extern void AlterTable(AlterTableStmt *stmt, LOCKMODE lockmode,
-					   struct AlterTableUtilityContext *context);
+					   AlterTableUtilityContext *context);
 
 extern LOCKMODE AlterTableGetLockLevel(List *cmds);
 

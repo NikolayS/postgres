@@ -8,7 +8,7 @@
  * computation. Otherwise, fall back to the pure software implementation
  * (slicing-by-8).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -26,7 +26,8 @@
 
 #if defined(HAVE_ELF_AUX_INFO) || defined(HAVE_GETAUXVAL)
 #include <sys/auxv.h>
-#if defined(__linux__) && !defined(__aarch64__) && !defined(HWCAP2_CRC32)
+/* Ancient glibc releases don't include the HWCAPxxx macros in sys/auxv.h */
+#if defined(__linux__) && (defined(__aarch64__) ? !defined(HWCAP_CRC32) : !defined(HWCAP2_CRC32))
 #include <asm/hwcap.h>
 #endif
 #endif

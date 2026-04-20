@@ -2,7 +2,7 @@
  *
  *	  Utility functions for conversion procs.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -484,7 +484,7 @@ pg_mb_radix_conv(const pg_mb_radix_tree *rt,
  * utf: input string in UTF8 encoding (need not be null-terminated)
  * len: length of input string (in bytes)
  * iso: pointer to the output area (must be large enough!)
-		  (output string will be null-terminated)
+ *		  (output string will be null-terminated)
  * map: conversion map for single characters
  * cmap: conversion map for combined characters
  *		  (optional, pass NULL if none)
@@ -694,7 +694,7 @@ UtfToLocal(const unsigned char *utf, int len,
  * iso: input string in local encoding (need not be null-terminated)
  * len: length of input string (in bytes)
  * utf: pointer to the output area (must be large enough!)
-		  (output string will be null-terminated)
+ *		  (output string will be null-terminated)
  * map: conversion map for single characters
  * cmap: conversion map for combined characters
  *		  (optional, pass NULL if none)

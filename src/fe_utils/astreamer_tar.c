@@ -12,7 +12,7 @@
  * just adds two blocks of NUL bytes to the end of the file, since older
  * server versions produce files with this terminator omitted.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/fe_utils/astreamer_tar.c
@@ -94,7 +94,7 @@ astreamer_tar_parser_new(astreamer *next)
 {
 	astreamer_tar_parser *streamer;
 
-	streamer = palloc0(sizeof(astreamer_tar_parser));
+	streamer = palloc0_object(astreamer_tar_parser);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_tar_parser_ops;
 	streamer->base.bbs_next = next;
@@ -357,7 +357,7 @@ astreamer_tar_archiver_new(astreamer *next)
 {
 	astreamer_tar_archiver *streamer;
 
-	streamer = palloc0(sizeof(astreamer_tar_archiver));
+	streamer = palloc0_object(astreamer_tar_archiver);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_tar_archiver_ops;
 	streamer->base.bbs_next = next;
@@ -463,7 +463,7 @@ astreamer_tar_terminator_new(astreamer *next)
 {
 	astreamer  *streamer;
 
-	streamer = palloc0(sizeof(astreamer));
+	streamer = palloc0_object(astreamer);
 	*((const astreamer_ops **) &streamer->bbs_ops) =
 		&astreamer_tar_terminator_ops;
 	streamer->bbs_next = next;

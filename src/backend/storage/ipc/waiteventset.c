@@ -37,7 +37,7 @@
  * The Windows implementation uses Windows events that are inherited by all
  * postmaster child processes. There's no need for the self-pipe trick there.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -67,6 +67,7 @@
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "port/atomics.h"
 #include "portability/instr_time.h"
 #include "postmaster/postmaster.h"
 #include "storage/fd.h"
@@ -461,7 +462,6 @@ CreateWaitEventSet(ResourceOwner resowner, int nevents)
 	 * pending signals are serviced.
 	 */
 	set->handles[0] = pgwin32_signal_event;
-	StaticAssertStmt(WSA_INVALID_EVENT == NULL, "");
 #endif
 
 	return set;
@@ -978,6 +978,8 @@ WaitEventAdjustKqueue(WaitEventSet *set, WaitEvent *event, int old_events)
 #endif
 
 #if defined(WAIT_USE_WIN32)
+StaticAssertDecl(WSA_INVALID_EVENT == NULL, "");
+
 static void
 WaitEventAdjustWin32(WaitEventSet *set, WaitEvent *event)
 {
@@ -1476,7 +1478,7 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
 	struct pollfd *cur_pollfd;
 
 	/* Sleep */
-	rc = poll(set->pollfds, set->nevents, (int) cur_timeout);
+	rc = poll(set->pollfds, set->nevents, cur_timeout);
 
 	/* Check return code */
 	if (rc < 0)
@@ -1529,15 +1531,15 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
 				 (cur_pollfd->revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
 		{
 			/*
-			 * We expect an POLLHUP when the remote end is closed, but because
+			 * We expect a POLLHUP when the remote end is closed, but because
 			 * we don't expect the pipe to become readable or to have any
 			 * errors either, treat those cases as postmaster death, too.
 			 *
 			 * Be paranoid about a spurious event signaling the postmaster as
 			 * being dead.  There have been reports about that happening with
 			 * older primitives (select(2) to be specific), and a spurious
-			 * WL_POSTMASTER_DEATH event would be painful. Re-checking doesn't
-			 * cost much.
+			 * WL_POSTMASTER_DEATH event would be painful.  Re-checking
+			 * doesn't cost much.
 			 */
 			if (!PostmasterIsAliveInternal())
 			{
@@ -2009,7 +2011,7 @@ ResOwnerReleaseWaitEventSet(Datum res)
  * NB: be sure to save and restore errno around it.  (That's standard practice
  * in most signal handlers, of course, but we used to omit it in handlers that
  * only set a flag.) XXX
-  *
+ *
  * NB: this function is called from critical sections and signal handlers so
  * throwing an error is not a good idea.
  *

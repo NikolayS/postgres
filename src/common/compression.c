@@ -14,7 +14,7 @@
  *
  * Currently, the supported keywords are "level", "long", and "workers".
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/common/compression.c
@@ -425,7 +425,7 @@ validate_compress_specification(pg_compress_specification *spec)
 void
 parse_compress_options(const char *option, char **algorithm, char **detail)
 {
-	char	   *sep;
+	const char *sep;
 	char	   *endp;
 	long		result;
 

@@ -39,7 +39,7 @@
  * specific parts are in the libpqwalreceiver module. It's loaded
  * dynamically to avoid linking the server with libpq.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -57,6 +57,7 @@
 #include "access/xlog_internal.h"
 #include "access/xlogarchive.h"
 #include "access/xlogrecovery.h"
+#include "access/xlogwait.h"
 #include "catalog/pg_authid.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
@@ -386,12 +387,12 @@ WalReceiverMain(const void *startup_data, size_t startup_data_len)
 		{
 			if (first_stream)
 				ereport(LOG,
-						(errmsg("started streaming WAL from primary at %X/%X on timeline %u",
-								LSN_FORMAT_ARGS(startpoint), startpointTLI)));
+						errmsg("started streaming WAL from primary at %X/%08X on timeline %u",
+							   LSN_FORMAT_ARGS(startpoint), startpointTLI));
 			else
 				ereport(LOG,
-						(errmsg("restarted WAL streaming at %X/%X on timeline %u",
-								LSN_FORMAT_ARGS(startpoint), startpointTLI)));
+						errmsg("restarted WAL streaming at %X/%08X on timeline %u",
+							   LSN_FORMAT_ARGS(startpoint), startpointTLI));
 			first_stream = false;
 
 			/* Initialize LogstreamResult and buffers for processing messages */
@@ -470,7 +471,7 @@ WalReceiverMain(const void *startup_data, size_t startup_data_len)
 						{
 							ereport(LOG,
 									(errmsg("replication terminated by primary server"),
-									 errdetail("End of WAL reached on timeline %u at %X/%X.",
+									 errdetail("End of WAL reached on timeline %u at %X/%08X.",
 											   startpointTLI,
 											   LSN_FORMAT_ARGS(LogstreamResult.Write))));
 							endofwal = true;
@@ -711,7 +712,7 @@ WalRcvWaitForStartPosition(XLogRecPtr *startpoint, TimeLineID *startpointTLI)
 	{
 		char		activitymsg[50];
 
-		snprintf(activitymsg, sizeof(activitymsg), "restarting at %X/%X",
+		snprintf(activitymsg, sizeof(activitymsg), "restarting at %X/%08X",
 				 LSN_FORMAT_ARGS(*startpoint));
 		set_ps_display(activitymsg);
 	}
@@ -826,7 +827,7 @@ XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len, TimeLineID tli)
 
 	switch (type)
 	{
-		case 'w':				/* WAL records */
+		case PqReplMsg_WALData:
 			{
 				StringInfoData incoming_message;
 
@@ -850,7 +851,7 @@ XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len, TimeLineID tli)
 				XLogWalRcvWrite(buf, len, dataStart, tli);
 				break;
 			}
-		case 'k':				/* Keepalive */
+		case PqReplMsg_Keepalive:
 			{
 				StringInfoData incoming_message;
 
@@ -928,7 +929,7 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
 		start = pgstat_prepare_io_time(track_wal_io_timing);
 
 		pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
-		byteswritten = pg_pwrite(recvFile, buf, segbytes, (off_t) startoff);
+		byteswritten = pg_pwrite(recvFile, buf, segbytes, (pgoff_t) startoff);
 		pgstat_report_wait_end();
 
 		pgstat_count_io_op_time(IOOBJECT_WAL, IOCONTEXT_NORMAL,
@@ -949,8 +950,8 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
 			ereport(PANIC,
 					(errcode_for_file_access(),
 					 errmsg("could not write to WAL segment %s "
-							"at offset %d, length %lu: %m",
-							xlogfname, startoff, (unsigned long) segbytes)));
+							"at offset %d, length %d: %m",
+							xlogfname, startoff, segbytes)));
 		}
 
 		/* Update state for write */
@@ -964,6 +965,14 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
 
 	/* Update shared-memory status */
 	pg_atomic_write_u64(&WalRcv->writtenUpto, LogstreamResult.Write);
+
+	/*
+	 * If we wrote an LSN that someone was waiting for, notify the waiters.
+	 */
+	if (waitLSNState &&
+		(LogstreamResult.Write >=
+		 pg_atomic_read_u64(&waitLSNState->minWaitedLSN[WAIT_LSN_TYPE_STANDBY_WRITE])))
+		WaitLSNWakeup(WAIT_LSN_TYPE_STANDBY_WRITE, LogstreamResult.Write);
 
 	/*
 	 * Close the current segment if it's fully written up in the last cycle of
@@ -1004,6 +1013,15 @@ XLogWalRcvFlush(bool dying, TimeLineID tli)
 		}
 		SpinLockRelease(&walrcv->mutex);
 
+		/*
+		 * If we flushed an LSN that someone was waiting for, notify the
+		 * waiters.
+		 */
+		if (waitLSNState &&
+			(LogstreamResult.Flush >=
+			 pg_atomic_read_u64(&waitLSNState->minWaitedLSN[WAIT_LSN_TYPE_STANDBY_FLUSH])))
+			WaitLSNWakeup(WAIT_LSN_TYPE_STANDBY_FLUSH, LogstreamResult.Flush);
+
 		/* Signal the startup process and walsender that new WAL has arrived */
 		WakeupRecovery();
 		if (AllowCascadeReplication())
@@ -1014,7 +1032,7 @@ XLogWalRcvFlush(bool dying, TimeLineID tli)
 		{
 			char		activitymsg[50];
 
-			snprintf(activitymsg, sizeof(activitymsg), "streaming %X/%X",
+			snprintf(activitymsg, sizeof(activitymsg), "streaming %X/%08X",
 					 LSN_FORMAT_ARGS(LogstreamResult.Write));
 			set_ps_display(activitymsg);
 		}
@@ -1130,7 +1148,7 @@ XLogWalRcvSendReply(bool force, bool requestReply)
 	applyPtr = GetXLogReplayRecPtr(NULL);
 
 	resetStringInfo(&reply_message);
-	pq_sendbyte(&reply_message, 'r');
+	pq_sendbyte(&reply_message, PqReplMsg_StandbyStatusUpdate);
 	pq_sendint64(&reply_message, writePtr);
 	pq_sendint64(&reply_message, flushPtr);
 	pq_sendint64(&reply_message, applyPtr);
@@ -1138,7 +1156,7 @@ XLogWalRcvSendReply(bool force, bool requestReply)
 	pq_sendbyte(&reply_message, requestReply ? 1 : 0);
 
 	/* Send it */
-	elog(DEBUG2, "sending write %X/%X flush %X/%X apply %X/%X%s",
+	elog(DEBUG2, "sending write %X/%08X flush %X/%08X apply %X/%08X%s",
 		 LSN_FORMAT_ARGS(writePtr),
 		 LSN_FORMAT_ARGS(flushPtr),
 		 LSN_FORMAT_ARGS(applyPtr),
@@ -1234,7 +1252,7 @@ XLogWalRcvSendHSFeedback(bool immed)
 
 	/* Construct the message and send it. */
 	resetStringInfo(&reply_message);
-	pq_sendbyte(&reply_message, 'h');
+	pq_sendbyte(&reply_message, PqReplMsg_HotStandbyFeedback);
 	pq_sendint64(&reply_message, GetCurrentTimestamp());
 	pq_sendint32(&reply_message, xmin);
 	pq_sendint32(&reply_message, xmin_epoch);
@@ -1450,8 +1468,8 @@ pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	values = palloc0(sizeof(Datum) * tupdesc->natts);
-	nulls = palloc0(sizeof(bool) * tupdesc->natts);
+	values = palloc0_array(Datum, tupdesc->natts);
+	nulls = palloc0_array(bool, tupdesc->natts);
 
 	/* Fetch values */
 	values[0] = Int32GetDatum(pid);
@@ -1469,16 +1487,16 @@ pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
 	{
 		values[1] = CStringGetTextDatum(WalRcvGetStateString(state));
 
-		if (XLogRecPtrIsInvalid(receive_start_lsn))
+		if (!XLogRecPtrIsValid(receive_start_lsn))
 			nulls[2] = true;
 		else
 			values[2] = LSNGetDatum(receive_start_lsn);
 		values[3] = Int32GetDatum(receive_start_tli);
-		if (XLogRecPtrIsInvalid(written_lsn))
+		if (!XLogRecPtrIsValid(written_lsn))
 			nulls[4] = true;
 		else
 			values[4] = LSNGetDatum(written_lsn);
-		if (XLogRecPtrIsInvalid(flushed_lsn))
+		if (!XLogRecPtrIsValid(flushed_lsn))
 			nulls[5] = true;
 		else
 			values[5] = LSNGetDatum(flushed_lsn);
@@ -1491,7 +1509,7 @@ pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
 			nulls[8] = true;
 		else
 			values[8] = TimestampTzGetDatum(last_receipt_time);
-		if (XLogRecPtrIsInvalid(latest_end_lsn))
+		if (!XLogRecPtrIsValid(latest_end_lsn))
 			nulls[9] = true;
 		else
 			values[9] = LSNGetDatum(latest_end_lsn);

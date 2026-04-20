@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -15,6 +15,22 @@ my $port = $node->port;
 
 $node->init;
 $node->start;
+
+#########################################
+# pg_dumpall: newline in database name
+
+$node->safe_psql('postgres', qq{CREATE DATABASE "regress_\nattack"});
+
+my (@cmd, $stdout, $stderr);
+@cmd = ("pg_dumpall", '--port' => $port, '--exclude-database=postgres');
+print("# Running: " . join(" ", @cmd) . "\n");
+my $result = IPC::Run::run \@cmd, '>' => \$stdout, '2>' => \$stderr;
+ok(!$result, "newline in dbname: exit code not 0");
+like(
+	$stderr,
+	qr/shell command argument contains a newline/,
+	"newline in dbname: stderr matches");
+unlike($stdout, qr/^attack/m, "newline in dbname: no comment escape");
 
 #########################################
 # Verify that dumping foreign data includes only foreign tables of

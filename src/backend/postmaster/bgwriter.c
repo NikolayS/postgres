@@ -21,7 +21,7 @@
  * should be killed by SIGQUIT and then a recovery cycle started.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -40,6 +40,7 @@
 #include "postmaster/interrupt.h"
 #include "storage/aio_subsys.h"
 #include "storage/buf_internals.h"
+#include "storage/buf_resize.h"
 #include "storage/bufmgr.h"
 #include "storage/condition_variable.h"
 #include "storage/fd.h"
@@ -234,6 +235,11 @@ BackgroundWriterMain(const void *startup_data, size_t startup_data_len)
 		 * Do one cycle of dirty-buffer writing.
 		 */
 		can_hibernate = BgBufferSync(&wb_context);
+
+		/*
+		 * Drain any condemned buffers from a buffer pool shrink.
+		 */
+		BufPoolDrainCondemnedBuffers();
 
 		/* Report pending statistics to the cumulative stats system */
 		pgstat_report_bgwriter();

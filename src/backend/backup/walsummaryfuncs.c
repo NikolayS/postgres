@@ -3,7 +3,7 @@
  * walsummaryfuncs.c
  *	  SQL-callable functions for accessing WAL summary data.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * src/backend/backup/walsummaryfuncs.c
  *
@@ -12,6 +12,7 @@
 
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "backup/walsummary.h"
 #include "common/blkreftable.h"
 #include "funcapi.h"

@@ -4,7 +4,7 @@
  *	  POSTGRES LIBPQ buffer structure definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/libpq/libpq.h
@@ -116,6 +116,24 @@ extern PGDLLIMPORT char *SSLECDHCurve;
 extern PGDLLIMPORT bool SSLPreferServerCiphers;
 #ifdef USE_SSL
 extern PGDLLIMPORT bool ssl_loaded_verify_locations;
+#endif
+
+#ifdef USE_SSL
+#define SSL_LIBRARY "OpenSSL"
+#else
+#define SSL_LIBRARY ""
+#endif
+
+#ifdef USE_OPENSSL
+#define DEFAULT_SSL_CIPHERS "HIGH:MEDIUM:+3DES:!aNULL"
+#else
+#define DEFAULT_SSL_CIPHERS "none"
+#endif
+
+#ifdef USE_SSL
+#define DEFAULT_SSL_GROUPS "X25519:prime256v1"
+#else
+#define DEFAULT_SSL_GROUPS "none"
 #endif
 
 /*

@@ -54,9 +54,6 @@
 /* Define to 1 if you have the `append_history' function. */
 #undef HAVE_APPEND_HISTORY
 
-/* Define to 1 if you have the <atomic.h> header file. */
-#undef HAVE_ATOMIC_H
-
 /* Define to 1 if you have the `backtrace_symbols' function. */
 #undef HAVE_BACKTRACE_SYMBOLS
 
@@ -82,14 +79,6 @@
 /* Define to 1 if you have the declaration of `F_FULLFSYNC', and to 0 if you
    don't. */
 #undef HAVE_DECL_F_FULLFSYNC
-
-/* Define to 1 if you have the declaration of
-   `LLVMCreateGDBRegistrationListener', and to 0 if you don't. */
-#undef HAVE_DECL_LLVMCREATEGDBREGISTRATIONLISTENER
-
-/* Define to 1 if you have the declaration of
-   `LLVMCreatePerfJITEventListener', and to 0 if you don't. */
-#undef HAVE_DECL_LLVMCREATEPERFJITEVENTLISTENER
 
 /* Define to 1 if you have the declaration of `memset_s', and to 0 if you
    don't. */
@@ -118,10 +107,6 @@
 /* Define to 1 if you have the declaration of `strlcpy', and to 0 if you
    don't. */
 #undef HAVE_DECL_STRLCPY
-
-/* Define to 1 if you have the declaration of `strnlen', and to 0 if you
-   don't. */
-#undef HAVE_DECL_STRNLEN
 
 /* Define to 1 if you have the declaration of `strsep', and to 0 if you don't.
    */
@@ -229,6 +214,9 @@
 /* Define to 1 if you have the global variable 'int timezone'. */
 #undef HAVE_INT_TIMEZONE
 
+/* Define to 1 if you have the `io_uring_queue_init_mem' function. */
+#undef HAVE_IO_URING_QUEUE_INIT_MEM
+
 /* Define to 1 if __builtin_constant_p(x) implies "i"(x) acceptance. */
 #undef HAVE_I_CONSTRAINT__BUILTIN_CONSTANT_P
 
@@ -285,9 +273,6 @@
 
 /* Define to 1 if you have the `localeconv_l' function. */
 #undef HAVE_LOCALECONV_L
-
-/* Define to 1 if you have the <mbarrier.h> header file. */
-#undef HAVE_MBARRIER_H
 
 /* Define to 1 if you have the `mbstowcs_l' function. */
 #undef HAVE_MBSTOWCS_L
@@ -382,6 +367,9 @@
 /* Define to 1 if you have the `SSL_CTX_set_num_tickets' function. */
 #undef HAVE_SSL_CTX_SET_NUM_TICKETS
 
+/* Define to 1 if your compiler supports statement expressions. */
+#undef HAVE_STATEMENT_EXPRESSIONS
+
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
 
@@ -402,9 +390,6 @@
 
 /* Define to 1 if you have the `strlcpy' function. */
 #undef HAVE_STRLCPY
-
-/* Define to 1 if you have the `strnlen' function. */
-#undef HAVE_STRNLEN
 
 /* Define to 1 if you have the `strsep' function. */
 #undef HAVE_STRSEP
@@ -468,6 +453,9 @@
 
 /* Define to 1 if your compiler understands `typeof' or something similar. */
 #undef HAVE_TYPEOF
+
+/* Define to 1 if you have the <uchar.h> header file. */
+#undef HAVE_UCHAR_H
 
 /* Define to 1 if you have the <ucred.h> header file. */
 #undef HAVE_UCRED_H
@@ -559,9 +547,6 @@
 /* Define to 1 if you have __get_cpuid_count. */
 #undef HAVE__GET_CPUID_COUNT
 
-/* Define to 1 if your compiler understands _Static_assert. */
-#undef HAVE__STATIC_ASSERT
-
 /* Define as the maximum alignment requirement of any C data type. */
 #undef MAXIMUM_ALIGNOF
 
@@ -590,6 +575,14 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Define to best C++ printf format archetype, usually gnu_printf if
+   available. */
+#undef PG_CXX_PRINTF_ATTRIBUTE
+
+/* Define to best C printf format archetype, usually gnu_printf if available.
+   */
+#undef PG_C_PRINTF_ATTRIBUTE
+
 /* Define to the name of a signed 128-bit integer type. */
 #undef PG_INT128_TYPE
 
@@ -605,9 +598,6 @@
 
 /* PostgreSQL minor version number */
 #undef PG_MINORVERSION_NUM
-
-/* Define to best printf format archetype, usually gnu_printf if available. */
-#undef PG_PRINTF_ATTRIBUTE
 
 /* PostgreSQL version as a string */
 #undef PG_VERSION
@@ -638,6 +628,9 @@
    save a few cycles in md.c, but is not absolutely required. Changing
    RELSEG_SIZE requires an initdb. */
 #undef RELSEG_SIZE
+
+/* The size of `intmax_t', as computed by sizeof. */
+#undef SIZEOF_INTMAX_T
 
 /* The size of `long', as computed by sizeof. */
 #undef SIZEOF_LONG
@@ -792,10 +785,6 @@
 #ifndef __cplusplus
 #undef inline
 #endif
-
-/* Define to keyword to use for C99 restrict support, or to nothing if not
-   supported */
-#undef pg_restrict
 
 /* Define to the equivalent of the C99 'restrict' keyword, or to
    nothing if this is not supported.  Do not define if restrict is

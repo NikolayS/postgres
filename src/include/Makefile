@@ -17,14 +17,46 @@ all: pg_config.h pg_config_os.h
 
 
 # Subdirectories containing installable headers
-SUBDIRS = access archive bootstrap catalog commands common datatype \
-	executor fe_utils foreign jit \
-	lib libpq mb nodes optimizer parser partitioning postmaster \
-	regex replication rewrite \
-	statistics storage tcop snowball snowball/libstemmer tsearch \
-	tsearch/dicts utils port port/atomics port/win32 port/win32_msvc \
-	port/win32_msvc/sys port/win32/arpa port/win32/netinet \
-	port/win32/sys portability
+SUBDIRS = \
+	access \
+	archive \
+	bootstrap \
+	catalog \
+	commands \
+	common \
+	datatype \
+	executor \
+	fe_utils \
+	foreign \
+	jit \
+	lib \
+	libpq \
+	mb \
+	nodes \
+	optimizer \
+	parser \
+	partitioning \
+	postmaster \
+	regex \
+	replication \
+	rewrite \
+	statistics \
+	storage \
+	tcop \
+	snowball \
+	snowball/libstemmer \
+	tsearch \
+	tsearch/dicts \
+	utils \
+	port \
+	port/atomics \
+	port/win32 \
+	port/win32_msvc \
+	port/win32_msvc/sys \
+	port/win32/arpa \
+	port/win32/netinet \
+	port/win32/sys \
+	portability
 
 # Install all headers
 install: all installdirs
@@ -72,7 +104,7 @@ uninstall:
 
 
 clean:
-	rm -f utils/fmgroids.h utils/fmgrprotos.h utils/errcodes.h utils/header-stamp
+	rm -f utils/fmgroids.h utils/fmgrprotos.h utils/guc_tables.inc.c utils/errcodes.h utils/header-stamp
 	rm -f storage/lwlocknames.h utils/probes.h utils/wait_event_types.h
 	rm -f nodes/nodetags.h nodes/header-stamp
 	$(MAKE) -C catalog clean

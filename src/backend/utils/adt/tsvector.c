@@ -3,7 +3,7 @@
  * tsvector.c
  *	  I/O functions for tsvector
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -202,17 +202,17 @@ tsvectorin(PG_FUNCTION_ARGS)
 	state = init_tsvector_parser(buf, 0, escontext);
 
 	arrlen = 64;
-	arr = (WordEntryIN *) palloc(sizeof(WordEntryIN) * arrlen);
-	cur = tmpbuf = (char *) palloc(buflen);
+	arr = palloc_array(WordEntryIN, arrlen);
+	cur = tmpbuf = palloc_array(char, buflen);
 
 	while (gettoken_tsvector(state, &token, &toklen, &pos, &poslen, NULL))
 	{
 		if (toklen >= MAXSTRLEN)
 			ereturn(escontext, (Datum) 0,
 					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-					 errmsg("word is too long (%ld bytes, max %ld bytes)",
-							(long) toklen,
-							(long) (MAXSTRLEN - 1))));
+					 errmsg("word is too long (%d bytes, max %d bytes)",
+							toklen,
+							MAXSTRLEN - 1)));
 
 		if (cur - tmpbuf > MAXSTRPOS)
 			ereturn(escontext, (Datum) 0,

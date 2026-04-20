@@ -4,7 +4,7 @@
  *
  * See src/backend/access/brin/README for details.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -68,7 +68,7 @@ typedef struct BrinShared
 	int			scantuplesortstates;
 
 	/* Query ID, for report in worker processes */
-	uint64		queryid;
+	int64		queryid;
 
 	/*
 	 * workersdonecv is used to monitor the progress of workers.  All parallel
@@ -249,62 +249,63 @@ static void _brin_parallel_scan_and_build(BrinBuildState *state,
 Datum
 brinhandler(PG_FUNCTION_ARGS)
 {
-	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = 0,
+		.amsupport = BRIN_LAST_OPTIONAL_PROCNUM,
+		.amoptsprocnum = BRIN_PROCNUM_OPTIONS,
+		.amcanorder = false,
+		.amcanorderbyop = false,
+		.amcanhash = false,
+		.amconsistentequality = false,
+		.amconsistentordering = false,
+		.amcanbackward = false,
+		.amcanunique = false,
+		.amcanmulticol = true,
+		.amoptionalkey = true,
+		.amsearcharray = false,
+		.amsearchnulls = true,
+		.amstorage = true,
+		.amclusterable = false,
+		.ampredlocks = false,
+		.amcanparallel = false,
+		.amcanbuildparallel = true,
+		.amcaninclude = false,
+		.amusemaintenanceworkmem = false,
+		.amsummarizing = true,
+		.amparallelvacuumoptions =
+		VACUUM_OPTION_PARALLEL_CLEANUP,
+		.amkeytype = InvalidOid,
 
-	amroutine->amstrategies = 0;
-	amroutine->amsupport = BRIN_LAST_OPTIONAL_PROCNUM;
-	amroutine->amoptsprocnum = BRIN_PROCNUM_OPTIONS;
-	amroutine->amcanorder = false;
-	amroutine->amcanorderbyop = false;
-	amroutine->amcanhash = false;
-	amroutine->amconsistentequality = false;
-	amroutine->amconsistentordering = false;
-	amroutine->amcanbackward = false;
-	amroutine->amcanunique = false;
-	amroutine->amcanmulticol = true;
-	amroutine->amoptionalkey = true;
-	amroutine->amsearcharray = false;
-	amroutine->amsearchnulls = true;
-	amroutine->amstorage = true;
-	amroutine->amclusterable = false;
-	amroutine->ampredlocks = false;
-	amroutine->amcanparallel = false;
-	amroutine->amcanbuildparallel = true;
-	amroutine->amcaninclude = false;
-	amroutine->amusemaintenanceworkmem = false;
-	amroutine->amsummarizing = true;
-	amroutine->amparallelvacuumoptions =
-		VACUUM_OPTION_PARALLEL_CLEANUP;
-	amroutine->amkeytype = InvalidOid;
+		.ambuild = brinbuild,
+		.ambuildempty = brinbuildempty,
+		.aminsert = brininsert,
+		.aminsertcleanup = brininsertcleanup,
+		.ambulkdelete = brinbulkdelete,
+		.amvacuumcleanup = brinvacuumcleanup,
+		.amcanreturn = NULL,
+		.amcostestimate = brincostestimate,
+		.amgettreeheight = NULL,
+		.amoptions = brinoptions,
+		.amproperty = NULL,
+		.ambuildphasename = NULL,
+		.amvalidate = brinvalidate,
+		.amadjustmembers = NULL,
+		.ambeginscan = brinbeginscan,
+		.amrescan = brinrescan,
+		.amgettuple = NULL,
+		.amgetbitmap = bringetbitmap,
+		.amendscan = brinendscan,
+		.ammarkpos = NULL,
+		.amrestrpos = NULL,
+		.amestimateparallelscan = NULL,
+		.aminitparallelscan = NULL,
+		.amparallelrescan = NULL,
+		.amtranslatestrategy = NULL,
+		.amtranslatecmptype = NULL,
+	};
 
-	amroutine->ambuild = brinbuild;
-	amroutine->ambuildempty = brinbuildempty;
-	amroutine->aminsert = brininsert;
-	amroutine->aminsertcleanup = brininsertcleanup;
-	amroutine->ambulkdelete = brinbulkdelete;
-	amroutine->amvacuumcleanup = brinvacuumcleanup;
-	amroutine->amcanreturn = NULL;
-	amroutine->amcostestimate = brincostestimate;
-	amroutine->amgettreeheight = NULL;
-	amroutine->amoptions = brinoptions;
-	amroutine->amproperty = NULL;
-	amroutine->ambuildphasename = NULL;
-	amroutine->amvalidate = brinvalidate;
-	amroutine->amadjustmembers = NULL;
-	amroutine->ambeginscan = brinbeginscan;
-	amroutine->amrescan = brinrescan;
-	amroutine->amgettuple = NULL;
-	amroutine->amgetbitmap = bringetbitmap;
-	amroutine->amendscan = brinendscan;
-	amroutine->ammarkpos = NULL;
-	amroutine->amrestrpos = NULL;
-	amroutine->amestimateparallelscan = NULL;
-	amroutine->aminitparallelscan = NULL;
-	amroutine->amparallelrescan = NULL;
-	amroutine->amtranslatestrategy = NULL;
-	amroutine->amtranslatecmptype = NULL;
-
-	PG_RETURN_POINTER(amroutine);
+	PG_RETURN_POINTER(&amroutine);
 }
 
 /*
@@ -318,7 +319,7 @@ initialize_brin_insertstate(Relation idxRel, IndexInfo *indexInfo)
 	MemoryContext oldcxt;
 
 	oldcxt = MemoryContextSwitchTo(indexInfo->ii_Context);
-	bistate = palloc0(sizeof(BrinInsertState));
+	bistate = palloc0_object(BrinInsertState);
 	bistate->bis_desc = brin_build_desc(idxRel);
 	bistate->bis_rmAccess = brinRevmapInitialize(idxRel,
 												 &bistate->bis_pages_per_range);
@@ -573,7 +574,6 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	Relation	heapRel;
 	BrinOpaque *opaque;
 	BlockNumber nblocks;
-	BlockNumber heapBlk;
 	int64		totalpages = 0;
 	FmgrInfo   *consistentFn;
 	MemoryContext oldcxt;
@@ -735,9 +735,10 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	/*
 	 * Now scan the revmap.  We start by querying for heap page 0,
 	 * incrementing by the number of pages per range; this gives us a full
-	 * view of the table.
+	 * view of the table.  We make use of uint64 for heapBlk as a BlockNumber
+	 * could wrap for tables with close to 2^32 pages.
 	 */
-	for (heapBlk = 0; heapBlk < nblocks; heapBlk += opaque->bo_pagesPerRange)
+	for (uint64 heapBlk = 0; heapBlk < nblocks; heapBlk += opaque->bo_pagesPerRange)
 	{
 		bool		addrange;
 		bool		gottuple = false;
@@ -749,7 +750,7 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 
 		MemoryContextReset(perRangeCxt);
 
-		tup = brinGetTupleForHeapBlock(opaque->bo_rmAccess, heapBlk, &buf,
+		tup = brinGetTupleForHeapBlock(opaque->bo_rmAccess, (BlockNumber) heapBlk, &buf,
 									   &off, &size, BUFFER_LOCK_SHARE);
 		if (tup)
 		{
@@ -924,7 +925,7 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 		/* add the pages in the range to the output bitmap, if needed */
 		if (addrange)
 		{
-			BlockNumber pageno;
+			uint64		pageno;
 
 			for (pageno = heapBlk;
 				 pageno <= Min(nblocks, heapBlk + opaque->bo_pagesPerRange) - 1;
@@ -1185,7 +1186,7 @@ brinbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	{
 		SortCoordinate coordinate;
 
-		coordinate = (SortCoordinate) palloc0(sizeof(SortCoordinateData));
+		coordinate = palloc0_object(SortCoordinateData);
 		coordinate->isWorker = false;
 		coordinate->nParticipants =
 			state->bs_leader->nparticipanttuplesorts;
@@ -1478,8 +1479,8 @@ brin_summarize_range(PG_FUNCTION_ARGS)
 	/* Restore userid and security context */
 	SetUserIdAndSecContext(save_userid, save_sec_context);
 
-	relation_close(indexRel, ShareUpdateExclusiveLock);
-	relation_close(heapRel, ShareUpdateExclusiveLock);
+	index_close(indexRel, ShareUpdateExclusiveLock);
+	table_close(heapRel, ShareUpdateExclusiveLock);
 
 	PG_RETURN_INT32((int32) numSummarized);
 }
@@ -1568,8 +1569,8 @@ brin_desummarize_range(PG_FUNCTION_ARGS)
 				 errmsg("index \"%s\" is not valid",
 						RelationGetRelationName(indexRel))));
 
-	relation_close(indexRel, ShareUpdateExclusiveLock);
-	relation_close(heapRel, ShareUpdateExclusiveLock);
+	index_close(indexRel, ShareUpdateExclusiveLock);
+	table_close(heapRel, ShareUpdateExclusiveLock);
 
 	PG_RETURN_VOID();
 }
@@ -1608,7 +1609,7 @@ brin_build_desc(Relation rel)
 		opcInfoFn = index_getprocinfo(rel, keyno + 1, BRIN_PROCNUM_OPCINFO);
 
 		opcinfo[keyno] = (BrinOpcInfo *)
-			DatumGetPointer(FunctionCall1(opcInfoFn, attr->atttypid));
+			DatumGetPointer(FunctionCall1(opcInfoFn, ObjectIdGetDatum(attr->atttypid)));
 		totalstored += opcinfo[keyno]->oi_nstored;
 	}
 
@@ -2171,27 +2172,41 @@ union_tuples(BrinDesc *bdesc, BrinMemTuple *a, BrinTuple *b)
 static void
 brin_vacuum_scan(Relation idxrel, BufferAccessStrategy strategy)
 {
-	BlockNumber nblocks;
-	BlockNumber blkno;
+	BlockRangeReadStreamPrivate p;
+	ReadStream *stream;
+	Buffer		buf;
+
+	p.current_blocknum = 0;
+	p.last_exclusive = RelationGetNumberOfBlocks(idxrel);
+
+	/*
+	 * It is safe to use batchmode as block_range_read_stream_cb takes no
+	 * locks.
+	 */
+	stream = read_stream_begin_relation(READ_STREAM_MAINTENANCE |
+										READ_STREAM_FULL |
+										READ_STREAM_USE_BATCHING,
+										strategy,
+										idxrel,
+										MAIN_FORKNUM,
+										block_range_read_stream_cb,
+										&p,
+										0);
 
 	/*
 	 * Scan the index in physical order, and clean up any possible mess in
 	 * each page.
 	 */
-	nblocks = RelationGetNumberOfBlocks(idxrel);
-	for (blkno = 0; blkno < nblocks; blkno++)
+	while ((buf = read_stream_next_buffer(stream, NULL)) != InvalidBuffer)
 	{
-		Buffer		buf;
-
 		CHECK_FOR_INTERRUPTS();
-
-		buf = ReadBufferExtended(idxrel, MAIN_FORKNUM, blkno,
-								 RBM_NORMAL, strategy);
 
 		brin_page_cleanup(idxrel, buf);
 
 		ReleaseBuffer(buf);
 	}
+
+	read_stream_end(stream);
 
 	/*
 	 * Update all upper pages in the index's FSM, as well.  This ensures not
@@ -2262,7 +2277,7 @@ add_values_to_range(Relation idxRel, BrinDesc *bdesc, BrinMemTuple *dtup,
 								   PointerGetDatum(bdesc),
 								   PointerGetDatum(bval),
 								   values[keyno],
-								   nulls[keyno]);
+								   BoolGetDatum(nulls[keyno]));
 		/* if that returned true, we need to insert the updated tuple */
 		modified |= DatumGetBool(result);
 
@@ -2370,7 +2385,7 @@ _brin_begin_parallel(BrinBuildState *buildstate, Relation heap, Relation index,
 	Size		estsort;
 	BrinShared *brinshared;
 	Sharedsort *sharedsort;
-	BrinLeader *brinleader = (BrinLeader *) palloc0(sizeof(BrinLeader));
+	BrinLeader *brinleader = palloc0_object(BrinLeader);
 	WalUsage   *walusage;
 	BufferUsage *bufferusage;
 	bool		leaderparticipates = true;
@@ -2814,7 +2829,7 @@ _brin_parallel_scan_and_build(BrinBuildState *state,
 	IndexInfo  *indexInfo;
 
 	/* Initialize local tuplesort coordination state */
-	coordinate = palloc0(sizeof(SortCoordinateData));
+	coordinate = palloc0_object(SortCoordinateData);
 	coordinate->isWorker = true;
 	coordinate->nParticipants = -1;
 	coordinate->sharedsort = sharedsort;

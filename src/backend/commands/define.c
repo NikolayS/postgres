@@ -4,7 +4,7 @@
  *	  Support routines for various kinds of object creation.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -42,7 +42,7 @@ defGetString(DefElem *def)
 	switch (nodeTag(def->arg))
 	{
 		case T_Integer:
-			return psprintf("%ld", (long) intVal(def->arg));
+			return psprintf("%d", intVal(def->arg));
 		case T_Float:
 			return castNode(Float, def->arg)->fval;
 		case T_Boolean:

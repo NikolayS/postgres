@@ -2,7 +2,7 @@
  * wait_classes.h
  *	  Definitions related to wait event classes
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  * src/include/utils/wait_classes.h
  * ----------
@@ -17,7 +17,7 @@
  */
 #define PG_WAIT_LWLOCK				0x01000000U
 #define PG_WAIT_LOCK				0x03000000U
-#define PG_WAIT_BUFFERPIN			0x04000000U
+#define PG_WAIT_BUFFER				0x04000000U
 #define PG_WAIT_ACTIVITY			0x05000000U
 #define PG_WAIT_CLIENT				0x06000000U
 #define PG_WAIT_EXTENSION			0x07000000U

@@ -6,7 +6,7 @@
  * astreamer_zstd_compressor applies lz4 compression to the input stream,
  * and astreamer_zstd_decompressor does the reverse.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/fe_utils/astreamer_zstd.c
@@ -75,7 +75,7 @@ astreamer_zstd_compressor_new(astreamer *next, pg_compress_specification *compre
 
 	Assert(next != NULL);
 
-	streamer = palloc0(sizeof(astreamer_zstd_frame));
+	streamer = palloc0_object(astreamer_zstd_frame);
 
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_zstd_compressor_ops;
@@ -266,7 +266,7 @@ astreamer_zstd_decompressor_new(astreamer *next)
 
 	Assert(next != NULL);
 
-	streamer = palloc0(sizeof(astreamer_zstd_frame));
+	streamer = palloc0_object(astreamer_zstd_frame);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_zstd_decompressor_ops;
 

@@ -21,7 +21,7 @@
  * the address family, everything goes into node 0 (which will probably
  * lead to creating an allTheSame tuple).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -196,8 +196,8 @@ inet_spg_picksplit(PG_FUNCTION_ARGS)
 
 	/* Don't need labels; allocate output arrays */
 	out->nodeLabels = NULL;
-	out->mapTuplesToNodes = (int *) palloc(sizeof(int) * in->nTuples);
-	out->leafTupleDatums = (Datum *) palloc(sizeof(Datum) * in->nTuples);
+	out->mapTuplesToNodes = palloc_array(int, in->nTuples);
+	out->leafTupleDatums = palloc_array(Datum, in->nTuples);
 
 	if (differentFamilies)
 	{
@@ -301,7 +301,7 @@ inet_spg_inner_consistent(PG_FUNCTION_ARGS)
 
 	if (which)
 	{
-		out->nodeNumbers = (int *) palloc(sizeof(int) * in->nNodes);
+		out->nodeNumbers = palloc_array(int, in->nNodes);
 
 		for (i = 0; i < in->nNodes; i++)
 		{

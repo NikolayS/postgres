@@ -3,7 +3,7 @@
  * bloom.h
  *	  Header for bloom index.
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/bloom/bloom.h
@@ -72,7 +72,7 @@ typedef BloomPageOpaqueData *BloomPageOpaque;
 	((BloomTuple *)(PageGetContents(page) \
 		+ (state)->sizeOfBloomTuple * ((offset) - 1)))
 #define BloomPageGetNextTuple(state, tuple) \
-	((BloomTuple *)((Pointer)(tuple) + (state)->sizeOfBloomTuple))
+	((BloomTuple *)((char *)(tuple) + (state)->sizeOfBloomTuple))
 
 /* Preserved page numbers */
 #define BLOOM_METAPAGE_BLKNO	(0)

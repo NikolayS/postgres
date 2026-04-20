@@ -17,7 +17,7 @@
  * a file is successfully archived and then the system crashes before
  * a durable record of the success has been made.
  *
- * Copyright (c) 2022-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2022-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/basic_archive/basic_archive.c
@@ -65,7 +65,7 @@ void
 _PG_init(void)
 {
 	DefineCustomStringVariable("basic_archive.archive_directory",
-							   gettext_noop("Archive file destination directory."),
+							   "Archive file destination directory.",
 							   NULL,
 							   &archive_directory,
 							   "",

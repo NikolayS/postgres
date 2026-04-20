@@ -3,7 +3,7 @@
  * mcxtfuncs.c
  *	  Functions to show backend memory context.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -38,7 +38,7 @@ typedef struct MemoryContextId
 {
 	MemoryContext context;
 	int			context_id;
-}			MemoryContextId;
+} MemoryContextId;
 
 /*
  * int_list_to_array
@@ -52,7 +52,7 @@ int_list_to_array(const List *list)
 	ArrayType  *result_array;
 
 	length = list_length(list);
-	datum_array = (Datum *) palloc(length * sizeof(Datum));
+	datum_array = palloc_array(Datum, length);
 
 	foreach_int(i, list)
 		datum_array[foreach_current_index(i)] = Int32GetDatum(i);

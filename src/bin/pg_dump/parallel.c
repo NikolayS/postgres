@@ -4,7 +4,7 @@
  *
  *	Parallel support for pg_dump and pg_restore
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -331,16 +331,6 @@ on_exit_close_archive(Archive *AHX)
 {
 	shutdown_info.AHX = AHX;
 	on_exit_nicely(archive_close_connection, &shutdown_info);
-}
-
-/*
- * When pg_restore restores multiple databases, then update already added entry
- * into array for cleanup.
- */
-void
-replace_on_exit_close_archive(Archive *AHX)
-{
-	shutdown_info.AHX = AHX;
 }
 
 /*

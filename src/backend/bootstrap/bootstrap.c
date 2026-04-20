@@ -4,7 +4,7 @@
  *	  routines to support running postgres in 'bootstrap' mode
  *	bootstrap mode is used to create the initial template database
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -109,10 +109,14 @@ static const struct typinfo TypInfo[] = {
 	F_REGROLEIN, F_REGROLEOUT},
 	{"regnamespace", REGNAMESPACEOID, 0, 4, true, TYPALIGN_INT, TYPSTORAGE_PLAIN, InvalidOid,
 	F_REGNAMESPACEIN, F_REGNAMESPACEOUT},
+	{"regdatabase", REGDATABASEOID, 0, 4, true, TYPALIGN_INT, TYPSTORAGE_PLAIN, InvalidOid,
+	F_REGDATABASEIN, F_REGDATABASEOUT},
 	{"text", TEXTOID, 0, -1, false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, DEFAULT_COLLATION_OID,
 	F_TEXTIN, F_TEXTOUT},
 	{"oid", OIDOID, 0, 4, true, TYPALIGN_INT, TYPSTORAGE_PLAIN, InvalidOid,
 	F_OIDIN, F_OIDOUT},
+	{"oid8", OID8OID, 0, 8, true, TYPALIGN_DOUBLE, TYPSTORAGE_PLAIN, InvalidOid,
+	F_OID8IN, F_OID8OUT},
 	{"tid", TIDOID, 0, 6, false, TYPALIGN_SHORT, TYPSTORAGE_PLAIN, InvalidOid,
 	F_TIDIN, F_TIDOUT},
 	{"xid", XIDOID, 0, 4, true, TYPALIGN_INT, TYPSTORAGE_PLAIN, InvalidOid,
@@ -740,7 +744,7 @@ populate_typ_list(void)
 		Form_pg_type typForm = (Form_pg_type) GETSTRUCT(tup);
 		struct typmap *newtyp;
 
-		newtyp = (struct typmap *) palloc(sizeof(struct typmap));
+		newtyp = palloc_object(struct typmap);
 		Typ = lappend(Typ, newtyp);
 
 		newtyp->am_oid = typForm->oid;
@@ -949,10 +953,10 @@ index_register(Oid heap,
 
 	oldcxt = MemoryContextSwitchTo(nogc);
 
-	newind = (IndexList *) palloc(sizeof(IndexList));
+	newind = palloc_object(IndexList);
 	newind->il_heap = heap;
 	newind->il_ind = ind;
-	newind->il_info = (IndexInfo *) palloc(sizeof(IndexInfo));
+	newind->il_info = palloc_object(IndexInfo);
 
 	memcpy(newind->il_info, indexInfo, sizeof(IndexInfo));
 	/* expressions will likely be null, but may as well copy it */
