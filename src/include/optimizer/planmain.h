@@ -45,7 +45,7 @@ extern ForeignScan *make_foreignscan(List *qptlist, List *qpqual,
 									 List *fdw_scan_tlist, List *fdw_recheck_quals,
 									 Plan *outer_plan);
 extern Plan *change_plan_targetlist(Plan *subplan, List *tlist,
-									bool tlist_parallel_safe);
+									ParallelSafe tlist_parallel_safe);
 extern Plan *materialize_finished_plan(Plan *subplan);
 extern bool is_projection_capable_path(Path *path);
 extern bool is_projection_capable_plan(Plan *plan);
@@ -55,7 +55,7 @@ extern Sort *make_sort_from_sortclauses(List *sortcls, Plan *lefttree);
 extern Agg *make_agg(List *tlist, List *qual,
 					 AggStrategy aggstrategy, AggSplit aggsplit,
 					 int numGroupCols, AttrNumber *grpColIdx, Oid *grpOperators, Oid *grpCollations,
-					 List *groupingSets, List *chain, double dNumGroups,
+					 List *groupingSets, List *chain, Cardinality numGroups,
 					 Size transitionSpace, Plan *lefttree);
 extern Limit *make_limit(Plan *lefttree, Node *limitOffset, Node *limitCount,
 						 LimitOption limitOption, int uniqNumCols,
@@ -76,6 +76,7 @@ extern void add_vars_to_targetlist(PlannerInfo *root, List *vars,
 extern void add_vars_to_attr_needed(PlannerInfo *root, List *vars,
 									Relids where_needed);
 extern void remove_useless_groupby_columns(PlannerInfo *root);
+extern void setup_eager_aggregation(PlannerInfo *root);
 extern void find_lateral_references(PlannerInfo *root);
 extern void rebuild_lateral_attr_needed(PlannerInfo *root);
 extern void create_lateral_join_info(PlannerInfo *root);

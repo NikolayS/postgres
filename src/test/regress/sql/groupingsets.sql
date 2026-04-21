@@ -290,10 +290,28 @@ explain (costs off)
   select v.c, (select count(*) from gstest2 group by () having v.c)
     from (values (false),(true)) v(c) order by v.c;
 
--- test pushdown of HAVING clause that does not reference any columns that are nullable by grouping sets
+-- test pushdown of non-degenerate HAVING clause that does not reference any
+-- columns that are nullable by grouping sets
 explain (costs off)
 select a, b, count(*) from gstest2 group by grouping sets ((a, b), (a)) having a > 1 and b > 1;
 select a, b, count(*) from gstest2 group by grouping sets ((a, b), (a)) having a > 1 and b > 1;
+
+explain (costs off)
+select a, b, count(*) from gstest2 group by rollup(a), b having b > 1;
+select a, b, count(*) from gstest2 group by rollup(a), b having b > 1;
+
+-- test pushdown of degenerate HAVING clause
+explain (costs off)
+select count(*) from gstest2 group by grouping sets (()) having false;
+select count(*) from gstest2 group by grouping sets (()) having false;
+
+explain (costs off)
+select a, count(*) from gstest2 group by grouping sets ((a), ()) having false;
+select a, count(*) from gstest2 group by grouping sets ((a), ()) having false;
+
+explain (costs off)
+select a, b, count(*) from gstest2 group by grouping sets ((a), (b)) having false;
+select a, b, count(*) from gstest2 group by grouping sets ((a), (b)) having false;
 
 -- HAVING with GROUPING queries
 select ten, grouping(ten) from onek
@@ -702,5 +720,28 @@ group by grouping sets((a, b), (a));
 select a, b, row_number() over (order by a, b nulls first)
 from (values (1, 1), (2, 2)) as t (a, b) where a = b
 group by grouping sets((a, b), (a));
+
+-- test handling of SRFs with grouping sets
+explain (verbose, costs off)
+select generate_series(1, a) as g
+from (values (1, 1), (2, 2)) as t (a, b)
+group by rollup(g)
+order by 1;
+
+select generate_series(1, a) as g
+from (values (1, 1), (2, 2)) as t (a, b)
+group by rollup(g)
+order by 1;
+
+explain (verbose, costs off)
+select generate_series(1, a) as g, a+b as ab
+from (values (1, 1), (2, 2)) as t (a, b)
+group by rollup(a, ab)
+order by 1, 2;
+
+select generate_series(1, a) as g, a+b as ab
+from (values (1, 1), (2, 2)) as t (a, b)
+group by rollup(a, ab)
+order by 1, 2;
 
 -- end

@@ -57,7 +57,8 @@ UPDATE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ] [ 
    to compute and return value(s) based on each row actually updated.
    Any expression using the table's columns, and/or columns of other
    tables mentioned in <literal>FROM</literal>, can be computed.
-   The new (post-update) values of the table's columns are used.
+   By default, the new (post-update) values of the table's columns are used,
+   but it is also possible to request the old (pre-update) values.
    The syntax of the <literal>RETURNING</literal> list is identical to that of the
    output list of <command>SELECT</command>.
   </para>
@@ -502,6 +503,9 @@ UPDATE work_item SET status = 'failed'
   WHERE work_item.ctid = emr.ctid;
 </programlisting>
    This command will need to be repeated until no rows remain to be updated.
+   (This use of <structfield>ctid</structfield> is only safe because
+   the query is repeatedly run, avoiding the problem of changed
+   <structfield>ctid</structfield>s.)
    Use of an <literal>ORDER BY</literal> clause allows the command to
    prioritize which rows will be updated; it can also prevent deadlock
    with other update operations if they use the same ordering.

@@ -76,6 +76,9 @@ query_planner(PlannerInfo *root,
 	root->placeholder_list = NIL;
 	root->placeholder_array = NULL;
 	root->placeholder_array_size = 0;
+	root->agg_clause_list = NIL;
+	root->group_expr_list = NIL;
+	root->tlist_vars = NIL;
 	root->fkey_list = NIL;
 	root->initial_rels = NIL;
 
@@ -123,7 +126,7 @@ query_planner(PlannerInfo *root,
 					(root->query_level > 1 ||
 					 debug_parallel_query != DEBUG_PARALLEL_OFF))
 					final_rel->consider_parallel =
-						is_parallel_safe(root, parse->jointree->quals);
+						is_parallel_safe(root, parse->jointree->quals, &final_rel->needs_temp_safety);
 
 				/*
 				 * The only path for it is a trivial Result path.  We cheat a
@@ -264,6 +267,12 @@ query_planner(PlannerInfo *root,
 	 * restriction OR clauses from.
 	 */
 	extract_restriction_or_clauses(root);
+
+	/*
+	 * Check if eager aggregation is applicable, and if so, set up
+	 * root->agg_clause_list and root->group_expr_list.
+	 */
+	setup_eager_aggregation(root);
 
 	/*
 	 * Now expand appendrels by adding "otherrels" for their children.  We

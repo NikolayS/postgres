@@ -25,6 +25,7 @@
 #include "utils/guc_hooks.h"
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
 #include "utils/resowner.h"
 
 
@@ -42,6 +43,10 @@ typedef struct
 	LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
 
 int			NLocBuffer = 0;		/* until buffers are initialized */
+
+
+int allocated_localbufs = 0;
+int dirtied_localbufs = 0;
 
 BufferDesc *LocalBufferDescriptors = NULL;
 Block	   *LocalBufferBlockPointers = NULL;
@@ -184,6 +189,12 @@ FlushLocalBuffer(BufferDesc *bufHdr, SMgrRelation reln)
 	instr_time	io_start;
 	Page		localpage = (char *) LocalBufHdrGetBlock(bufHdr);
 
+	/*
+	 * Parallel temp table scan allows an access to temp tables. So, to be
+	 * paranoid enough we should check it each time, flushing local buffer.
+	 */
+	Assert(!IsParallelWorker());
+
 	Assert(LocalRefCount[-BufferDescriptorGetBuffer(bufHdr) - 1] > 0);
 
 	/*
@@ -229,7 +240,7 @@ GetLocalVictimBuffer(void)
 	ResourceOwnerEnlarge(CurrentResourceOwner);
 
 	/*
-	 * Need to get a new buffer.  We use a clock sweep algorithm (essentially
+	 * Need to get a new buffer.  We use a clock-sweep algorithm (essentially
 	 * the same as what freelist.c does now...)
 	 */
 	trycounter = NLocBuffer;
@@ -372,7 +383,7 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		MemSet(buf_block, 0, BLCKSZ);
 	}
 
-	first_block = smgrnblocks(bmr.smgr, fork);
+	first_block = smgrnblocks(BMR_GET_SMGR(bmr), fork);
 
 	if (extend_upto != InvalidBlockNumber)
 	{
@@ -391,7 +402,7 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("cannot extend relation %s beyond %u blocks",
-						relpath(bmr.smgr->smgr_rlocator, fork).str,
+						relpath(BMR_GET_SMGR(bmr)->smgr_rlocator, fork).str,
 						MaxBlockNumber)));
 
 	for (uint32 i = 0; i < extend_by; i++)
@@ -408,7 +419,8 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		/* in case we need to pin an existing buffer below */
 		ResourceOwnerEnlarge(CurrentResourceOwner);
 
-		InitBufferTag(&tag, &bmr.smgr->smgr_rlocator.locator, fork, first_block + i);
+		InitBufferTag(&tag, &BMR_GET_SMGR(bmr)->smgr_rlocator.locator, fork,
+					  first_block + i);
 
 		hresult = (LocalBufferLookupEnt *)
 			hash_search(LocalBufHash, &tag, HASH_ENTER, &found);
@@ -456,7 +468,7 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 	io_start = pgstat_prepare_io_time(track_io_timing);
 
 	/* actually extend relation */
-	smgrzeroextend(bmr.smgr, fork, first_block, extend_by, false);
+	smgrzeroextend(BMR_GET_SMGR(bmr), fork, first_block, extend_by, false);
 
 	pgstat_count_io_op_time(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_EXTEND,
 							io_start, 1, extend_by * BLCKSZ);
@@ -507,7 +519,10 @@ MarkLocalBufferDirty(Buffer buffer)
 	buf_state = pg_atomic_read_u32(&bufHdr->state);
 
 	if (!(buf_state & BM_DIRTY))
+	{
 		pgBufferUsage.local_blks_dirtied++;
+		dirtied_localbufs++;
+	}
 
 	buf_state |= BM_DIRTY;
 
@@ -568,6 +583,12 @@ TerminateLocalBufferIO(BufferDesc *bufHdr, bool clear_dirty, uint32 set_flag_bit
 	/* Clear earlier errors, if this IO failed, it'll be marked again */
 	buf_state &= ~BM_IO_ERROR;
 
+	if (buf_state & BM_DIRTY)
+	{
+		Assert(dirtied_localbufs > 0);
+		dirtied_localbufs--;
+	}
+
 	if (clear_dirty)
 		buf_state &= ~BM_DIRTY;
 
@@ -607,6 +628,12 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 	uint32		buf_state;
 	LocalBufferLookupEnt *hresult;
 
+	if (pg_atomic_read_u32(&bufHdr->state) & BM_DIRTY)
+	{
+		Assert(dirtied_localbufs > 0);
+		dirtied_localbufs--;
+	}
+
 	/*
 	 * It's possible that we started IO on this buffer before e.g. aborting
 	 * the transaction that created a table. We need to wait for that IO to
@@ -629,7 +656,7 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 	 */
 	if (check_unreferenced &&
 		(LocalRefCount[bufid] != 0 || BUF_STATE_GET_REFCOUNT(buf_state) != 0))
-		elog(ERROR, "block %u of %s is still referenced (local %u)",
+		elog(ERROR, "block %u of %s is still referenced (local %d)",
 			 bufHdr->tag.blockNum,
 			 relpathbackend(BufTagGetRelFileLocator(&bufHdr->tag),
 							MyProcNumber,
@@ -660,10 +687,11 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
  *		See DropRelationBuffers in bufmgr.c for more notes.
  */
 void
-DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber forkNum,
-						 BlockNumber firstDelBlock)
+DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber *forkNum,
+						 int nforks, BlockNumber *firstDelBlock)
 {
 	int			i;
+	int			j;
 
 	for (i = 0; i < NLocBuffer; i++)
 	{
@@ -672,12 +700,18 @@ DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber forkNum,
 
 		buf_state = pg_atomic_read_u32(&bufHdr->state);
 
-		if ((buf_state & BM_TAG_VALID) &&
-			BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator) &&
-			BufTagGetForkNum(&bufHdr->tag) == forkNum &&
-			bufHdr->tag.blockNum >= firstDelBlock)
+		if (!(buf_state & BM_TAG_VALID) ||
+			!BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator))
+			continue;
+
+		for (j = 0; j < nforks; j++)
 		{
-			InvalidateLocalBuffer(bufHdr, true);
+			if (BufTagGetForkNum(&bufHdr->tag) == forkNum[j] &&
+				bufHdr->tag.blockNum >= firstDelBlock[j])
+			{
+				InvalidateLocalBuffer(bufHdr, true);
+				break;
+			}
 		}
 	}
 }
@@ -721,19 +755,6 @@ InitLocalBuffers(void)
 	int			nbufs = num_temp_buffers;
 	HASHCTL		info;
 	int			i;
-
-	/*
-	 * Parallel workers can't access data in temporary tables, because they
-	 * have no visibility into the local buffers of their leader.  This is a
-	 * convenient, low-cost place to provide a backstop check for that.  Note
-	 * that we don't wish to prevent a parallel worker from accessing catalog
-	 * metadata about a temp table, so checks at higher levels would be
-	 * inappropriate.
-	 */
-	if (IsParallelWorker())
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-				 errmsg("cannot access temporary tables during a parallel operation")));
 
 	/* Allocate and zero buffer headers and auxiliary arrays */
 	LocalBufferDescriptors = (BufferDesc *) calloc(nbufs, sizeof(BufferDesc));
@@ -925,10 +946,11 @@ GetLocalBufferStorage(void)
 		num_bufs = Min(num_bufs, MaxAllocSize / BLCKSZ);
 
 		/* Buffers should be I/O aligned. */
-		cur_block = (char *)
-			TYPEALIGN(PG_IO_ALIGN_SIZE,
-					  MemoryContextAlloc(LocalBufferContext,
-										 num_bufs * BLCKSZ + PG_IO_ALIGN_SIZE));
+		cur_block = MemoryContextAllocAligned(LocalBufferContext,
+											  num_bufs * BLCKSZ,
+											  PG_IO_ALIGN_SIZE,
+											  0);
+
 		next_buf_in_block = 0;
 		num_bufs_in_block = num_bufs;
 	}
@@ -937,6 +959,7 @@ GetLocalBufferStorage(void)
 	this_buf = cur_block + next_buf_in_block * BLCKSZ;
 	next_buf_in_block++;
 	total_bufs_allocated++;
+	allocated_localbufs++;
 
 	/*
 	 * Caller's PinLocalBuffer() was too early for Valgrind updates, so do it
@@ -1009,4 +1032,37 @@ AtProcExit_LocalBuffers(void)
 	 * drop the temp rels.
 	 */
 	CheckForLocalBufferLeaks();
+}
+
+/*
+ * Flush each temporary buffer page to the disk.
+ *
+ * It is costly operation needed solely to let temporary tables, indexes and
+ * 'toasts' participate in a parallel query plan.
+ */
+void
+FlushAllLocalBuffers(void)
+{
+	int                     i;
+
+	for (i = 0; i < NLocBuffer; i++)
+	{
+		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
+		uint32		buf_state;
+
+		if (LocalBufHdrGetBlock(bufHdr) == NULL)
+			continue;
+
+		buf_state = pg_atomic_read_u32(&bufHdr->state);
+
+		/* XXX only valid dirty pages need to be flushed? */
+		if ((buf_state & (BM_VALID | BM_DIRTY)) == (BM_VALID | BM_DIRTY))
+		{
+			PinLocalBuffer(bufHdr, false);
+			FlushLocalBuffer(bufHdr, NULL);
+			UnpinLocalBuffer(BufferDescriptorGetBuffer(bufHdr));
+		}
+	}
+
+	Assert(dirtied_localbufs == 0);
 }

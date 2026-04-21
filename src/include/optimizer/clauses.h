@@ -33,7 +33,7 @@ extern double expression_returns_set_rows(PlannerInfo *root, Node *clause);
 extern bool contain_subplans(Node *clause);
 
 extern char max_parallel_hazard(Query *parse);
-extern bool is_parallel_safe(PlannerInfo *root, Node *node);
+extern bool is_parallel_safe(PlannerInfo *root, Node *node, bool *needs_temp_flush);
 extern bool contain_nonstrict_functions(Node *clause);
 extern bool contain_exec_param(Node *clause, List *param_ids);
 extern bool contain_leaked_vars(Node *clause);
@@ -50,8 +50,8 @@ extern int	NumRelids(PlannerInfo *root, Node *clause);
 
 extern void CommuteOpExpr(OpExpr *clause);
 
-extern Query *inline_set_returning_function(PlannerInfo *root,
-											RangeTblEntry *rte);
+extern Query *inline_function_in_from(PlannerInfo *root,
+									  RangeTblEntry *rte);
 
 extern Bitmapset *pull_paramids(Expr *expr);
 
