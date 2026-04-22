@@ -100,7 +100,10 @@ int			recovery_min_apply_delay = 0;
  * If true, when WAL replay on a standby is about to invalidate an otherwise-
  * active logical replication slot because a catalog PRUNE_ON_ACCESS record's
  * snapshotConflictHorizon has overtaken the slot's catalog_xmin, pause replay
- * instead and give an operator a chance to drain (or drop) the slot.
+ * instead. Replay auto-resumes once the consumer has drained the slot past
+ * the pause point (or the slot is dropped, advanced, or otherwise no longer
+ * blocking); pg_wal_replay_resume() also forces continuation. See
+ * MaybePauseOnLogicalSlotConflict() in standby.c.
  *
  * Motivated by blueprints/LOGICAL_DECODING_ARCHIVED_WALS.md §4.2.3 / US-4:
  * an archive-only logical-decoding standby cannot feed hot_standby_feedback

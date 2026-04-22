@@ -217,6 +217,49 @@ sub wait_for_replay_paused
     return 0;
 }
 
+# Models an operator who issued an explicit pg_wal_replay_pause() that
+# must survive the GUC's auto-resume. On entry replay is parked at a
+# pre-conflict LSN with the operator pause already in effect. Each tick we
+# nudge replay forward (pg_wal_replay_resume()) and then immediately
+# re-assert the operator pause (pg_wal_replay_pause()), so that when the
+# startup process reaches the catalog-prune record the operator pause is
+# already pending — i.e. GetRecoveryPauseState() != RECOVERY_NOT_PAUSED
+# at the moment MaybePauseOnLogicalSlotConflict() captures it. We then
+# drain the slot so the GUC's auto-resume re-scan finds nothing blocking.
+# With the fix the operator's pause is preserved; without it the
+# unconditional SetRecoveryPause(false) would clear it.
+#
+# Returns the total number of changes drained.
+sub drain_holding_user_pause
+{
+    my ($standby, $slot_name, $deadline_seconds) = @_;
+
+    my $total_drained = 0;
+    my $deadline = time() + $deadline_seconds;
+
+    while (time() < $deadline) {
+        # Drain whatever the slot currently holds.
+        my $got = $standby->safe_psql('postgres',
+            "SELECT COUNT(*) FROM pg_logical_slot_get_changes('$slot_name', NULL, NULL)");
+        $total_drained += $got;
+
+        # Stop once the slot is fully drained and replay has advanced past
+        # the conflict (nothing left to decode and no longer pause-looping
+        # on the GUC). A short tail of zero-change drains confirms we are
+        # done.
+        last if $got == 0 && $total_drained > 0;
+
+        # Nudge replay forward, then immediately re-pause so the operator
+        # pause is pending again when the next conflict record is applied.
+        $standby->safe_psql('postgres', "SELECT pg_wal_replay_resume()");
+        $standby->safe_psql('postgres', "SELECT pg_wal_replay_pause()");
+
+        usleep(500_000);
+    }
+
+    return $total_drained;
+}
+
 # ---------------------------------------------------------------------
 # Main script
 # ---------------------------------------------------------------------
@@ -228,22 +271,28 @@ my $guc = $node_primary->safe_psql('postgres',
     "SELECT COUNT(*) FROM pg_settings WHERE name = 'recovery_pause_on_logical_slot_conflict'");
 is($guc, '1', 'recovery_pause_on_logical_slot_conflict GUC is registered');
 
-# 2. Phase 1: bring up BOTH standbys (GUC-on and GUC-off) while the
-# archive still contains only the quiet-moment snapshot — no prune
-# records yet. Slot creation reaches SNAPBUILD_CONSISTENT quickly on
-# both. Later, when Phase 2 ships the prune records, the two standbys
-# diverge: the GUC-on one pauses and drains; the GUC-off one
-# invalidates.
+# 2. Phase 1: bring up the standbys (GUC-on, GUC-off, and a second
+# GUC-on "user-pause" standby) while the archive still contains only the
+# quiet-moment snapshot — no prune records yet. Slot creation reaches
+# SNAPBUILD_CONSISTENT quickly on all of them. Later, when Phase 2 ships
+# the prune records, the standbys diverge: the GUC-on ones pause and
+# drain; the GUC-off one invalidates. The user-pause standby additionally
+# checks that an operator's explicit pause survives the GUC auto-resume.
 my $node_standby = create_archive_standby($node_primary, $backup_name,
     'standby', 'on');
 my $node_standby_off = create_archive_standby($node_primary, $backup_name,
     'standby_off', 'off');
+my $node_standby_up = create_archive_standby($node_primary, $backup_name,
+    'standby_userpause', 'on');
 
 $node_standby->safe_psql('postgres', qq[
     SELECT pg_create_logical_replication_slot('t_slot', 'test_decoding');
 ]);
 $node_standby_off->safe_psql('postgres', qq[
     SELECT pg_create_logical_replication_slot('t_slot_off', 'test_decoding');
+]);
+$node_standby_up->safe_psql('postgres', qq[
+    SELECT pg_create_logical_replication_slot('up_slot', 'test_decoding');
 ]);
 
 my $slot_ready = $node_standby->safe_psql('postgres', qq[
@@ -256,6 +305,21 @@ my $off_slot_ready = $node_standby_off->safe_psql('postgres', qq[
 ]);
 is($off_slot_ready, 'reserved',
    "baseline slot created cleanly in Phase 1 (state: $off_slot_ready)");
+
+my $up_slot_ready = $node_standby_up->safe_psql('postgres', qq[
+    SELECT wal_status FROM pg_replication_slots WHERE slot_name = 'up_slot'
+]);
+is($up_slot_ready, 'reserved',
+   "user-pause slot created cleanly in Phase 1 (state: $up_slot_ready)");
+
+# Operator pauses recovery on the user-pause standby NOW, while the
+# archive still only holds the clean Phase-1 snapshot and the catalog-
+# prune conflict has not been replayed yet. This parks replay at a
+# pre-conflict LSN with an explicit operator pause in effect — the exact
+# precondition for the user-pause-clobber bug.
+$node_standby_up->safe_psql('postgres', "SELECT pg_wal_replay_pause()");
+ok(wait_for_replay_paused($node_standby_up),
+   "user-pause standby parks on operator pg_wal_replay_pause() before conflict");
 
 # 3. Phase 2: catalog churn on primary, then wait for archive.
 run_catalog_churn($node_primary);
@@ -322,6 +386,50 @@ cmp_ok($elapsed, '<', 10,
     "pg_promote completed in under 10s (actual: ${elapsed}s)");
 
 $node_standby_p->stop;
+
+# 7. User-pause survives auto-resume. The operator paused recovery with
+# pg_wal_replay_pause() before the conflict record was replayed (done in
+# section 2). drain_holding_user_pause nudges replay into the conflict
+# while keeping that operator pause pending, then drains the slot so the
+# GUC's auto-resume re-scan finds nothing blocking. The fix in
+# MaybePauseOnLogicalSlotConflict() must then leave the operator's pause
+# in place rather than clearing it with an unconditional
+# SetRecoveryPause(false), so:
+#   - with the fix: replay stays 'paused' after the conflict resolves;
+#   - without the fix: auto-resume clears the pause and replay proceeds.
+my $up_drained = drain_holding_user_pause($node_standby_up, 'up_slot', 60);
+
+cmp_ok($up_drained, '>=', 2000,
+    "user-pause standby drained the slot under operator pause ($up_drained got)");
+
+# The slot must have survived (drained, not invalidated) just like the
+# plain GUC-on standby.
+my $up_slot_state = $node_standby_up->safe_psql('postgres', qq[
+    SELECT wal_status || '|' || COALESCE(invalidation_reason, '')
+    FROM pg_replication_slots WHERE slot_name = 'up_slot';
+]);
+like($up_slot_state, qr/^reserved\|/,
+     "user-pause slot survived catalog prune (state: $up_slot_state)");
+
+# The crux: recovery is STILL paused because the operator's pause was not
+# cleared by the GUC's auto-resume.
+my $up_pause_state = $node_standby_up->safe_psql('postgres',
+    "SELECT pg_get_wal_replay_pause_state()");
+is($up_pause_state, 'paused',
+   "operator pause survived GUC auto-resume (state: $up_pause_state)");
+
+# Now the operator resumes and replay must proceed past the pause.
+my $up_lsn_before = $node_standby_up->safe_psql('postgres',
+    "SELECT pg_last_wal_replay_lsn()");
+$node_standby_up->safe_psql('postgres', "SELECT pg_wal_replay_resume()");
+$node_standby_up->poll_query_until('postgres',
+    "SELECT pg_get_wal_replay_pause_state() = 'not paused'")
+    or die "replay did not leave paused state after operator resume";
+ok($node_standby_up->poll_query_until('postgres',
+    "SELECT pg_last_wal_replay_lsn() >= '$up_lsn_before'::pg_lsn"),
+   "replay proceeds after operator pg_wal_replay_resume()");
+
+$node_standby_up->stop;
 $node_standby_off->stop;
 $node_standby->stop;
 $node_primary->stop;
