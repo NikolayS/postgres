@@ -514,41 +514,37 @@ ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHorizon,
 }
 
 /*
- * If recovery_pause_on_logical_slot_conflict is enabled, and replay is about
- * to apply a catalog PRUNE_ON_ACCESS record whose snapshotConflictHorizon
- * would cause the invalidation of at least one non-invalidated logical slot
- * in the same database, request a recovery pause and wait on the recovery
- * pause condition variable until an operator resumes.
+ * Returns true if at least one non-synced logical slot in `dboid` still
+ * blocks replay past snapshotConflictHorizon.
  *
- * On resume the caller re-falls through to InvalidateObsoleteReplicationSlots:
- * if the operator has drained / dropped / advanced the slot, invalidation is
- * a no-op; if they chose to resume without acting, the slot is invalidated
- * as usual. This matches the recovery_target_action=pause precedent.
+ * "Blocks" means: the slot is in use, not invalidated, snapbuild-consistent
+ * (effective_catalog_xmin is valid — skipping in-progress slots avoids a
+ * deadlock with DecodingContextFindStartpoint), and its catalog_xmin
+ * precedes-or-equals the horizon.
  *
- * Only invoked from ResolveRecoveryConflictWithSnapshot(), before any buffer
- * locks are taken, so pausing here does not deadlock with anything.
+ * Use PrecedesOrEquals (not Precedes) to match DetermineSlotInvalidationCause.
+ * Otherwise a slot whose catalog_xmin was just advanced to exactly horizon by
+ * a previous pause-and-advance cycle fails to re-pause on the next prune
+ * record with the same horizon, yet would still be invalidated by the
+ * fall-through InvalidateObsoleteReplicationSlots call.
+ *
+ * Synced slots are skipped: writing their fields from the startup process
+ * would race the slot-sync worker, and ALTER / DROP_REPLICATION_SLOT errors
+ * out on a synced slot so the operator-facing recipe does not apply.
+ *
+ * When conflict_lsn is valid (in-wait auto-resume check), slots whose
+ * confirmed_flush_lsn has reached conflict_lsn are treated as not blocking:
+ * the consumer has caught up to the pause point and the post-wait advance
+ * code will bump their catalog_xmin past the horizon. Pass InvalidXLogRecPtr
+ * for the initial pause-or-not decision (we don't yet have a pause point).
  */
-void
-MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon)
+static bool
+AnySlotStillBlocksConflict(Oid dboid, TransactionId snapshotConflictHorizon,
+						   XLogRecPtr conflict_lsn)
 {
 	int			i;
-	bool		would_invalidate = false;
+	bool		blocking = false;
 
-	if (!recovery_pause_on_logical_slot_conflict)
-		return;
-	if (!TransactionIdIsValid(snapshotConflictHorizon))
-		return;
-
-	/*
-	 * Scan for a would-be-invalidated slot in the conflicting database.
-	 *
-	 * Skip slots that have not yet reached snapshot-builder consistency
-	 * (effective_catalog_xmin is still InvalidTransactionId). An in-progress
-	 * slot has not produced any output to a consumer, so invalidating it is
-	 * harmless — the caller can retry. Pausing for such a slot would
-	 * deadlock: DecodingContextFindStartpoint would be waiting for replay
-	 * to advance, while replay would be waiting for the slot to be drained.
-	 */
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 	for (i = 0; i < max_replication_slots; i++)
 	{
@@ -556,7 +552,8 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		Oid			slot_db;
 		TransactionId slot_xmin;
 		TransactionId slot_effective_xmin;
-		bool		active_logical;
+		XLogRecPtr	slot_confirmed;
+		bool		is_candidate;
 
 		if (!s->in_use)
 			continue;
@@ -565,52 +562,80 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		slot_db = s->data.database;
 		slot_xmin = s->data.catalog_xmin;
 		slot_effective_xmin = s->effective_catalog_xmin;
-		/*
-		 * Skip synced slots (managed by the slot-sync worker per
-		 * sync_replication_slots). Writing their fields from the startup
-		 * process would race with the slot-sync worker's own updates, and
-		 * the operator-facing "drain or drop the slot" recipe in the
-		 * errhint below cannot be applied to a synced slot (ALTER /
-		 * DROP_REPLICATION_SLOT error on synced).
-		 */
-		active_logical = (s->data.invalidated == RS_INVAL_NONE &&
-						  slot_db != InvalidOid &&
-						  TransactionIdIsValid(slot_effective_xmin) &&
-						  !s->data.synced);
+		slot_confirmed = s->data.confirmed_flush;
+		is_candidate = (s->data.invalidated == RS_INVAL_NONE &&
+						slot_db != InvalidOid &&
+						TransactionIdIsValid(slot_effective_xmin) &&
+						!s->data.synced);
 		SpinLockRelease(&s->mutex);
 
-		if (!active_logical)
+		if (!is_candidate)
 			continue;
 		if (slot_db != dboid)
 			continue;
 		if (!TransactionIdIsValid(slot_xmin))
 			continue;
-		/*
-		 * Use PrecedesOrEquals (not Precedes) to match the check in
-		 * DetermineSlotInvalidationCause. Otherwise a slot whose
-		 * catalog_xmin was just advanced to exactly conflict_horizon by
-		 * a previous pause-and-advance cycle (our own resume code) will
-		 * NOT trigger a pause here when the next prune record arrives
-		 * with horizon == catalog_xmin, yet WILL still be invalidated
-		 * by the fall-through InvalidateObsoleteReplicationSlots call.
-		 */
-		if (TransactionIdPrecedesOrEquals(slot_xmin, snapshotConflictHorizon))
-		{
-			would_invalidate = true;
-			break;
-		}
+		if (!TransactionIdPrecedesOrEquals(slot_xmin, snapshotConflictHorizon))
+			continue;
+		if (conflict_lsn != InvalidXLogRecPtr &&
+			slot_confirmed >= conflict_lsn)
+			continue;
+
+		blocking = true;
+		break;
 	}
 	LWLockRelease(ReplicationSlotControlLock);
 
-	if (!would_invalidate)
+	return blocking;
+}
+
+/*
+ * If recovery_pause_on_logical_slot_conflict is enabled, and replay is about
+ * to apply a catalog PRUNE_ON_ACCESS record whose snapshotConflictHorizon
+ * would cause the invalidation of at least one non-invalidated logical slot
+ * in the same database, request a recovery pause and wait until the conflict
+ * is resolved.
+ *
+ * The wait exits in any of:
+ *   - Auto-resume: a periodic re-scan finds no slot still blocking. Any of
+ *     draining past the pause LSN, dropping the slot, pg_replication_slot_
+ *     advance(), or out-of-band invalidation (e.g. max_slot_wal_keep_size
+ *     applied by the checkpointer, which runs even while startup is paused
+ *     here) will satisfy this. The post-wait advance then bumps catalog_xmin
+ *     on drained slots so the fall-through InvalidateObsoleteReplicationSlots()
+ *     is a no-op.
+ *   - Manual resume: pg_wal_replay_resume() flips the state to NOT_PAUSED.
+ *     Any slot still blocking at that point is invalidated by the
+ *     fall-through — the "give up on this slot" escape hatch.
+ *   - Promote: CheckForStandbyTrigger() consumes PROMOTE_SIGNAL_FILE and we
+ *     return early so the startup process can finish promotion.
+ *
+ * Only invoked from ResolveRecoveryConflictWithSnapshot(), before any buffer
+ * locks are taken, so pausing here does not deadlock with anything.
+ */
+void
+MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon)
+{
+	XLogRecPtr	conflict_lsn;
+
+	if (!recovery_pause_on_logical_slot_conflict)
 		return;
+	if (!TransactionIdIsValid(snapshotConflictHorizon))
+		return;
+
+	if (!AnySlotStillBlocksConflict(dboid, snapshotConflictHorizon,
+									InvalidXLogRecPtr))
+		return;
+
+	conflict_lsn = GetXLogReplayRecPtr(NULL);
 
 	ereport(LOG,
 			(errmsg("recovery paused: WAL redo at %X/%X would invalidate a logical replication slot",
-					LSN_FORMAT_ARGS(GetXLogReplayRecPtr(NULL))),
+					LSN_FORMAT_ARGS(conflict_lsn)),
 			 errdetail("snapshotConflictHorizon %u exceeds catalog_xmin of at least one active logical slot in database %u.",
 					   snapshotConflictHorizon, dboid),
-			 errhint("Drain, advance, or drop the slot, then execute pg_wal_replay_resume().")));
+			 errhint("Recovery will resume automatically once the slot is drained past %X/%X, dropped, advanced, or invalidated for another reason; pg_wal_replay_resume() forces continuation (invalidating any remaining blocking slot).",
+					 LSN_FORMAT_ARGS(conflict_lsn))));
 
 	SetRecoveryPause(true);
 
@@ -633,6 +658,21 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 		}
 
 		/*
+		 * Auto-resume: if nothing is still blocking this conflict, clear
+		 * the pause and let the loop condition exit. The post-wait advance
+		 * will bump catalog_xmin on any slot that drained past conflict_lsn
+		 * so the fall-through InvalidateObsoleteReplicationSlots() is a
+		 * no-op. Slots invalidated out of band (dropped, WAL-removed,
+		 * etc.) are simply not in the scan anymore.
+		 */
+		if (!AnySlotStillBlocksConflict(dboid, snapshotConflictHorizon,
+										conflict_lsn))
+		{
+			SetRecoveryPause(false);
+			break;
+		}
+
+		/*
 		 * Promote RECOVERY_PAUSE_REQUESTED to RECOVERY_PAUSED so that
 		 * observers (pg_get_wal_replay_pause_state() / monitoring) see the
 		 * pause as actually taken, not just requested.
@@ -644,21 +684,14 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 	ConditionVariableCancelSleep();
 
 	/*
-	 * Operator has resumed. If they drained slot(s) up to (or past) the LSN
-	 * of the about-to-be-replayed conflict record, we trust that the consumer
-	 * downstream has captured everything that needed the pre-conflict catalog
-	 * snapshot. Advance those slots' catalog_xmin past the horizon so the
-	 * subsequent InvalidateObsoleteReplicationSlots() fall-through is a
-	 * no-op. Slots that the operator did NOT drain are left alone and get
-	 * invalidated normally — that is the "I didn't act, just let the slot
-	 * die" path.
-	 *
-	 * "Drained past the conflict LSN" is defined as: the slot's
-	 * confirmed_flush_lsn >= the LSN at which replay has paused, which is
-	 * the current replay position reported by GetXLogReplayRecPtr.
+	 * Wait is over. For any slot whose consumer drained up to (or past)
+	 * conflict_lsn, advance catalog_xmin past the horizon so the subsequent
+	 * InvalidateObsoleteReplicationSlots() fall-through is a no-op. Slots
+	 * that did not drain are left alone and get invalidated normally — the
+	 * "I didn't act, just let the slot die" path that runs when an operator
+	 * manually resumed without draining.
 	 */
 	{
-		XLogRecPtr	conflict_lsn = GetXLogReplayRecPtr(NULL);
 		int			j;
 
 		LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
@@ -713,7 +746,7 @@ MaybePauseOnLogicalSlotConflict(Oid dboid, TransactionId snapshotConflictHorizon
 				ereport(LOG,
 						(errmsg("advanced catalog_xmin of logical slot \"%s\" past conflict horizon %u",
 								NameStr(s->data.name), snapshotConflictHorizon),
-						 errdetail("Slot's confirmed_flush_lsn %X/%X reached the conflict record at %X/%X; operator drained before resuming.",
+						 errdetail("Slot's confirmed_flush_lsn %X/%X reached the conflict record at %X/%X; consumer drained past the pause point.",
 								   LSN_FORMAT_ARGS(s->data.confirmed_flush),
 								   LSN_FORMAT_ARGS(conflict_lsn))));
 		}
