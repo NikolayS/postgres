@@ -146,6 +146,12 @@ section{margin-top:88px;position:relative}
 /* chart frames */
 .chart{position:relative;margin-top:18px}
 .chart svg{display:block;width:100%;height:auto;overflow:visible}
+/* mobile: charts horizontally scroll instead of shrinking text to illegibility */
+@media (max-width:720px){
+  .chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .chart svg{min-width:720px;width:720px}
+  .chart::after{content:"◀ scroll ▶";display:block;font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--paper-mute);text-align:center;margin-top:6px;letter-spacing:.18em;text-transform:uppercase}
+}
 .legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:14px;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--paper-dim)}
 .legend .dot{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:middle;border-radius:2px}
 .legend span{display:inline-flex;align-items:center}

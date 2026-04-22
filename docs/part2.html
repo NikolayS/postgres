@@ -84,6 +84,12 @@ section{margin-top:88px;position:relative}
 .two-col{display:grid;grid-template-columns:1fr 340px;gap:56px;margin-top:36px;align-items:start}
 .three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:44px;margin-top:28px}
 .chart svg{display:block;width:100%;height:auto;overflow:visible}
+/* mobile: charts horizontally scroll instead of shrinking text to illegibility */
+@media (max-width:720px){
+  .chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .chart svg{min-width:720px;width:720px}
+  .chart::after{content:"◀ scroll ▶";display:block;font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--paper-mute);text-align:center;margin-top:6px;letter-spacing:.18em;text-transform:uppercase}
+}
 hr.rule{border:0;height:1px;background:var(--rule);margin:0}
 
 /* Ribbon disclaimer for affiliation section (key UX note) */
