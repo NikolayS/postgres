@@ -133,6 +133,10 @@ typedef struct PgStat_BackendSubEntry
  * For an index, tuples_returned is the number of index entries returned by
  * the index AM, while tuples_fetched is the number of tuples successfully
  * fetched by heap_fetch under the control of simple indexscans for this index.
+ * index_only_scans is the number of index-only scans initiated on the index,
+ * index_only_tuples_returned is the number of index entries returned during
+ * index-only scans, and index_only_heap_fetches is the number of index-only
+ * scan visibility map misses that required a heap visit.
  *
  * tuples_inserted/updated/deleted/hot_updated/newpage_updated count attempted
  * actions, regardless of whether the transaction committed.  delta_live_tuples,
@@ -146,6 +150,9 @@ typedef struct PgStat_TableCounts
 
 	PgStat_Counter tuples_returned;
 	PgStat_Counter tuples_fetched;
+	PgStat_Counter index_only_scans;
+	PgStat_Counter index_only_tuples_returned;
+	PgStat_Counter index_only_heap_fetches;
 
 	PgStat_Counter tuples_inserted;
 	PgStat_Counter tuples_updated;
@@ -455,6 +462,9 @@ typedef struct PgStat_StatTabEntry
 
 	PgStat_Counter tuples_returned;
 	PgStat_Counter tuples_fetched;
+	PgStat_Counter index_only_scans;
+	PgStat_Counter index_only_tuples_returned;
+	PgStat_Counter index_only_heap_fetches;
 
 	PgStat_Counter tuples_inserted;
 	PgStat_Counter tuples_updated;
@@ -738,6 +748,21 @@ extern void pgstat_report_analyze(Relation rel,
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
 			(rel)->pgstat_info->counts.tuples_returned += (n);		\
+	} while (0)
+#define pgstat_count_index_only_scan(rel, n)					\
+	do {												\
+		if (pgstat_should_count_relation(rel))						\
+			(rel)->pgstat_info->counts.index_only_scans += (n);		\
+	} while (0)
+#define pgstat_count_index_only_tuples(rel, n)				\
+	do {												\
+		if (pgstat_should_count_relation(rel))						\
+			(rel)->pgstat_info->counts.index_only_tuples_returned += (n); \
+	} while (0)
+#define pgstat_count_index_only_heap_fetch(rel)				\
+	do {												\
+		if (pgstat_should_count_relation(rel))						\
+			(rel)->pgstat_info->counts.index_only_heap_fetches++;	\
 	} while (0)
 #define pgstat_count_buffer_read(rel)								\
 	do {															\

@@ -396,6 +396,41 @@ SELECT pg_stat_reset_single_table_counters('test_last_scan_pkey'::regclass);
 SELECT idx_scan, stats_reset IS NOT NULL AS has_stats_reset
   FROM pg_stat_all_indexes WHERE indexrelid = 'test_last_scan_pkey'::regclass;
 
+-- check index-only scan counters
+CREATE TEMPORARY TABLE test_index_only_stats(id int primary key, payload int);
+INSERT INTO test_index_only_stats SELECT g, g FROM generate_series(1, 10) g;
+VACUUM test_index_only_stats;
+SELECT pg_stat_reset_single_table_counters('test_index_only_stats_pkey'::regclass);
+
+BEGIN;
+SET LOCAL enable_seqscan TO off;
+SET LOCAL enable_indexscan TO on;
+SET LOCAL enable_indexonlyscan TO on;
+SET LOCAL enable_bitmapscan TO off;
+EXPLAIN (COSTS off) SELECT id FROM test_index_only_stats WHERE id <= 3;
+SELECT id FROM test_index_only_stats WHERE id <= 3;
+SELECT pg_stat_force_next_flush();
+COMMIT;
+
+SELECT idx_scan, idx_only_scan, idx_only_tup_read, idx_only_heap_fetch
+  FROM pg_stat_all_indexes WHERE indexrelid = 'test_index_only_stats_pkey'::regclass;
+
+INSERT INTO test_index_only_stats VALUES (11, 11);
+SELECT pg_stat_reset_single_table_counters('test_index_only_stats_pkey'::regclass);
+
+BEGIN;
+SET LOCAL enable_seqscan TO off;
+SET LOCAL enable_indexscan TO on;
+SET LOCAL enable_indexonlyscan TO on;
+SET LOCAL enable_bitmapscan TO off;
+EXPLAIN (COSTS off) SELECT id FROM test_index_only_stats WHERE id = 11;
+SELECT id FROM test_index_only_stats WHERE id = 11;
+SELECT pg_stat_force_next_flush();
+COMMIT;
+
+SELECT idx_scan, idx_only_scan, idx_only_tup_read, idx_only_heap_fetch
+  FROM pg_stat_all_indexes WHERE indexrelid = 'test_index_only_stats_pkey'::regclass;
+
 -----
 -- Test reset of some stats for shared table
 -----

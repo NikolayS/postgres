@@ -41,6 +41,7 @@
 #include "executor/nodeIndexonlyscan.h"
 #include "executor/nodeIndexscan.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
 #include "utils/builtins.h"
@@ -125,6 +126,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	{
 		bool		tuple_from_heap = false;
 
+		pgstat_count_index_only_tuples(scandesc->indexRelation, 1);
+
 		CHECK_FOR_INTERRUPTS();
 
 		/*
@@ -168,6 +171,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 			/*
 			 * Rats, we have to visit the heap to check visibility.
 			 */
+			pgstat_count_index_only_heap_fetch(scandesc->indexRelation);
 			InstrCountTuples2(node, 1);
 			if (!index_fetch_heap(scandesc, node->ioss_TableSlot))
 				continue;		/* no visible tuple, try next index entry */
@@ -422,6 +426,10 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 	 * worker back into shared memory so that it can be picked up by the main
 	 * process to report in EXPLAIN ANALYZE
 	 */
+	if (node->ioss_Instrument != NULL && node->ioss_Instrument->nsearches > 0)
+		pgstat_count_index_only_scan(indexRelationDesc,
+									 node->ioss_Instrument->nsearches);
+
 	if (node->ioss_SharedInfo != NULL && IsParallelWorker())
 	{
 		IndexScanInstrumentation *winstrument;
@@ -608,9 +616,11 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	if (eflags & EXEC_FLAG_EXPLAIN_ONLY)
 		return indexstate;
 
-	/* Set up instrumentation of index-only scans if requested */
-	if (estate->es_instrument)
-		indexstate->ioss_Instrument = palloc0_object(IndexScanInstrumentation);
+	/*
+	 * Set up instrumentation of index-only scans.  Besides EXPLAIN ANALYZE,
+	 * this is used to count index-only searches for cumulative statistics.
+	 */
+	indexstate->ioss_Instrument = palloc0_object(IndexScanInstrumentation);
 
 	/* Open the index relation. */
 	lockmode = exec_rt_fetch(node->scan.scanrelid, estate)->rellockmode;

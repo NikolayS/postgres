@@ -869,6 +869,9 @@ CREATE VIEW pg_stat_all_indexes AS
             pg_stat_get_lastscan(I.oid) AS last_idx_scan,
             pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
             pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch,
+            pg_stat_get_index_only_scans(I.oid) AS idx_only_scan,
+            pg_stat_get_index_only_tuples_returned(I.oid) AS idx_only_tup_read,
+            pg_stat_get_index_only_heap_fetches(I.oid) AS idx_only_heap_fetch,
             pg_stat_get_stat_reset_time(I.oid) AS stats_reset
     FROM pg_class C JOIN
             pg_index X ON C.oid = X.indrelid JOIN

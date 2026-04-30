@@ -4798,6 +4798,34 @@ description | Waiting for a newly initialized WAL file to reach durable storage
 
      <row>
       <entry role="catalog_table_entry"><para role="column_definition">
+       <structfield>idx_only_scan</structfield> <type>bigint</type>
+      </para>
+      <para>
+       Number of index-only scans initiated on this index
+      </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+       <structfield>idx_only_tup_read</structfield> <type>bigint</type>
+      </para>
+      <para>
+       Number of index entries returned by index-only scans on this index
+      </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+       <structfield>idx_only_heap_fetch</structfield> <type>bigint</type>
+      </para>
+      <para>
+       Number of index-only scan visibility map misses that required a heap
+       visit
+      </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
         <structfield>stats_reset</structfield> <type>timestamp with time zone</type>
        </para>
        <para>

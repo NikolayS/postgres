@@ -850,6 +850,11 @@ pgstat_relation_flush_cb(PgStat_EntryRef *entry_ref, bool nowait)
 	}
 	tabentry->tuples_returned += lstats->counts.tuples_returned;
 	tabentry->tuples_fetched += lstats->counts.tuples_fetched;
+	tabentry->index_only_scans += lstats->counts.index_only_scans;
+	tabentry->index_only_tuples_returned +=
+		lstats->counts.index_only_tuples_returned;
+	tabentry->index_only_heap_fetches +=
+		lstats->counts.index_only_heap_fetches;
 	tabentry->tuples_inserted += lstats->counts.tuples_inserted;
 	tabentry->tuples_updated += lstats->counts.tuples_updated;
 	tabentry->tuples_deleted += lstats->counts.tuples_deleted;
