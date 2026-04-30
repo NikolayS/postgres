@@ -99,6 +99,7 @@
 #include "storage/subsystems.h"
 #include "storage/sync.h"
 #include "utils/guc_hooks.h"
+#include "utils/uuid.h"
 #include "utils/guc_tables.h"
 #include "utils/injection_point.h"
 #include "utils/pgstat_internal.h"
@@ -514,6 +515,13 @@ typedef struct XLogCtlData
 	 */
 	TimeLineID	InsertTimeLineID;
 	TimeLineID	PrevTimeLineID;
+
+	/*
+	 * UUID for the current promotion. Generated when the timeline history
+	 * file is written and later embedded in the XLOG_END_OF_RECOVERY record.
+	 * Protected by info_lck.
+	 */
+	pg_uuid_t	ThisTimeLineUUID;
 
 	/*
 	 * SharedRecoveryState indicates if we're still in crash or archive
@@ -6378,6 +6386,9 @@ StartupXLOG(void)
 	newTLI = endOfRecoveryInfo->lastRecTLI;
 	if (ArchiveRecoveryRequested)
 	{
+		TimestampTz now = GetCurrentTimestamp();
+		pg_uuid_t uuid_buf;
+
 		newTLI = findNewestTimeLine(recoveryTargetTLI) + 1;
 		ereport(LOG,
 				(errmsg("selected new timeline ID: %u", newTLI)));
@@ -6408,8 +6419,27 @@ StartupXLOG(void)
 		 * to the new timeline, and will try to connect to the new timeline.
 		 * To minimize the window for that, try to do as little as possible
 		 * between here and writing the end-of-recovery record.
+		 *
+		 * Generate a UUIDv7 that uniquely identifies this promotion.  The
+		 * same UUID is written into the history file and later into the
+		 * XLOG_END_OF_RECOVERY record so that pg_rewind can distinguish two
+		 * servers that independently promoted to the same timeline ID.
 		 */
+
+
+		/*
+		* TimestampTz is microseconds; generate_uuidv7 wants ms + sub-ms. We
+		* generate the UUID outside the spinlock, to avoid doing the relatively
+		* expensive UUID generation, which could involve unexpected delays,
+		* while holding the spinlock.
+		*/
+		generate_uuidv7_r(&uuid_buf, (uint64) (now / 1000), (uint32) (now % 1000) * 1000);
+		SpinLockAcquire(&XLogCtl->info_lck);
+		memcpy(&XLogCtl->ThisTimeLineUUID, &uuid_buf, sizeof(pg_uuid_t));
+		SpinLockRelease(&XLogCtl->info_lck);
+
 		writeTimeLineHistory(newTLI, recoveryTargetTLI,
+							 &uuid_buf,
 							 EndOfLog, endOfRecoveryInfo->recoveryStopReason);
 
 		ereport(LOG,
@@ -9020,8 +9050,16 @@ xlog_redo(XLogReaderState *record)
 	{
 		xl_end_of_recovery xlrec;
 		TimeLineID	replayTLI;
+		uint32		rec_len;
 
-		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_end_of_recovery));
+		/*
+		 * Zero the struct first so that old records without UUID fields
+		 * produce all-zero UUIDs, which pg_rewind treats as "unknown".
+		 */
+		memset(&xlrec, 0, sizeof(xl_end_of_recovery));
+		rec_len = XLogRecGetDataLen(record);
+		memcpy(&xlrec, XLogRecGetData(record),
+			   Min(rec_len, sizeof(xl_end_of_recovery)));
 
 		/*
 		 * For Hot Standby, we could treat this like a Shutdown Checkpoint,
