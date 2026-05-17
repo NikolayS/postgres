@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 auto_explain_sources = files(
   'auto_explain.c',
@@ -20,6 +20,12 @@ tests += {
   'name': 'auto_explain',
   'sd': meson.current_source_dir(),
   'bd': meson.current_build_dir(),
+  'regress': {
+    'sql': [
+      'alter_reset',
+      'extension_options',
+    ],
+  },
   'tap': {
     'tests': [
       't/001_auto_explain.pl',

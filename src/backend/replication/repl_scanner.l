@@ -4,7 +4,7 @@
  * repl_scanner.l
  *	  a lexical scanner for the replication commands
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -155,7 +155,7 @@ UPLOAD_MANIFEST		{ return K_UPLOAD_MANIFEST; }
 {hexdigit}+\/{hexdigit}+		{
 					uint32	hi,
 							lo;
-					if (sscanf(yytext, "%X/%X", &hi, &lo) != 2)
+					if (sscanf(yytext, "%X/%08X", &hi, &lo) != 2)
 						replication_yyerror(NULL, yyscanner, "invalid streaming start location");
 					yylval->recptr = ((uint64) hi) << 32 | lo;
 					return RECPTR;

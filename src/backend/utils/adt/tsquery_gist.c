@@ -3,7 +3,7 @@
  * tsquery_gist.c
  *	  GiST index support for tsquery
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -33,7 +33,7 @@ gtsquery_compress(PG_FUNCTION_ARGS)
 	{
 		TSQuerySign sign;
 
-		retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		sign = makeTSQuerySign(DatumGetTSQuery(entry->key));
 
 		gistentryinit(*retval, TSQuerySignGetDatum(sign),
@@ -55,8 +55,9 @@ gtsquery_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	TSQuery		query = PG_GETARG_TSQUERY(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	TSQuerySign key = DatumGetTSQuerySign(entry->key);
 	TSQuerySign sq = makeTSQuerySign(query);
@@ -213,7 +214,7 @@ gtsquery_picksplit(PG_FUNCTION_ARGS)
 	datum_r = GETENTRY(entryvec, seed_2);
 
 	maxoff = OffsetNumberNext(maxoff);
-	costvector = (SPLITCOST *) palloc(sizeof(SPLITCOST) * maxoff);
+	costvector = palloc_array(SPLITCOST, maxoff);
 	for (j = FirstOffsetNumber; j <= maxoff; j = OffsetNumberNext(j))
 	{
 		costvector[j - 1].pos = j;

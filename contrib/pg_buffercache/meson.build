@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pg_buffercache_sources = files(
   'pg_buffercache_pages.c',
@@ -24,6 +24,7 @@ install_data(
   'pg_buffercache--1.3--1.4.sql',
   'pg_buffercache--1.4--1.5.sql',
   'pg_buffercache--1.5--1.6.sql',
+  'pg_buffercache--1.6--1.7.sql',
   'pg_buffercache.control',
   kwargs: contrib_data_args,
 )

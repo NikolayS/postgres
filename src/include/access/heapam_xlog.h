@@ -4,7 +4,7 @@
  *	  POSTGRES heap access XLOG definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/heapam_xlog.h
@@ -60,7 +60,7 @@
 #define XLOG_HEAP2_PRUNE_ON_ACCESS		0x10
 #define XLOG_HEAP2_PRUNE_VACUUM_SCAN	0x20
 #define XLOG_HEAP2_PRUNE_VACUUM_CLEANUP	0x30
-#define XLOG_HEAP2_VISIBLE		0x40
+/* 0x40 was XLOG_HEAP2_VISIBLE */
 #define XLOG_HEAP2_MULTI_INSERT 0x50
 #define XLOG_HEAP2_LOCK_UPDATED 0x60
 #define XLOG_HEAP2_NEW_CID		0x70
@@ -104,6 +104,8 @@
 #define XLH_DELETE_CONTAINS_OLD_KEY				(1<<2)
 #define XLH_DELETE_IS_SUPER						(1<<3)
 #define XLH_DELETE_IS_PARTITION_MOVE			(1<<4)
+/* See heap_delete() */
+#define XLH_DELETE_NO_LOGICAL					(1<<5)
 
 /* convenience macro for checking whether any form of old tuple was logged */
 #define XLH_DELETE_CONTAINS_OLD						\
@@ -249,7 +251,7 @@ typedef struct xl_heap_update
  * Main data section:
  *
  *	xl_heap_prune
- *		uint8				flags
+ *		uint16				flags
  *	TransactionId			snapshot_conflict_horizon
  *
  * Block 0 data section:
@@ -284,8 +286,7 @@ typedef struct xl_heap_update
  */
 typedef struct xl_heap_prune
 {
-	uint8		reason;
-	uint8		flags;
+	uint16		flags;
 
 	/*
 	 * If XLHP_HAS_CONFLICT_HORIZON is set, the conflict horizon XID follows,
@@ -293,7 +294,7 @@ typedef struct xl_heap_prune
 	 */
 } xl_heap_prune;
 
-#define SizeOfHeapPrune (offsetof(xl_heap_prune, flags) + sizeof(uint8))
+#define SizeOfHeapPrune (offsetof(xl_heap_prune, flags) + sizeof(uint16))
 
 /* to handle recovery conflict during logical decoding on standby */
 #define		XLHP_IS_CATALOG_REL			(1 << 1)
@@ -330,6 +331,15 @@ typedef struct xl_heap_prune
 #define		XLHP_HAS_REDIRECTIONS		(1 << 5)
 #define		XLHP_HAS_DEAD_ITEMS	        (1 << 6)
 #define		XLHP_HAS_NOW_UNUSED_ITEMS   (1 << 7)
+
+/*
+ * The xl_heap_prune record's flags may also contain which VM bits to set.
+ * xl_heap_prune should always use the XLHP_VM_ALL_VISIBLE and
+ * XLHP_VM_ALL_FROZEN flags and translate them to their visibilitymapdefs.h
+ * equivalents, VISIBILITYMAP_ALL_VISIBLE and VISIBILITYMAP_ALL_FROZEN.
+ */
+#define		XLHP_VM_ALL_VISIBLE			(1 << 8)
+#define		XLHP_VM_ALL_FROZEN			(1 << 9)
 
 /*
  * xlhp_freeze_plan describes how to freeze a group of one or more heap tuples
@@ -435,20 +445,6 @@ typedef struct xl_heap_inplace
 
 #define MinSizeOfHeapInplace	(offsetof(xl_heap_inplace, nmsgs) + sizeof(int))
 
-/*
- * This is what we need to know about setting a visibility map bit
- *
- * Backup blk 0: visibility map buffer
- * Backup blk 1: heap buffer
- */
-typedef struct xl_heap_visible
-{
-	TransactionId snapshotConflictHorizon;
-	uint8		flags;
-} xl_heap_visible;
-
-#define SizeOfHeapVisible (offsetof(xl_heap_visible, flags) + sizeof(uint8))
-
 typedef struct xl_heap_new_cid
 {
 	/*
@@ -492,13 +488,8 @@ extern void heap2_desc(StringInfo buf, XLogReaderState *record);
 extern const char *heap2_identify(uint8 info);
 extern void heap_xlog_logical_rewrite(XLogReaderState *r);
 
-extern XLogRecPtr log_heap_visible(Relation rel, Buffer heap_buffer,
-								   Buffer vm_buffer,
-								   TransactionId snapshotConflictHorizon,
-								   uint8 vmflags);
-
 /* in heapdesc.c, so it can be shared between frontend/backend code */
-extern void heap_xlog_deserialize_prune_and_freeze(char *cursor, uint8 flags,
+extern void heap_xlog_deserialize_prune_and_freeze(char *cursor, uint16 flags,
 												   int *nplans, xlhp_freeze_plan **plans,
 												   OffsetNumber **frz_offsets,
 												   int *nredirected, OffsetNumber **redirected,

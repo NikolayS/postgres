@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Check that pg_check_visible() and pg_check_frozen() report correct TIDs for
 # corruption.
@@ -40,7 +40,7 @@ my $npages = $node->safe_psql(
 	"SELECT relpages FROM pg_class
 		WHERE relname = 'corruption_test';"
 );
-ok($npages >= 10, 'table has at least 10 pages');
+cmp_ok($npages, '>=', 10, 'table has at least 10 pages');
 
 my $file = $node->safe_psql("postgres",
 	"SELECT pg_relation_filepath('corruption_test');");

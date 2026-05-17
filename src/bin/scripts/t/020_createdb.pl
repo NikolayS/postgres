@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -241,6 +241,18 @@ $node->command_fails(
 	],
 	'fails for invalid locale provider');
 
+$node->command_fails_like(
+    [ 'createdb', "invalid \n dbname" ],
+    qr(contains a newline or carriage return character),
+    'fails if database name contains a newline character in name'
+);
+
+$node->command_fails_like(
+    [ 'createdb', "invalid \r dbname" ],
+    qr(contains a newline or carriage return character),
+    'fails if database name contains a carriage return character in name'
+);
+
 # Check use of templates with shared dependencies copied from the template.
 my ($ret, $stdout, $stderr) = $node->psql(
 	'foobar2',
@@ -351,9 +363,9 @@ $node->issues_sql_like(
 	'create database with owner role_foobar');
 ($ret, $stdout, $stderr) =
   $node->psql('foobar2', 'DROP OWNED BY role_foobar;', on_error_die => 1,);
-ok($ret == 0, "DROP OWNED BY role_foobar");
+is($ret, 0, "DROP OWNED BY role_foobar");
 ($ret, $stdout, $stderr) =
   $node->psql('foobar2', 'DROP DATABASE foobar8;', on_error_die => 1,);
-ok($ret == 0, "DROP DATABASE foobar8");
+is($ret, 0, "DROP DATABASE foobar8");
 
 done_testing();

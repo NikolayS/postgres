@@ -3,7 +3,7 @@
  * fmgr.c
  *	  The Postgres function manager.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include "access/detoast.h"
+#include "access/htup_details.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -30,6 +31,7 @@
 #include "utils/builtins.h"
 #include "utils/fmgrtab.h"
 #include "utils/guc.h"
+#include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
@@ -1570,7 +1572,6 @@ InputFunctionCall(FmgrInfo *flinfo, char *str, Oid typioparam, int32 typmod)
  * This is basically like InputFunctionCall, but the converted Datum is
  * returned into *result while the function result is true for success or
  * false for failure.  Also, the caller may pass an ErrorSaveContext node.
- * (We declare that as "fmNodePtr" to avoid including nodes.h in fmgr.h.)
  *
  * If escontext points to an ErrorSaveContext, any "soft" errors detected by
  * the input function will be reported by filling the escontext struct and
@@ -1584,7 +1585,7 @@ InputFunctionCall(FmgrInfo *flinfo, char *str, Oid typioparam, int32 typmod)
 bool
 InputFunctionCallSafe(FmgrInfo *flinfo, char *str,
 					  Oid typioparam, int32 typmod,
-					  fmNodePtr escontext,
+					  Node *escontext,
 					  Datum *result)
 {
 	LOCAL_FCINFO(fcinfo, 3);
@@ -1639,7 +1640,7 @@ InputFunctionCallSafe(FmgrInfo *flinfo, char *str,
 bool
 DirectInputFunctionCallSafe(PGFunction func, char *str,
 							Oid typioparam, int32 typmod,
-							fmNodePtr escontext,
+							Node *escontext,
 							Datum *result)
 {
 	LOCAL_FCINFO(fcinfo, 3);
@@ -1789,47 +1790,12 @@ OidSendFunctionCall(Oid functionId, Datum val)
 
 
 /*-------------------------------------------------------------------------
- *		Support routines for standard maybe-pass-by-reference datatypes
- *
- * int8 and float8 can be passed by value if Datum is wide enough.
- * (For backwards-compatibility reasons, we allow pass-by-ref to be chosen
- * at compile time even if pass-by-val is possible.)
- *
- * Note: there is only one switch controlling the pass-by-value option for
- * both int8 and float8; this is to avoid making things unduly complicated
- * for the timestamp types, which might have either representation.
- *-------------------------------------------------------------------------
- */
-
-#ifndef USE_FLOAT8_BYVAL		/* controls int8 too */
-
-Datum
-Int64GetDatum(int64 X)
-{
-	int64	   *retval = (int64 *) palloc(sizeof(int64));
-
-	*retval = X;
-	return PointerGetDatum(retval);
-}
-
-Datum
-Float8GetDatum(float8 X)
-{
-	float8	   *retval = (float8 *) palloc(sizeof(float8));
-
-	*retval = X;
-	return PointerGetDatum(retval);
-}
-#endif							/* USE_FLOAT8_BYVAL */
-
-
-/*-------------------------------------------------------------------------
  *		Support routines for toastable datatypes
  *-------------------------------------------------------------------------
  */
 
-struct varlena *
-pg_detoast_datum(struct varlena *datum)
+varlena *
+pg_detoast_datum(varlena *datum)
 {
 	if (VARATT_IS_EXTENDED(datum))
 		return detoast_attr(datum);
@@ -1837,8 +1803,8 @@ pg_detoast_datum(struct varlena *datum)
 		return datum;
 }
 
-struct varlena *
-pg_detoast_datum_copy(struct varlena *datum)
+varlena *
+pg_detoast_datum_copy(varlena *datum)
 {
 	if (VARATT_IS_EXTENDED(datum))
 		return detoast_attr(datum);
@@ -1846,22 +1812,22 @@ pg_detoast_datum_copy(struct varlena *datum)
 	{
 		/* Make a modifiable copy of the varlena object */
 		Size		len = VARSIZE(datum);
-		struct varlena *result = (struct varlena *) palloc(len);
+		varlena    *result = (varlena *) palloc(len);
 
 		memcpy(result, datum, len);
 		return result;
 	}
 }
 
-struct varlena *
-pg_detoast_datum_slice(struct varlena *datum, int32 first, int32 count)
+varlena *
+pg_detoast_datum_slice(varlena *datum, int32 first, int32 count)
 {
 	/* Only get the specified portion from the toast rel */
 	return detoast_attr_slice(datum, first, count);
 }
 
-struct varlena *
-pg_detoast_datum_packed(struct varlena *datum)
+varlena *
+pg_detoast_datum_packed(varlena *datum)
 {
 	if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
 		return detoast_attr(datum);

@@ -15,7 +15,7 @@
  * to users.  The txid_XXX variants should eventually be dropped.
  *
  *
- *	Copyright (c) 2003-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2003-2026, PostgreSQL Global Development Group
  *	Author: Jan Wieck, Afilias USA INC.
  *	64-bit txids: Marko Kreen, Skype Technologies
  *
@@ -39,6 +39,7 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/xid8.h"
+#include "varatt.h"
 
 
 /*
@@ -193,7 +194,7 @@ is_visible_fxid(FullTransactionId value, const pg_snapshot *snap)
 #ifdef USE_BSEARCH_IF_NXIP_GREATER
 	else if (snap->nxip > USE_BSEARCH_IF_NXIP_GREATER)
 	{
-		void	   *res;
+		const void *res;
 
 		res = bsearch(&value, snap->xip, snap->nxip, sizeof(FullTransactionId),
 					  cmp_fxid);

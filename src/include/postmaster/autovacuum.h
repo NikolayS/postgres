@@ -4,7 +4,7 @@
  *	  header file for integrated autovacuum daemon
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/postmaster/autovacuum.h
@@ -43,11 +43,13 @@ extern PGDLLIMPORT int autovacuum_freeze_max_age;
 extern PGDLLIMPORT int autovacuum_multixact_freeze_max_age;
 extern PGDLLIMPORT double autovacuum_vac_cost_delay;
 extern PGDLLIMPORT int autovacuum_vac_cost_limit;
-
-/* autovacuum launcher PID, only valid when worker is shutting down */
-extern PGDLLIMPORT int AutovacuumLauncherPid;
-
+extern PGDLLIMPORT double autovacuum_freeze_score_weight;
+extern PGDLLIMPORT double autovacuum_multixact_freeze_score_weight;
+extern PGDLLIMPORT double autovacuum_vacuum_score_weight;
+extern PGDLLIMPORT double autovacuum_vacuum_insert_score_weight;
+extern PGDLLIMPORT double autovacuum_analyze_score_weight;
 extern PGDLLIMPORT int Log_autovacuum_min_duration;
+extern PGDLLIMPORT int Log_autoanalyze_min_duration;
 
 /* Status inquiry functions */
 extern bool AutoVacuumingActive(void);
@@ -63,9 +65,5 @@ pg_noreturn extern void AutoVacWorkerMain(const void *startup_data, size_t start
 
 extern bool AutoVacuumRequestWork(AutoVacuumWorkItemType type,
 								  Oid relationId, BlockNumber blkno);
-
-/* shared memory stuff */
-extern Size AutoVacuumShmemSize(void);
-extern void AutoVacuumShmemInit(void);
 
 #endif							/* AUTOVACUUM_H */

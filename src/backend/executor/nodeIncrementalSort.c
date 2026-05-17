@@ -3,7 +3,7 @@
  * nodeIncrementalSort.c
  *	  Routines to handle incremental sorting of relations.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -102,7 +102,7 @@
 			if ((node)->shared_info && (node)->am_worker) \
 			{ \
 				Assert(IsParallelWorker()); \
-				Assert(ParallelWorkerNumber <= (node)->shared_info->num_workers); \
+				Assert(ParallelWorkerNumber < (node)->shared_info->num_workers); \
 				instrumentSortedGroup(&(node)->shared_info->sinfo[ParallelWorkerNumber].groupName##GroupInfo, \
 									  (node)->groupName##_state); \
 			} \

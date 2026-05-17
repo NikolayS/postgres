@@ -5,7 +5,7 @@
  *
  * All the actual insertion logic is in spgdoinsert.c.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -140,7 +140,7 @@ spgbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 						  true);
 	}
 
-	result = (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
+	result = palloc0_object(IndexBuildResult);
 	result->heap_tuples = reltuples;
 	result->index_tuples = buildstate.indtuples;
 

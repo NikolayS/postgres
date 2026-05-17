@@ -12,9 +12,6 @@
 /* The normal alignment of `int64_t', in bytes. */
 #undef ALIGNOF_INT64_T
 
-/* The normal alignment of `long', in bytes. */
-#undef ALIGNOF_LONG
-
 /* The normal alignment of `PG_INT128_TYPE', in bytes. */
 #undef ALIGNOF_PG_INT128_TYPE
 
@@ -54,9 +51,6 @@
 /* Define to 1 if you have the `append_history' function. */
 #undef HAVE_APPEND_HISTORY
 
-/* Define to 1 if you have the <atomic.h> header file. */
-#undef HAVE_ATOMIC_H
-
 /* Define to 1 if you have the `backtrace_symbols' function. */
 #undef HAVE_BACKTRACE_SYMBOLS
 
@@ -75,6 +69,14 @@
 /* Define to 1 if you have the <crtdefs.h> header file. */
 #undef HAVE_CRTDEFS_H
 
+/* Define to 1 if your C++ compiler understands `typeof' or something similar.
+   */
+#undef HAVE_CXX_TYPEOF
+
+/* Define to 1 if your C++ compiler understands `typeof_unqual' or something
+   similar. */
+#undef HAVE_CXX_TYPEOF_UNQUAL
+
 /* Define to 1 if you have the declaration of `fdatasync', and to 0 if you
    don't. */
 #undef HAVE_DECL_FDATASYNC
@@ -82,14 +84,6 @@
 /* Define to 1 if you have the declaration of `F_FULLFSYNC', and to 0 if you
    don't. */
 #undef HAVE_DECL_F_FULLFSYNC
-
-/* Define to 1 if you have the declaration of
-   `LLVMCreateGDBRegistrationListener', and to 0 if you don't. */
-#undef HAVE_DECL_LLVMCREATEGDBREGISTRATIONLISTENER
-
-/* Define to 1 if you have the declaration of
-   `LLVMCreatePerfJITEventListener', and to 0 if you don't. */
-#undef HAVE_DECL_LLVMCREATEPERFJITEVENTLISTENER
 
 /* Define to 1 if you have the declaration of `memset_s', and to 0 if you
    don't. */
@@ -119,10 +113,6 @@
    don't. */
 #undef HAVE_DECL_STRLCPY
 
-/* Define to 1 if you have the declaration of `strnlen', and to 0 if you
-   don't. */
-#undef HAVE_DECL_STRNLEN
-
 /* Define to 1 if you have the declaration of `strsep', and to 0 if you don't.
    */
 #undef HAVE_DECL_STRSEP
@@ -145,6 +135,9 @@
 
 /* Define to 1 if you have the `explicit_bzero' function. */
 #undef HAVE_EXPLICIT_BZERO
+
+/* Define to 1 if you have the `explicit_memset' function. */
+#undef HAVE_EXPLICIT_MEMSET
 
 /* Define to 1 if fseeko (and presumably ftello) exists and is declared. */
 #undef HAVE_FSEEKO
@@ -229,6 +222,9 @@
 /* Define to 1 if you have the global variable 'int timezone'. */
 #undef HAVE_INT_TIMEZONE
 
+/* Define to 1 if you have the `io_uring_queue_init_mem' function. */
+#undef HAVE_IO_URING_QUEUE_INIT_MEM
+
 /* Define to 1 if __builtin_constant_p(x) implies "i"(x) acceptance. */
 #undef HAVE_I_CONSTRAINT__BUILTIN_CONSTANT_P
 
@@ -286,14 +282,14 @@
 /* Define to 1 if you have the `localeconv_l' function. */
 #undef HAVE_LOCALECONV_L
 
-/* Define to 1 if you have the <mbarrier.h> header file. */
-#undef HAVE_MBARRIER_H
-
 /* Define to 1 if you have the `mbstowcs_l' function. */
 #undef HAVE_MBSTOWCS_L
 
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
+
+/* Define to 1 if you have the `memset_explicit' function. */
+#undef HAVE_MEMSET_EXPLICIT
 
 /* Define to 1 if you have the `mkdtemp' function. */
 #undef HAVE_MKDTEMP
@@ -358,6 +354,9 @@
 /* Define to 1 if you have the `rl_variable_bind' function. */
 #undef HAVE_RL_VARIABLE_BIND
 
+/* Define to 1 if you have SA_SIGINFO available. */
+#undef HAVE_SA_SIGINFO
+
 /* Define to 1 if you have the <security/pam_appl.h> header file. */
 #undef HAVE_SECURITY_PAM_APPL_H
 
@@ -375,6 +374,9 @@
 
 /* Define to 1 if you have the `SSL_CTX_set_ciphersuites' function. */
 #undef HAVE_SSL_CTX_SET_CIPHERSUITES
+
+/* Define to 1 if you have the `SSL_CTX_set_client_hello_cb' function. */
+#undef HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
 
 /* Define to 1 if you have the `SSL_CTX_set_keylog_callback' function. */
 #undef HAVE_SSL_CTX_SET_KEYLOG_CALLBACK
@@ -402,9 +404,6 @@
 
 /* Define to 1 if you have the `strlcpy' function. */
 #undef HAVE_STRLCPY
-
-/* Define to 1 if you have the `strnlen' function. */
-#undef HAVE_STRNLEN
 
 /* Define to 1 if you have the `strsep' function. */
 #undef HAVE_STRSEP
@@ -468,6 +467,13 @@
 
 /* Define to 1 if your compiler understands `typeof' or something similar. */
 #undef HAVE_TYPEOF
+
+/* Define to 1 if your compiler understands `typeof_unqual' or something
+   similar. */
+#undef HAVE_TYPEOF_UNQUAL
+
+/* Define to 1 if you have the <uchar.h> header file. */
+#undef HAVE_UCHAR_H
 
 /* Define to 1 if you have the <ucred.h> header file. */
 #undef HAVE_UCRED_H
@@ -538,9 +544,6 @@
 /* Define to 1 if your compiler understands __builtin_$op_overflow. */
 #undef HAVE__BUILTIN_OP_OVERFLOW
 
-/* Define to 1 if your compiler understands __builtin_popcount. */
-#undef HAVE__BUILTIN_POPCOUNT
-
 /* Define to 1 if your compiler understands __builtin_types_compatible_p. */
 #undef HAVE__BUILTIN_TYPES_COMPATIBLE_P
 
@@ -558,9 +561,6 @@
 
 /* Define to 1 if you have __get_cpuid_count. */
 #undef HAVE__GET_CPUID_COUNT
-
-/* Define to 1 if your compiler understands _Static_assert. */
-#undef HAVE__STATIC_ASSERT
 
 /* Define as the maximum alignment requirement of any C data type. */
 #undef MAXIMUM_ALIGNOF
@@ -590,6 +590,14 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Define to best C++ printf format archetype, usually gnu_printf if
+   available. */
+#undef PG_CXX_PRINTF_ATTRIBUTE
+
+/* Define to best C printf format archetype, usually gnu_printf if available.
+   */
+#undef PG_C_PRINTF_ATTRIBUTE
+
 /* Define to the name of a signed 128-bit integer type. */
 #undef PG_INT128_TYPE
 
@@ -605,9 +613,6 @@
 
 /* PostgreSQL minor version number */
 #undef PG_MINORVERSION_NUM
-
-/* Define to best printf format archetype, usually gnu_printf if available. */
-#undef PG_PRINTF_ATTRIBUTE
 
 /* PostgreSQL version as a string */
 #undef PG_VERSION
@@ -639,6 +644,9 @@
    RELSEG_SIZE requires an initdb. */
 #undef RELSEG_SIZE
 
+/* The size of `intmax_t', as computed by sizeof. */
+#undef SIZEOF_INTMAX_T
+
 /* The size of `long', as computed by sizeof. */
 #undef SIZEOF_LONG
 
@@ -668,6 +676,9 @@
 
 /* Define to 1 to build with assertion checks. (--enable-cassert) */
 #undef USE_ASSERT_CHECKING
+
+/* Define to 1 to use AVX2 instructions with a runtime check. */
+#undef USE_AVX2_WITH_RUNTIME_CHECK
 
 /* Define to 1 to use AVX-512 CRC algorithms with a runtime check. */
 #undef USE_AVX512_CRC32C_WITH_RUNTIME_CHECK
@@ -723,6 +734,9 @@
 
 /* Define to 1 to build with PAM support. (--with-pam) */
 #undef USE_PAM
+
+/* Define to 1 to use Arm PMULL CRC algorithms with a runtime check. */
+#undef USE_PMULL_CRC32C_WITH_RUNTIME_CHECK
 
 /* Define to 1 to use software CRC-32C implementation (slicing-by-8). */
 #undef USE_SLICING_BY_8_CRC32C
@@ -787,11 +801,11 @@
 /* Define for large files, on AIX-style hosts. */
 #undef _LARGE_FILES
 
-/* Define to `__inline__' or `__inline' if that's what the C compiler
-   calls it, or to nothing if 'inline' is not supported under any name.  */
-#ifndef __cplusplus
-#undef inline
-#endif
+/* Define to how the C++ compiler spells `typeof'. */
+#undef pg_cxx_typeof
+
+/* Define to how the C++ compiler spells `typeof_unqual'. */
+#undef pg_cxx_typeof_unqual
 
 /* Define to keyword to use for C99 restrict support, or to nothing if not
    supported */
@@ -813,3 +827,6 @@
 
 /* Define to how the compiler spells `typeof'. */
 #undef typeof
+
+/* Define to how the compiler spells `typeof_unqual'. */
+#undef typeof_unqual

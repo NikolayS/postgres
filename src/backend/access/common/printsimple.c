@@ -8,7 +8,7 @@
  *	  doesn't handle standalone backends or protocol versions other than
  *	  3.0, because we don't need such handling for current applications.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -23,6 +23,7 @@
 #include "libpq/pqformat.h"
 #include "libpq/protocol.h"
 #include "utils/builtins.h"
+#include "varatt.h"
 
 /*
  * At startup time, send a RowDescription message.
@@ -123,7 +124,7 @@ printsimple(TupleTableSlot *slot, DestReceiver *self)
 
 			case OIDOID:
 				{
-					Oid			num = ObjectIdGetDatum(value);
+					Oid			num = DatumGetObjectId(value);
 					char		str[10];	/* 10 digits */
 					int			len;
 

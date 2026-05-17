@@ -4,7 +4,7 @@
  *	  prototypes for pathnode.c, relnode.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/pathnode.h
@@ -17,6 +17,35 @@
 #include "nodes/bitmapset.h"
 #include "nodes/pathnodes.h"
 
+/* Hook for plugins to get control in build_simple_rel() */
+typedef void (*build_simple_rel_hook_type) (PlannerInfo *root,
+											RelOptInfo *rel,
+											RangeTblEntry *rte);
+extern PGDLLIMPORT build_simple_rel_hook_type build_simple_rel_hook;
+
+/*
+ * Everything in subpaths or partial_subpaths will become part of the
+ * Append node's subpaths list. Partial and non-partial subpaths can be
+ * mixed in the same Append node only if it is parallel-aware.
+ *
+ * See the comments for AppendPath for the meaning and purpose of the
+ * child_append_relid_sets field.
+ */
+typedef struct AppendPathInput
+{
+	List	   *subpaths;
+	List	   *partial_subpaths;
+	List	   *child_append_relid_sets;
+} AppendPathInput;
+
+/* Hook for plugins to get control during joinrel setup */
+typedef void (*joinrel_setup_hook_type) (PlannerInfo *root,
+										 RelOptInfo *joinrel,
+										 RelOptInfo *outer_rel,
+										 RelOptInfo *inner_rel,
+										 SpecialJoinInfo *sjinfo,
+										 List *restrictlist);
+extern PGDLLIMPORT joinrel_setup_hook_type joinrel_setup_hook;
 
 /*
  * prototypes for pathnode.c
@@ -32,7 +61,7 @@ extern bool add_path_precheck(RelOptInfo *parent_rel, int disabled_nodes,
 							  List *pathkeys, Relids required_outer);
 extern void add_partial_path(RelOptInfo *parent_rel, Path *new_path);
 extern bool add_partial_path_precheck(RelOptInfo *parent_rel,
-									  int disabled_nodes,
+									  int disabled_nodes, Cost startup_cost,
 									  Cost total_cost, List *pathkeys);
 
 extern Path *create_seqscan_path(PlannerInfo *root, RelOptInfo *rel,
@@ -67,22 +96,26 @@ extern TidPath *create_tidscan_path(PlannerInfo *root, RelOptInfo *rel,
 extern TidRangePath *create_tidrangescan_path(PlannerInfo *root,
 											  RelOptInfo *rel,
 											  List *tidrangequals,
-											  Relids required_outer);
+											  Relids required_outer,
+											  int parallel_workers);
+
 extern AppendPath *create_append_path(PlannerInfo *root, RelOptInfo *rel,
-									  List *subpaths, List *partial_subpaths,
+									  AppendPathInput input,
 									  List *pathkeys, Relids required_outer,
 									  int parallel_workers, bool parallel_aware,
 									  double rows);
 extern MergeAppendPath *create_merge_append_path(PlannerInfo *root,
 												 RelOptInfo *rel,
 												 List *subpaths,
+												 List *child_append_relid_sets,
 												 List *pathkeys,
 												 Relids required_outer);
 extern GroupResultPath *create_group_result_path(PlannerInfo *root,
 												 RelOptInfo *rel,
 												 PathTarget *target,
 												 List *havingqual);
-extern MaterialPath *create_material_path(RelOptInfo *rel, Path *subpath);
+extern MaterialPath *create_material_path(RelOptInfo *rel, Path *subpath,
+										  bool enabled);
 extern MemoizePath *create_memoize_path(PlannerInfo *root,
 										RelOptInfo *rel,
 										Path *subpath,
@@ -90,9 +123,7 @@ extern MemoizePath *create_memoize_path(PlannerInfo *root,
 										List *hash_operators,
 										bool singlerow,
 										bool binary_mode,
-										double calls);
-extern UniquePath *create_unique_path(PlannerInfo *root, RelOptInfo *rel,
-									  Path *subpath, SpecialJoinInfo *sjinfo);
+										Cardinality est_calls);
 extern GatherPath *create_gather_path(PlannerInfo *root,
 									  RelOptInfo *rel, Path *subpath, PathTarget *target,
 									  Relids required_outer, double *rows);
@@ -223,11 +254,11 @@ extern GroupPath *create_group_path(PlannerInfo *root,
 									List *groupClause,
 									List *qual,
 									double numGroups);
-extern UpperUniquePath *create_upper_unique_path(PlannerInfo *root,
-												 RelOptInfo *rel,
-												 Path *subpath,
-												 int numCols,
-												 double numGroups);
+extern UniquePath *create_unique_path(PlannerInfo *root,
+									  RelOptInfo *rel,
+									  Path *subpath,
+									  int numCols,
+									  double numGroups);
 extern AggPath *create_agg_path(PlannerInfo *root,
 								RelOptInfo *rel,
 								Path *subpath,
@@ -283,13 +314,12 @@ extern ModifyTablePath *create_modifytable_path(PlannerInfo *root,
 												Path *subpath,
 												CmdType operation, bool canSetTag,
 												Index nominalRelation, Index rootRelation,
-												bool partColsUpdated,
 												List *resultRelations,
 												List *updateColnosLists,
 												List *withCheckOptionLists, List *returningLists,
 												List *rowMarks, OnConflictExpr *onconflict,
 												List *mergeActionLists, List *mergeJoinConditions,
-												int epqParam);
+												ForPortionOfExpr *forPortionOf, int epqParam);
 extern LimitPath *create_limit_path(PlannerInfo *root, RelOptInfo *rel,
 									Path *subpath,
 									Node *limitOffset, Node *limitCount,
@@ -314,6 +344,8 @@ extern void setup_simple_rel_arrays(PlannerInfo *root);
 extern void expand_planner_arrays(PlannerInfo *root, int add_size);
 extern RelOptInfo *build_simple_rel(PlannerInfo *root, int relid,
 									RelOptInfo *parent);
+extern RelOptInfo *build_simple_grouped_rel(PlannerInfo *root, RelOptInfo *rel);
+extern RelOptInfo *build_grouped_rel(PlannerInfo *root, RelOptInfo *rel);
 extern RelOptInfo *find_base_rel(PlannerInfo *root, int relid);
 extern RelOptInfo *find_base_rel_noerr(PlannerInfo *root, int relid);
 extern RelOptInfo *find_base_rel_ignore_join(PlannerInfo *root, int relid);
@@ -353,4 +385,6 @@ extern RelOptInfo *build_child_join_rel(PlannerInfo *root,
 										SpecialJoinInfo *sjinfo,
 										int nappinfos, AppendRelInfo **appinfos);
 
+extern RelAggInfo *create_rel_agg_info(PlannerInfo *root, RelOptInfo *rel,
+									   bool calculate_grouped_rows);
 #endif							/* PATHNODE_H */

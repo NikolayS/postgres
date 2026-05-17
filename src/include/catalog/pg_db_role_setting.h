@@ -5,7 +5,7 @@
  *	  configuration settings (pg_db_role_setting)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_db_role_setting.h
@@ -31,6 +31,8 @@
  *		typedef struct FormData_pg_db_role_setting
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_db_role_setting,2964,DbRoleSettingRelationId) BKI_SHARED_RELATION
 {
 	/* database, or 0 for a role-specific setting */
@@ -43,6 +45,8 @@ CATALOG(pg_db_role_setting,2964,DbRoleSettingRelationId) BKI_SHARED_RELATION
 	text		setconfig[1];	/* GUC settings to apply at login */
 #endif
 } FormData_pg_db_role_setting;
+
+END_CATALOG_STRUCT
 
 typedef FormData_pg_db_role_setting * Form_pg_db_role_setting;
 

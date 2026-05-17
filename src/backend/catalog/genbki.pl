@@ -6,7 +6,7 @@
 #    headers from specially formatted header files and data files.
 #    postgres.bki is used to initialize the postgres template database.
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/backend/catalog/genbki.pl
@@ -795,9 +795,12 @@ print $fk_info "};\n\n#endif\t\t\t\t\t\t\t/* SYSTEM_FK_INFO_H */\n";
 # Now generate syscache info
 
 print_boilerplate($syscache_ids_fh, "syscache_ids.h", "SysCache identifiers");
-print $syscache_ids_fh "enum SysCacheIdentifier
+print $syscache_ids_fh "#ifndef SYSCACHE_IDS_H
+#define SYSCACHE_IDS_H
+
+typedef enum SysCacheIdentifier
 {
-";
+\tSYSCACHEID_INVALID = -1,\n";
 
 print_boilerplate($syscache_info_fh, "syscache_info.h",
 	"SysCache definitions");
@@ -812,7 +815,14 @@ print $syscache_info_fh "static const struct cachedesc cacheinfo[] = {\n";
 my $last_syscache;
 foreach my $syscache (sort keys %syscaches)
 {
-	print $syscache_ids_fh "\t$syscache,\n";
+	if (not defined $last_syscache)
+	{
+		print $syscache_ids_fh "\t$syscache = 0,\n";
+	}
+	else
+	{
+		print $syscache_ids_fh "\t$syscache,\n";
+	}
 	$last_syscache = $syscache;
 
 	print $syscache_info_fh "\t[$syscache] = {\n";
@@ -825,8 +835,11 @@ foreach my $syscache (sort keys %syscaches)
 	print $syscache_info_fh "\t},\n";
 }
 
-print $syscache_ids_fh "};\n";
-print $syscache_ids_fh "#define SysCacheSize ($last_syscache + 1)\n";
+print $syscache_ids_fh "} SysCacheIdentifier;\n";
+print $syscache_ids_fh "#define SysCacheSize ($last_syscache + 1)\n\n";
+
+# Closing boilerplate for syscache_ids.h
+print $syscache_ids_fh "#endif\t\t\t\t\t\t\t/* SYSCACHE_IDS_H */\n";
 
 print $syscache_info_fh "};\n";
 
@@ -1054,8 +1067,7 @@ sub morph_row_for_schemapg
 		}
 
 		# Expand booleans from 'f'/'t' to 'false'/'true'.
-		# Some values might be other macros (eg FLOAT8PASSBYVAL),
-		# don't change.
+		# Some values might be other macros, if so don't change.
 		elsif ($atttype eq 'bool')
 		{
 			$row->{$attname} = 'true' if $row->{$attname} eq 't';
@@ -1162,7 +1174,7 @@ sub print_boilerplate
  * %s
  *    %s
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES

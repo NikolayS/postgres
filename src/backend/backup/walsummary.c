@@ -3,7 +3,7 @@
  * walsummary.c
  *	  Functions for accessing and managing WAL summary data.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * src/backend/backup/walsummary.c
  *
@@ -67,13 +67,13 @@ GetWalSummaries(TimeLineID tli, XLogRecPtr start_lsn, XLogRecPtr end_lsn)
 		/* Skip if it doesn't match the filter criteria. */
 		if (tli != 0 && tli != file_tli)
 			continue;
-		if (!XLogRecPtrIsInvalid(start_lsn) && start_lsn >= file_end_lsn)
+		if (XLogRecPtrIsValid(start_lsn) && start_lsn >= file_end_lsn)
 			continue;
-		if (!XLogRecPtrIsInvalid(end_lsn) && end_lsn <= file_start_lsn)
+		if (XLogRecPtrIsValid(end_lsn) && end_lsn <= file_start_lsn)
 			continue;
 
 		/* Add it to the list. */
-		ws = palloc(sizeof(WalSummaryFile));
+		ws = palloc_object(WalSummaryFile);
 		ws->tli = file_tli;
 		ws->start_lsn = file_start_lsn;
 		ws->end_lsn = file_end_lsn;
@@ -111,9 +111,9 @@ FilterWalSummaries(List *wslist, TimeLineID tli,
 		/* Skip if it doesn't match the filter criteria. */
 		if (tli != 0 && tli != ws->tli)
 			continue;
-		if (!XLogRecPtrIsInvalid(start_lsn) && start_lsn > ws->end_lsn)
+		if (XLogRecPtrIsValid(start_lsn) && start_lsn > ws->end_lsn)
 			continue;
-		if (!XLogRecPtrIsInvalid(end_lsn) && end_lsn < ws->start_lsn)
+		if (XLogRecPtrIsValid(end_lsn) && end_lsn < ws->start_lsn)
 			continue;
 
 		/* Add it to the result list. */
@@ -214,7 +214,7 @@ OpenWalSummaryFile(WalSummaryFile *ws, bool missing_ok)
 			 LSN_FORMAT_ARGS(ws->end_lsn));
 
 	file = PathNameOpenFile(path, O_RDONLY);
-	if (file < 0 && (errno != EEXIST || !missing_ok))
+	if (file < 0 && (errno != ENOENT || !missing_ok))
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m", path)));
@@ -251,7 +251,7 @@ RemoveWalSummaryIfOlderThan(WalSummaryFile *ws, time_t cutoff_time)
 	if (unlink(path) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not stat file \"%s\": %m", path)));
+				 errmsg("could not remove file \"%s\": %m", path)));
 	ereport(DEBUG2,
 			(errmsg_internal("removing file \"%s\"", path)));
 }

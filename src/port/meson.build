@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pgport_sources = [
   'bsearch_arg.c',
@@ -7,10 +7,12 @@ pgport_sources = [
   'noblock.c',
   'path.c',
   'pg_bitutils.c',
+  'pg_cpu_x86.c',
+  'pg_getopt_ctx.c',
   'pg_localeconv_r.c',
   'pg_numa.c',
   'pg_popcount_aarch64.c',
-  'pg_popcount_avx512.c',
+  'pg_popcount_x86.c',
   'pg_strong_random.c',
   'pgcheckdir.c',
   'pgmkdirp.c',
@@ -72,7 +74,6 @@ replace_funcs_neg = [
   ['mkdtemp'],
   ['strlcat'],
   ['strlcpy'],
-  ['strnlen'],
   ['strsep'],
   ['timingsafe_bcmp'],
 ]
@@ -87,13 +88,12 @@ replace_funcs_pos = [
   # x86/x64
   ['pg_crc32c_sse42', 'USE_SSE42_CRC32C'],
   ['pg_crc32c_sse42', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
-  ['pg_crc32c_sse42_choose', 'USE_SSE42_CRC32C'],
-  ['pg_crc32c_sse42_choose', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
   ['pg_crc32c_sb8', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
 
   # arm / aarch64
   ['pg_crc32c_armv8', 'USE_ARMV8_CRC32C'],
   ['pg_crc32c_armv8', 'USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK', 'crc'],
+  ['pg_crc32c_armv8_choose', 'USE_ARMV8_CRC32C'],
   ['pg_crc32c_armv8_choose', 'USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK'],
   ['pg_crc32c_sb8', 'USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK'],
 
@@ -193,6 +193,7 @@ foreach name, opts : pgport_variants
       c_pch: pch_c_h,
       kwargs: opts + {
         'dependencies': opts['dependencies'] + [ssl],
+        'install': install_internal_static_lib and name != '_srv',
       }
     )
   pgport += {name: lib}

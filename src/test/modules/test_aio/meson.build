@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, PostgreSQL Global Development Group
+# Copyright (c) 2024-2026, PostgreSQL Global Development Group
 
 test_aio_sources = files(
   'test_aio.c',
@@ -32,6 +32,8 @@ tests += {
     'tests': [
       't/001_aio.pl',
       't/002_io_workers.pl',
+      't/003_initdb.pl',
+      't/004_read_stream.pl',
     ],
   },
 }

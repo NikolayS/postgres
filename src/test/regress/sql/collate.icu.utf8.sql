@@ -513,6 +513,10 @@ DROP TABLE test7;
 
 CREATE COLLATION testcoll_rulesx (provider = icu, locale = '', rules = '!!wrong!!');
 
+-- strength specified in the rules
+CREATE COLLATION strength_in_rule (provider = icu, locale = 'und', deterministic = false, rules = '[strength 1]');
+SELECT 'a' = 'à' COLLATE strength_in_rule;  -- true because of the rule
+
 
 -- nondeterministic collations
 
@@ -567,6 +571,9 @@ SELECT 'abc' <= 'ABC' COLLATE case_insensitive, 'abc' >= 'ABC' COLLATE case_inse
 -- tests with array_sort
 SELECT array_sort('{a,B}'::text[] COLLATE case_insensitive);
 SELECT array_sort('{a,B}'::text[] COLLATE "C");
+
+-- test replace() at the end of the string (bug #19341)
+SELECT replace('testX' COLLATE case_insensitive, 'x' COLLATE case_insensitive, 'er');
 
 -- test language tags
 CREATE COLLATION lt_insensitive (provider = icu, locale = 'en-u-ks-level1', deterministic = false);
@@ -983,6 +990,51 @@ RESET enable_partitionwise_aggregate;
 RESET max_parallel_workers_per_gather;
 RESET enable_incremental_sort;
 
+--
+-- Test for eager aggregation non-deterministic collation bug
+--
+
+CREATE TABLE eager_agg_t1 (id int, val text COLLATE case_insensitive);
+CREATE TABLE eager_agg_t2 (val text COLLATE case_insensitive);
+
+INSERT INTO eager_agg_t1 SELECT 1, 'a' FROM generate_series(1, 50);
+INSERT INTO eager_agg_t1 SELECT 1, 'A' FROM generate_series(1, 50);
+INSERT INTO eager_agg_t2 VALUES ('A');
+
+ANALYZE eager_agg_t1;
+ANALYZE eager_agg_t2;
+
+-- Ensure that eager aggregation is not used for t1.val due to the
+-- non-deterministic collation.
+EXPLAIN (COSTS OFF)
+SELECT t1.id, count(t1.val)
+  FROM eager_agg_t1 t1
+  JOIN eager_agg_t2 t2 ON t1.val = t2.val COLLATE "C"
+GROUP BY t1.id;
+
+-- Ensure it returns 1 row with count = 50
+SELECT t1.id, count(t1.val)
+  FROM eager_agg_t1 t1
+  JOIN eager_agg_t2 t2 ON t1.val = t2.val COLLATE "C"
+GROUP BY t1.id;
+
+-- Ensure that eager aggregation is not used when grouping by a column with
+-- non-deterministic collation.
+EXPLAIN (COSTS OFF)
+SELECT t1.id, t1.val, count(t1.val)
+  FROM eager_agg_t1 t1
+  JOIN eager_agg_t2 t2 ON t1.val = t2.val COLLATE "C"
+GROUP BY t1.id, t1.val;
+
+-- Ensure it returns 1 row with count = 50
+SELECT t1.id, t1.val, count(t1.val)
+  FROM eager_agg_t1 t1
+  JOIN eager_agg_t2 t2 ON t1.val = t2.val COLLATE "C"
+GROUP BY t1.id, t1.val;
+
+DROP TABLE eager_agg_t1;
+DROP TABLE eager_agg_t2;
+
 -- virtual generated columns
 CREATE TABLE t5 (
     a int,
@@ -997,6 +1049,19 @@ INSERT INTO t5 (a, b) values (1, 'D1'), (2, 'D2'), (3, 'd1');
 -- rewriting.)
 SELECT * FROM t5 ORDER BY c ASC, a ASC;
 
+-- Check that DEFAULT expressions in SQL/JSON functions use the same collation
+-- as the RETURNING type.  Mismatched collations should raise an error.
+CREATE DOMAIN d1 AS text COLLATE case_insensitive;
+CREATE DOMAIN d2 AS text COLLATE "C";
+SELECT JSON_VALUE('{"a": "A"}', '$.a' RETURNING d1 DEFAULT ('C' COLLATE "C") COLLATE case_insensitive ON EMPTY) = 'a'; -- true
+SELECT JSON_VALUE('{"a": "A"}', '$.a' RETURNING d1 DEFAULT 'C' ON EMPTY) = 'a'; -- true
+SELECT JSON_VALUE('{"a": "A"}', '$.a' RETURNING d1 DEFAULT 'C'::d2 ON EMPTY) = 'a'; -- error
+SELECT JSON_VALUE('{"a": "A"}', '$.a' RETURNING d1 DEFAULT 'C' COLLATE "C" ON EMPTY) = 'a'; -- error
+SELECT JSON_VALUE('{"a": "A"}', '$.c' RETURNING d1 DEFAULT 'A' ON EMPTY) = 'a'; -- true
+SELECT JSON_VALUE('{"a": "A"}', '$.c' RETURNING d1 DEFAULT 'A' COLLATE case_insensitive ON EMPTY) = 'a'; -- true
+SELECT JSON_VALUE('{"a": "A"}', '$.c' RETURNING d1 DEFAULT 'A'::d2 ON EMPTY) = 'a'; -- error
+SELECT JSON_VALUE('{"a": "A"}', '$.c' RETURNING d1 DEFAULT 'A' COLLATE "C" ON EMPTY) = 'a'; -- error
+DROP DOMAIN d1, d2;
 
 -- cleanup
 RESET search_path;

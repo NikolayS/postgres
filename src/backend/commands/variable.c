@@ -4,7 +4,7 @@
  *		Routines for handling specialized SET variables.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1255,5 +1255,41 @@ check_ssl(bool *newval, void **extra, GucSource source)
 		return false;
 	}
 #endif
+	return true;
+}
+
+bool
+check_ssl_sni(bool *newval, void **extra, GucSource source)
+{
+#ifndef USE_SSL
+	if (*newval)
+	{
+		GUC_check_errmsg("SSL is not supported by this build");
+		return false;
+	}
+#else
+#ifndef HAVE_SSL_CTX_SET_CLIENT_HELLO_CB
+	if (*newval)
+	{
+		GUC_check_errmsg("SNI requires OpenSSL 1.1.1 or later");
+		return false;
+	}
+#endif
+#endif
+	return true;
+}
+
+bool
+check_standard_conforming_strings(bool *newval, void **extra, GucSource source)
+{
+	if (!*newval)
+	{
+		/* check the GUC's definition for an explanation */
+		GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+		GUC_check_errmsg("non-standard string literals are not supported");
+
+		return false;
+	}
+
 	return true;
 }

@@ -20,7 +20,7 @@
  * same state as after fork() on a Unix system.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -49,12 +49,15 @@
 #include "replication/walreceiver.h"
 #include "storage/dsm.h"
 #include "storage/io_worker.h"
+#include "storage/ipc.h"
 #include "storage/pg_shmem.h"
+#include "storage/shmem_internal.h"
 #include "tcop/backend_startup.h"
 #include "utils/memutils.h"
 
 #ifdef EXEC_BACKEND
 #include "nodes/queryjumble.h"
+#include "portability/instr_time.h"
 #include "storage/pg_shmem.h"
 #include "storage/spin.h"
 #endif
@@ -96,14 +99,9 @@ typedef struct
 	HANDLE		UsedShmemSegID;
 #endif
 	void	   *UsedShmemSegAddr;
-	slock_t    *ShmemLock;
 #ifdef USE_INJECTION_POINTS
 	struct InjectionPointsCtl *ActiveInjectionPoints;
 #endif
-	int			NamedLWLockTrancheRequests;
-	NamedLWLockTranche *NamedLWLockTrancheArray;
-	LWLockPadded *MainLWLockArray;
-	slock_t    *ProcStructLock;
 	PROC_HDR   *ProcGlobal;
 	PGPROC	   *AuxiliaryProcs;
 	PGPROC	   *PreparedXactProcs;
@@ -132,6 +130,8 @@ typedef struct
 
 	int			MyPMChildSlot;
 
+	int32		timing_tsc_frequency_khz;
+
 	/*
 	 * These are only used by backend processes, but are here because passing
 	 * a socket needs some special handling on Windows. 'client_sock' is an
@@ -154,15 +154,15 @@ static void read_backend_variables(char *id, void **startup_data, size_t *startu
 static void restore_backend_variables(BackendParameters *param);
 
 static bool save_backend_variables(BackendParameters *param, int child_slot,
-								   ClientSocket *client_sock,
+								   const ClientSocket *client_sock,
 #ifdef WIN32
 								   HANDLE childProcess, pid_t childPid,
 #endif
 								   const void *startup_data, size_t startup_data_len);
 
-static pid_t internal_forkexec(const char *child_kind, int child_slot,
+static pid_t internal_forkexec(BackendType child_kind, int child_slot,
 							   const void *startup_data, size_t startup_data_len,
-							   ClientSocket *client_sock);
+							   const ClientSocket *client_sock);
 
 #endif							/* EXEC_BACKEND */
 
@@ -177,34 +177,10 @@ typedef struct
 } child_process_kind;
 
 static child_process_kind child_process_kinds[] = {
-	[B_INVALID] = {"invalid", NULL, false},
-
-	[B_BACKEND] = {"backend", BackendMain, true},
-	[B_DEAD_END_BACKEND] = {"dead-end backend", BackendMain, true},
-	[B_AUTOVAC_LAUNCHER] = {"autovacuum launcher", AutoVacLauncherMain, true},
-	[B_AUTOVAC_WORKER] = {"autovacuum worker", AutoVacWorkerMain, true},
-	[B_BG_WORKER] = {"bgworker", BackgroundWorkerMain, true},
-
-	/*
-	 * WAL senders start their life as regular backend processes, and change
-	 * their type after authenticating the client for replication.  We list it
-	 * here for PostmasterChildName() but cannot launch them directly.
-	 */
-	[B_WAL_SENDER] = {"wal sender", NULL, true},
-	[B_SLOTSYNC_WORKER] = {"slot sync worker", ReplSlotSyncWorkerMain, true},
-
-	[B_STANDALONE_BACKEND] = {"standalone backend", NULL, false},
-
-	[B_ARCHIVER] = {"archiver", PgArchiverMain, true},
-	[B_BG_WRITER] = {"bgwriter", BackgroundWriterMain, true},
-	[B_CHECKPOINTER] = {"checkpointer", CheckpointerMain, true},
-	[B_IO_WORKER] = {"io_worker", IoWorkerMain, true},
-	[B_STARTUP] = {"startup", StartupProcessMain, true},
-	[B_WAL_RECEIVER] = {"wal_receiver", WalReceiverMain, true},
-	[B_WAL_SUMMARIZER] = {"wal_summarizer", WalSummarizerMain, true},
-	[B_WAL_WRITER] = {"wal_writer", WalWriterMain, true},
-
-	[B_LOGGER] = {"syslogger", SysLoggerMain, false},
+#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach) \
+	[bktype] = {description, main_func, shmem_attach},
+#include "postmaster/proctypelist.h"
+#undef PG_PROCTYPE
 };
 
 const char *
@@ -227,8 +203,8 @@ PostmasterChildName(BackendType child_type)
  */
 pid_t
 postmaster_child_launch(BackendType child_type, int child_slot,
-						const void *startup_data, size_t startup_data_len,
-						ClientSocket *client_sock)
+						void *startup_data, size_t startup_data_len,
+						const ClientSocket *client_sock)
 {
 	pid_t		pid;
 
@@ -239,13 +215,15 @@ postmaster_child_launch(BackendType child_type, int child_slot,
 		((BackendStartupData *) startup_data)->fork_started = GetCurrentTimestamp();
 
 #ifdef EXEC_BACKEND
-	pid = internal_forkexec(child_process_kinds[child_type].name, child_slot,
+	pid = internal_forkexec(child_type, child_slot,
 							startup_data, startup_data_len, client_sock);
 	/* the child process will arrive in SubPostmasterMain */
 #else							/* !EXEC_BACKEND */
 	pid = fork_process();
 	if (pid == 0)				/* child */
 	{
+		MyBackendType = child_type;
+
 		/* Capture and transfer timings that may be needed for logging */
 		if (IsExternalConnectionBackend(child_type))
 		{
@@ -280,7 +258,7 @@ postmaster_child_launch(BackendType child_type, int child_slot,
 		MyPMChildSlot = child_slot;
 		if (client_sock)
 		{
-			MyClientSocket = palloc(sizeof(ClientSocket));
+			MyClientSocket = palloc_object(ClientSocket);
 			memcpy(MyClientSocket, client_sock, sizeof(ClientSocket));
 		}
 
@@ -304,8 +282,8 @@ postmaster_child_launch(BackendType child_type, int child_slot,
  * - fork():s, and then exec():s the child process
  */
 static pid_t
-internal_forkexec(const char *child_kind, int child_slot,
-				  const void *startup_data, size_t startup_data_len, ClientSocket *client_sock)
+internal_forkexec(BackendType child_kind, int child_slot,
+				  const void *startup_data, size_t startup_data_len, const ClientSocket *client_sock)
 {
 	static unsigned long tmpBackendFileNum = 0;
 	pid_t		pid;
@@ -380,7 +358,7 @@ internal_forkexec(const char *child_kind, int child_slot,
 
 	/* set up argv properly */
 	argv[0] = "postgres";
-	snprintf(forkav, MAXPGPATH, "--forkchild=%s", child_kind);
+	snprintf(forkav, MAXPGPATH, "--forkchild=%d", (int) child_kind);
 	argv[1] = forkav;
 	/* Insert temp file name after --forkchild argument */
 	argv[2] = tmpfilename;
@@ -414,8 +392,8 @@ internal_forkexec(const char *child_kind, int child_slot,
  *	 file is complete.
  */
 static pid_t
-internal_forkexec(const char *child_kind, int child_slot,
-				  const void *startup_data, size_t startup_data_len, ClientSocket *client_sock)
+internal_forkexec(BackendType child_kind, int child_slot,
+				  const void *startup_data, size_t startup_data_len, const ClientSocket *client_sock)
 {
 	int			retry_count = 0;
 	STARTUPINFO si;
@@ -466,8 +444,8 @@ retry:
 #else
 	sprintf(paramHandleStr, "%lu", (DWORD) paramHandle);
 #endif
-	l = snprintf(cmdLine, sizeof(cmdLine) - 1, "\"%s\" --forkchild=\"%s\" %s",
-				 postgres_exec_path, child_kind, paramHandleStr);
+	l = snprintf(cmdLine, sizeof(cmdLine) - 1, "\"%s\" --forkchild=%d %s",
+				 postgres_exec_path, (int) child_kind, paramHandleStr);
 	if (l >= sizeof(cmdLine))
 	{
 		ereport(LOG,
@@ -589,8 +567,8 @@ retry:
  *			to what it would be if we'd simply forked on Unix, and then
  *			dispatch to the appropriate place.
  *
- * The first two command line arguments are expected to be "--forkchild=<name>",
- * where <name> indicates which postmaster child we are to become, and
+ * The first two command line arguments are expected to be "--forkchild=<kind>",
+ * where <kind> indicates which process type we are to become, and
  * the name of a variables file that we can read to load data that would
  * have been inherited by fork() on Unix.
  */
@@ -601,7 +579,6 @@ SubPostmasterMain(int argc, char *argv[])
 	size_t		startup_data_len;
 	char	   *child_kind;
 	BackendType child_type;
-	bool		found = false;
 	TimestampTz fork_end;
 
 	/* In EXEC_BACKEND case we will not have inherited these settings */
@@ -621,22 +598,17 @@ SubPostmasterMain(int argc, char *argv[])
 	if (argc != 3)
 		elog(FATAL, "invalid subpostmaster invocation");
 
-	/* Find the entry in child_process_kinds */
+	/*
+	 * Parse the --forkchild argument to find our process type.  We rely with
+	 * malice aforethought on atoi returning 0 (B_INVALID) on error.
+	 */
 	if (strncmp(argv[1], "--forkchild=", 12) != 0)
 		elog(FATAL, "invalid subpostmaster invocation (--forkchild argument missing)");
 	child_kind = argv[1] + 12;
-	found = false;
-	for (int idx = 0; idx < lengthof(child_process_kinds); idx++)
-	{
-		if (strcmp(child_process_kinds[idx].name, child_kind) == 0)
-		{
-			child_type = (BackendType) idx;
-			found = true;
-			break;
-		}
-	}
-	if (!found)
+	child_type = (BackendType) atoi(child_kind);
+	if (child_type <= B_INVALID || child_type > BACKEND_NUM_TYPES - 1)
 		elog(ERROR, "unknown child kind %s", child_kind);
+	MyBackendType = child_type;
 
 	/* Read in the variables file */
 	read_backend_variables(argv[2], &startup_data, &startup_data_len);
@@ -695,6 +667,8 @@ SubPostmasterMain(int argc, char *argv[])
 	 */
 	LocalProcessControlFile(false);
 
+	RegisterBuiltinShmemCallbacks();
+
 	/*
 	 * Reload any libraries that were preloaded by the postmaster.  Since we
 	 * exec'd this process, those libraries didn't come along with us; but we
@@ -705,7 +679,10 @@ SubPostmasterMain(int argc, char *argv[])
 
 	/* Restore basic shared memory pointers */
 	if (UsedShmemSegAddr != NULL)
-		InitShmemAccess(UsedShmemSegAddr);
+	{
+		InitShmemAllocator(UsedShmemSegAddr);
+		ShmemCallRequestCallbacks();
+	}
 
 	/*
 	 * Run the appropriate Main function
@@ -728,7 +705,7 @@ static void read_inheritable_socket(SOCKET *dest, InheritableSocket *src);
 /* Save critical backend variables into the BackendParameters struct */
 static bool
 save_backend_variables(BackendParameters *param,
-					   int child_slot, ClientSocket *client_sock,
+					   int child_slot, const ClientSocket *client_sock,
 #ifdef WIN32
 					   HANDLE childProcess, pid_t childPid,
 #endif
@@ -753,16 +730,10 @@ save_backend_variables(BackendParameters *param,
 	param->UsedShmemSegID = UsedShmemSegID;
 	param->UsedShmemSegAddr = UsedShmemSegAddr;
 
-	param->ShmemLock = ShmemLock;
-
 #ifdef USE_INJECTION_POINTS
 	param->ActiveInjectionPoints = ActiveInjectionPoints;
 #endif
 
-	param->NamedLWLockTrancheRequests = NamedLWLockTrancheRequests;
-	param->NamedLWLockTrancheArray = NamedLWLockTrancheArray;
-	param->MainLWLockArray = MainLWLockArray;
-	param->ProcStructLock = ProcStructLock;
 	param->ProcGlobal = ProcGlobal;
 	param->AuxiliaryProcs = AuxiliaryProcs;
 	param->PreparedXactProcs = PreparedXactProcs;
@@ -781,6 +752,8 @@ save_backend_variables(BackendParameters *param,
 
 	param->MaxBackends = MaxBackends;
 	param->num_pmchild_slots = num_pmchild_slots;
+
+	param->timing_tsc_frequency_khz = timing_tsc_frequency_khz;
 
 #ifdef WIN32
 	param->PostmasterHandle = PostmasterHandle;
@@ -1013,16 +986,10 @@ restore_backend_variables(BackendParameters *param)
 	UsedShmemSegID = param->UsedShmemSegID;
 	UsedShmemSegAddr = param->UsedShmemSegAddr;
 
-	ShmemLock = param->ShmemLock;
-
 #ifdef USE_INJECTION_POINTS
 	ActiveInjectionPoints = param->ActiveInjectionPoints;
 #endif
 
-	NamedLWLockTrancheRequests = param->NamedLWLockTrancheRequests;
-	NamedLWLockTrancheArray = param->NamedLWLockTrancheArray;
-	MainLWLockArray = param->MainLWLockArray;
-	ProcStructLock = param->ProcStructLock;
 	ProcGlobal = param->ProcGlobal;
 	AuxiliaryProcs = param->AuxiliaryProcs;
 	PreparedXactProcs = param->PreparedXactProcs;
@@ -1041,6 +1008,12 @@ restore_backend_variables(BackendParameters *param)
 
 	MaxBackends = param->MaxBackends;
 	num_pmchild_slots = param->num_pmchild_slots;
+
+	timing_tsc_frequency_khz = param->timing_tsc_frequency_khz;
+
+	/* Re-run logic usually done by assign_timing_clock_source */
+	pg_initialize_timing();
+	pg_set_timing_clock_source(timing_clock_source);
 
 #ifdef WIN32
 	PostmasterHandle = param->PostmasterHandle;

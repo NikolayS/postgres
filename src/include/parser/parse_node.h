@@ -4,7 +4,7 @@
  *		Internal definitions for parser
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/parser/parse_node.h
@@ -56,6 +56,7 @@ typedef enum ParseExprKind
 	EXPR_KIND_UPDATE_SOURCE,	/* UPDATE assignment source item */
 	EXPR_KIND_UPDATE_TARGET,	/* UPDATE assignment target item */
 	EXPR_KIND_MERGE_WHEN,		/* MERGE WHEN [NOT] MATCHED condition */
+	EXPR_KIND_FOR_PORTION,		/* UPDATE/DELETE FOR PORTION OF item */
 	EXPR_KIND_GROUP_BY,			/* GROUP BY */
 	EXPR_KIND_ORDER_BY,			/* ORDER BY */
 	EXPR_KIND_DISTINCT_ON,		/* DISTINCT ON */
@@ -82,6 +83,7 @@ typedef enum ParseExprKind
 	EXPR_KIND_COPY_WHERE,		/* WHERE condition in COPY FROM */
 	EXPR_KIND_GENERATED_COLUMN, /* generation expression for a column */
 	EXPR_KIND_CYCLE_MARK,		/* cycle mark value */
+	EXPR_KIND_PROPGRAPH_PROPERTY,	/* derived property expression */
 } ParseExprKind;
 
 
@@ -95,6 +97,24 @@ typedef Node *(*CoerceParamHook) (ParseState *pstate, Param *param,
 								  Oid targetTypeId, int32 targetTypeMod,
 								  int location);
 
+/*
+ * Namespace for the GRAPH_TABLE reference being transformed.
+ *
+ * Labels, properties and variables used in the GRAPH_TABLE form the namespace.
+ * The names of the labels and properties used in GRAPH_TABLE are looked up using
+ * the OID of the property graph. Variables are collected in a list as graph
+ * patterns are transformed. This namespace is used to resolve label and property
+ * references in the GRAPH_TABLE.
+ */
+typedef struct GraphTableParseState
+{
+	Oid			graphid;		/* OID of the graph being referenced */
+	List	   *variables;		/* list of element pattern variables in
+								 * GRAPH_TABLE */
+	GraphElementPattern *cur_gep;	/* The element pattern being transformed.
+									 * NULL if no element pattern is being
+									 * transformed. */
+} GraphTableParseState;
 
 /*
  * State information used during parse analysis
@@ -107,20 +127,6 @@ typedef Node *(*CoerceParamHook) (ParseState *pstate, Param *param,
  * generate cursor positions in error messages: we need it to convert
  * byte-wise locations in parse structures to character-wise cursor
  * positions.)
- *
- * p_stmt_location: location of the top level RawStmt's start.  During
- * transformation, the Query's location will be set to the statement's
- * location if available.  Otherwise, the RawStmt's start location will
- * be used.  Propagating the location through ParseState is needed for
- * the Query length calculation (see p_stmt_len below).
- *
- * p_stmt_len: length of the top level RawStmt.  Most of the time, the
- * statement's length is not provided by the parser, with the exception
- * of SelectStmt within parentheses and PreparableStmt in COPY.  If the
- * statement's location is provided by the parser, the top-level location
- * and length are needed to accurately compute the Query's length.  If the
- * statement's location is not provided, the RawStmt's length can be used
- * directly.
  *
  * p_rtable: list of RTEs that will become the rangetable of the query.
  * Note that neither relname nor refname of these entries are necessarily
@@ -167,10 +173,6 @@ typedef Node *(*CoerceParamHook) (ParseState *pstate, Param *param,
  *
  * p_grouping_nsitem: the ParseNamespaceItem that represents the grouping step.
  *
- * p_is_insert: true to process assignment expressions like INSERT, false
- * to process them like UPDATE.  (Note this can change intra-statement, for
- * cases like INSERT ON CONFLICT UPDATE.)
- *
  * p_windowdefs: list of WindowDefs representing WINDOW and OVER clauses.
  * We collect these while transforming expressions and then transform them
  * afterwards (so that any resjunk tlist items needed for the sort/group
@@ -192,6 +194,9 @@ typedef Node *(*CoerceParamHook) (ParseState *pstate, Param *param,
  * p_resolve_unknowns: resolve unknown-type SELECT output columns as type TEXT
  * (this is true by default).
  *
+ * p_graph_table_pstate: Namespace for the GRAPH_TABLE reference being
+ * transformed, if any.
+ *
  * p_hasAggs, p_hasWindowFuncs, etc: true if we've found any of the indicated
  * constructs in the query.
  *
@@ -207,8 +212,6 @@ struct ParseState
 {
 	ParseState *parentParseState;	/* stack link */
 	const char *p_sourcetext;	/* source text, or NULL if not available */
-	ParseLoc	p_stmt_location;	/* start location, or -1 if unknown */
-	ParseLoc	p_stmt_len;		/* length in bytes; 0 means "rest of string" */
 	List	   *p_rtable;		/* range table so far */
 	List	   *p_rteperminfos; /* list of RTEPermissionInfo nodes for each
 								 * RTE_RELATION entry in rtable */
@@ -225,7 +228,6 @@ struct ParseState
 	Relation	p_target_relation;	/* INSERT/UPDATE/DELETE/MERGE target rel */
 	ParseNamespaceItem *p_target_nsitem;	/* target rel's NSItem, or NULL */
 	ParseNamespaceItem *p_grouping_nsitem;	/* NSItem for grouping, or NULL */
-	bool		p_is_insert;	/* process assignment like INSERT not UPDATE */
 	List	   *p_windowdefs;	/* raw representations of window clauses */
 	ParseExprKind p_expr_kind;	/* what kind of expression we're parsing */
 	int			p_next_resno;	/* next targetlist resno to assign */
@@ -237,6 +239,8 @@ struct ParseState
 									 * type text */
 
 	QueryEnvironment *p_queryEnv;	/* curr env, incl refs to enclosing env */
+	GraphTableParseState *p_graph_table_pstate; /* Current graph table
+												 * namespace, if any */
 
 	/* Flags telling about things found in the query: */
 	bool		p_hasAggs;

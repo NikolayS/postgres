@@ -4,7 +4,7 @@
  *	  definition of the "operator" system catalog (pg_operator)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_operator.h
@@ -28,6 +28,8 @@
  *		typedef struct FormData_pg_operator
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_operator,2617,OperatorRelationId)
 {
 	Oid			oid;			/* oid */
@@ -74,6 +76,8 @@ CATALOG(pg_operator,2617,OperatorRelationId)
 	/* OID of join estimator, or 0 */
 	regproc		oprjoin BKI_DEFAULT(-) BKI_LOOKUP_OPT(pg_proc);
 } FormData_pg_operator;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_operator corresponds to a pointer to a tuple with

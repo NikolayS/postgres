@@ -10,7 +10,7 @@
  * See proclist_types.h for the structs that these functions operate on.  They
  * are separated to break a header dependency cycle with proc.h.
  *
- * Portions Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/include/storage/proclist.h
@@ -204,8 +204,8 @@ proclist_pop_head_node_offset(proclist_head *list, size_t node_offset)
  * node with proclist_delete(list, iter.cur, node_offset).
  */
 #define proclist_foreach_modify(iter, lhead, link_member)					\
-	for (AssertVariableIsOfTypeMacro(iter, proclist_mutable_iter),			\
-		 AssertVariableIsOfTypeMacro(lhead, proclist_head *),				\
+	for (StaticAssertVariableIsOfTypeMacro(iter, proclist_mutable_iter),			\
+		 StaticAssertVariableIsOfTypeMacro(lhead, proclist_head *),				\
 		 (iter).cur = (lhead)->head,										\
 		 (iter).next = (iter).cur == INVALID_PROC_NUMBER ? INVALID_PROC_NUMBER :	\
 			 proclist_node_get((iter).cur,									\

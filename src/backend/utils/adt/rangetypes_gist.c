@@ -3,7 +3,7 @@
  * rangetypes_gist.c
  *	  GiST support for range types.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -251,7 +251,7 @@ multirange_gist_compress(PG_FUNCTION_ARGS)
 		MultirangeType *mr = DatumGetMultirangeTypeP(entry->key);
 		RangeType  *r;
 		TypeCacheEntry *typcache;
-		GISTENTRY  *retval = palloc(sizeof(GISTENTRY));
+		GISTENTRY  *retval = palloc_object(GISTENTRY);
 
 		typcache = multirange_get_typcache(fcinfo, MultirangeTypeGetOid(mr));
 		r = multirange_get_union_range(typcache->rngtype, mr);
@@ -1240,8 +1240,7 @@ range_gist_single_sorting_split(TypeCacheEntry *typcache,
 
 	maxoff = entryvec->n - 1;
 
-	sortItems = (SingleBoundSortItem *)
-		palloc(maxoff * sizeof(SingleBoundSortItem));
+	sortItems = palloc_array(SingleBoundSortItem, maxoff);
 
 	/*
 	 * Prepare auxiliary array and sort the values.
@@ -1343,8 +1342,8 @@ range_gist_double_sorting_split(TypeCacheEntry *typcache,
 	context.first = true;
 
 	/* Allocate arrays for sorted range bounds */
-	by_lower = (NonEmptyRange *) palloc(nentries * sizeof(NonEmptyRange));
-	by_upper = (NonEmptyRange *) palloc(nentries * sizeof(NonEmptyRange));
+	by_lower = palloc_array(NonEmptyRange, nentries);
+	by_upper = palloc_array(NonEmptyRange, nentries);
 
 	/* Fill arrays of bounds */
 	for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
@@ -1499,8 +1498,8 @@ range_gist_double_sorting_split(TypeCacheEntry *typcache,
 	 */
 
 	/* Allocate vectors for results */
-	v->spl_left = (OffsetNumber *) palloc(nentries * sizeof(OffsetNumber));
-	v->spl_right = (OffsetNumber *) palloc(nentries * sizeof(OffsetNumber));
+	v->spl_left = palloc_array(OffsetNumber, nentries);
+	v->spl_right = palloc_array(OffsetNumber, nentries);
 	v->spl_nleft = 0;
 	v->spl_nright = 0;
 
@@ -1509,7 +1508,7 @@ range_gist_double_sorting_split(TypeCacheEntry *typcache,
 	 * either group without affecting overlap along selected axis.
 	 */
 	common_entries_count = 0;
-	common_entries = (CommonEntry *) palloc(nentries * sizeof(CommonEntry));
+	common_entries = palloc_array(CommonEntry, nentries);
 
 	/*
 	 * Distribute entries which can be distributed unambiguously, and collect
@@ -1730,9 +1729,9 @@ get_gist_range_class(RangeType *range)
 static int
 single_bound_cmp(const void *a, const void *b, void *arg)
 {
-	SingleBoundSortItem *i1 = (SingleBoundSortItem *) a;
-	SingleBoundSortItem *i2 = (SingleBoundSortItem *) b;
-	TypeCacheEntry *typcache = (TypeCacheEntry *) arg;
+	const SingleBoundSortItem *i1 = a;
+	const SingleBoundSortItem *i2 = b;
+	TypeCacheEntry *typcache = arg;
 
 	return range_cmp_bounds(typcache, &i1->bound, &i2->bound);
 }
@@ -1743,9 +1742,9 @@ single_bound_cmp(const void *a, const void *b, void *arg)
 static int
 interval_cmp_lower(const void *a, const void *b, void *arg)
 {
-	NonEmptyRange *i1 = (NonEmptyRange *) a;
-	NonEmptyRange *i2 = (NonEmptyRange *) b;
-	TypeCacheEntry *typcache = (TypeCacheEntry *) arg;
+	const NonEmptyRange *i1 = a;
+	const NonEmptyRange *i2 = b;
+	TypeCacheEntry *typcache = arg;
 
 	return range_cmp_bounds(typcache, &i1->lower, &i2->lower);
 }
@@ -1756,9 +1755,9 @@ interval_cmp_lower(const void *a, const void *b, void *arg)
 static int
 interval_cmp_upper(const void *a, const void *b, void *arg)
 {
-	NonEmptyRange *i1 = (NonEmptyRange *) a;
-	NonEmptyRange *i2 = (NonEmptyRange *) b;
-	TypeCacheEntry *typcache = (TypeCacheEntry *) arg;
+	const NonEmptyRange *i1 = a;
+	const NonEmptyRange *i2 = b;
+	TypeCacheEntry *typcache = arg;
 
 	return range_cmp_bounds(typcache, &i1->upper, &i2->upper);
 }
@@ -1769,8 +1768,8 @@ interval_cmp_upper(const void *a, const void *b, void *arg)
 static int
 common_entry_cmp(const void *i1, const void *i2)
 {
-	double		delta1 = ((CommonEntry *) i1)->delta;
-	double		delta2 = ((CommonEntry *) i2)->delta;
+	double		delta1 = ((const CommonEntry *) i1)->delta;
+	double		delta2 = ((const CommonEntry *) i2)->delta;
 
 	if (delta1 < delta2)
 		return -1;

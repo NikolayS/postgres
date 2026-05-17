@@ -4,7 +4,7 @@
  *	  Routines to attempt to prove logical implications between predicate
  *	  expressions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -25,6 +25,7 @@
 #include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
 #include "utils/array.h"
+#include "utils/hsearch.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
@@ -109,7 +110,8 @@ static bool operator_same_subexprs_proof(Oid pred_op, Oid clause_op,
 static bool operator_same_subexprs_lookup(Oid pred_op, Oid clause_op,
 										  bool refute_it);
 static Oid	get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it);
-static void InvalidateOprProofCacheCallBack(Datum arg, int cacheid, uint32 hashvalue);
+static void InvalidateOprProofCacheCallBack(Datum arg, SysCacheIdentifier cacheid,
+											uint32 hashvalue);
 
 
 /*
@@ -967,7 +969,7 @@ arrayconst_startup_fn(Node *clause, PredIterInfo info)
 	char		elmalign;
 
 	/* Create working state struct */
-	state = (ArrayConstIterState *) palloc(sizeof(ArrayConstIterState));
+	state = palloc_object(ArrayConstIterState);
 	info->state = state;
 
 	/* Deconstruct the array literal */
@@ -1046,7 +1048,7 @@ arrayexpr_startup_fn(Node *clause, PredIterInfo info)
 	ArrayExpr  *arrayexpr;
 
 	/* Create working state struct */
-	state = (ArrayExprIterState *) palloc(sizeof(ArrayExprIterState));
+	state = palloc_object(ArrayExprIterState);
 	info->state = state;
 
 	/* Set up a dummy OpExpr to return as the per-item node */
@@ -2343,7 +2345,8 @@ get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it)
  * Callback for pg_amop inval events
  */
 static void
-InvalidateOprProofCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
+InvalidateOprProofCacheCallBack(Datum arg, SysCacheIdentifier cacheid,
+								uint32 hashvalue)
 {
 	HASH_SEQ_STATUS status;
 	OprProofCacheEntry *hentry;

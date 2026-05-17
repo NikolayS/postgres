@@ -19,7 +19,7 @@
  * routines.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -236,8 +236,8 @@ pqGetInt(int *result, size_t bytes, PGconn *conn)
 			break;
 		default:
 			pqInternalNotice(&conn->noticeHooks,
-							 "integer of size %lu not supported by pqGetInt",
-							 (unsigned long) bytes);
+							 "integer of size %zu not supported by pqGetInt",
+							 bytes);
 			return EOF;
 	}
 
@@ -269,8 +269,8 @@ pqPutInt(int value, size_t bytes, PGconn *conn)
 			break;
 		default:
 			pqInternalNotice(&conn->noticeHooks,
-							 "integer of size %lu not supported by pqPutInt",
-							 (unsigned long) bytes);
+							 "integer of size %zu not supported by pqPutInt",
+							 bytes);
 			return EOF;
 	}
 
@@ -553,9 +553,35 @@ pqPutMsgEnd(PGconn *conn)
 	/* Make message eligible to send */
 	conn->outCount = conn->outMsgEnd;
 
+	/* If appropriate, try to push out some data */
 	if (conn->outCount >= 8192)
 	{
-		int			toSend = conn->outCount - (conn->outCount % 8192);
+		int			toSend = conn->outCount;
+
+		/*
+		 * On Unix-pipe connections, it seems profitable to prefer sending
+		 * pipe-buffer-sized packets not randomly-sized ones, so retain the
+		 * last partial-8K chunk in our buffer for now.  On TCP connections,
+		 * the advantage of that is far less clear.  Moreover, it flat out
+		 * isn't safe when using SSL or GSSAPI, because those code paths have
+		 * API stipulations that if they fail to send all the data that was
+		 * offered in the previous write attempt, we mustn't offer less data
+		 * in this write attempt.  The previous write attempt might've been
+		 * pqFlush attempting to send everything in the buffer, so we mustn't
+		 * offer less now.  (Presently, we won't try to use SSL or GSSAPI on
+		 * Unix connections, so those checks are just Asserts.  They'll have
+		 * to become part of the regular if-test if we ever change that.)
+		 */
+		if (conn->raddr.addr.ss_family == AF_UNIX)
+		{
+#ifdef USE_SSL
+			Assert(!conn->ssl_in_use);
+#endif
+#ifdef ENABLE_GSS
+			Assert(!conn->gssenc);
+#endif
+			toSend -= toSend % 8192;
+		}
 
 		if (pqSendSome(conn, toSend) < 0)
 			return EOF;
@@ -1396,4 +1422,22 @@ libpq_append_conn_error(PGconn *conn, const char *fmt,...)
 	} while (!done);
 
 	appendPQExpBufferChar(&conn->errorMessage, '\n');
+}
+
+/*
+ * For 19beta only, some protocol errors will have additional information
+ * appended to help with the "grease" campaign.
+ */
+void
+libpq_append_grease_info(PGconn *conn)
+{
+	/* translator: %s is a URL */
+	libpq_append_conn_error(conn,
+							"\tThis indicates a bug in either the server being contacted\n"
+							"\tor a proxy handling the connection. Please consider\n"
+							"\treporting this to the maintainers of that software.\n"
+							"\tFor more information, including instructions on how to\n"
+							"\twork around this issue for now, visit\n"
+							"\t\t%s",
+							"https://www.postgresql.org/docs/devel/libpq-connect.html#LIBPQ-CONNECT-MAX-PROTOCOL-VERSION");
 }

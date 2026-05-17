@@ -129,10 +129,9 @@
     In all cases, a trigger is executed as part of the same transaction as
     the statement that triggered it, so if either the statement or the
     trigger causes an error, the effects of both will be rolled back.
-    Also, the trigger will always run in the security context of the role
-    that executed the statement that caused the trigger to fire, unless
-    the trigger function is defined as <literal>SECURITY DEFINER</literal>,
-    in which case it will run as the function owner.
+    Also, the trigger will always run as the role that queued the trigger
+    event, unless the trigger function is marked as <literal>SECURITY
+    DEFINER</literal>, in which case it will run as the function owner.
    </para>
 
    <para>
@@ -214,6 +213,18 @@
     inserted or deleted. So it's perfectly legal that while statement-level
     triggers are fired for certain types of action, no row-level triggers
     are fired for the same kind of action.
+   </para>
+
+   <para>
+    If an <command>UPDATE</command> or <command>DELETE</command> uses
+    <literal>FOR PORTION OF</literal>, causing new rows to be inserted
+    to preserve the leftover untargeted part of modified records, then
+    <command>INSERT</command> triggers are fired for each inserted
+    row. Each row is inserted separately, so they fire their own
+    statement triggers, and they have their own transition tables.
+    (The <literal>BEFORE DELETE/UPDATE</literal> triggers are fired first,
+    then <literal>BEFORE INSERT</literal>, then <literal>AFTER
+    INSERT</literal>, then <literal>AFTER DELETE/UPDATE</literal>.)
    </para>
 
    <para>
@@ -824,7 +835,7 @@ typedef struct Trigger
         <varname>attnum</varname> (1-based) is a member of this bitmap set,
         call <literal>bms_is_member(attnum -
         FirstLowInvalidHeapAttributeNumber,
-        trigdata->tg_updatedcols))</literal>.
+        trigdata->tg_updatedcols)</literal>.
        </para>
 
        <para>

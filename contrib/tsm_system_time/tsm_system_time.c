@@ -13,7 +13,7 @@
  * However, we do what we can to reduce surprising behavior by selecting
  * the sampling pattern just once per query, much as in tsm_system_rows.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -30,6 +30,7 @@
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
+#include "portability/instr_time.h"
 #include "utils/sampling.h"
 #include "utils/spccache.h"
 
@@ -179,7 +180,7 @@ system_time_samplescangetsamplesize(PlannerInfo *root,
 static void
 system_time_initsamplescan(SampleScanState *node, int eflags)
 {
-	node->tsm_state = palloc0(sizeof(SystemTimeSamplerData));
+	node->tsm_state = palloc0_object(SystemTimeSamplerData);
 	/* Note the above leaves tsm_state->step equal to zero */
 }
 

@@ -3,7 +3,7 @@
  * test_rls_hooks.c
  *		Code for testing RLS hooks.
  *
- * Copyright (c) 2015-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2015-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_rls_hooks/test_rls_hooks.c
@@ -44,7 +44,7 @@ List *
 test_rls_hooks_permissive(CmdType cmdtype, Relation relation)
 {
 	List	   *policies = NIL;
-	RowSecurityPolicy *policy = palloc0(sizeof(RowSecurityPolicy));
+	RowSecurityPolicy *policy = palloc0_object(RowSecurityPolicy);
 	Datum		role;
 	FuncCall   *n;
 	Node	   *e;
@@ -112,7 +112,7 @@ List *
 test_rls_hooks_restrictive(CmdType cmdtype, Relation relation)
 {
 	List	   *policies = NIL;
-	RowSecurityPolicy *policy = palloc0(sizeof(RowSecurityPolicy));
+	RowSecurityPolicy *policy = palloc0_object(RowSecurityPolicy);
 	Datum		role;
 	FuncCall   *n;
 	Node	   *e;
