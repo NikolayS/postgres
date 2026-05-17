@@ -22,14 +22,30 @@ PostgreSQL documentation
  <refsynopsisdiv>
 <synopsis>
 CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
-    [ FOR ALL TABLES
-      | FOR <replaceable class="parameter">publication_object</replaceable> [, ... ] ]
+    [ FOR { <replaceable class="parameter">publication_object</replaceable> [, ... ] | <replaceable class="parameter">publication_all_object</replaceable> [, ... ] } ]
     [ WITH ( <replaceable class="parameter">publication_parameter</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] ) ]
 
 <phrase>where <replaceable class="parameter">publication_object</replaceable> is one of:</phrase>
 
-    TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ] [ ( <replaceable class="parameter">column_name</replaceable> [, ... ] ) ] [ WHERE ( <replaceable class="parameter">expression</replaceable> ) ] [, ... ]
+    TABLE <replaceable class="parameter">table_and_columns</replaceable> [, ... ]
     TABLES IN SCHEMA { <replaceable class="parameter">schema_name</replaceable> | CURRENT_SCHEMA } [, ... ]
+
+<phrase>and <replaceable class="parameter">publication_all_object</replaceable> is one of:</phrase>
+
+    ALL TABLES [ EXCEPT ( <replaceable class="parameter">except_table_object</replaceable> [, ... ] ) ]
+    ALL SEQUENCES
+
+<phrase>and <replaceable class="parameter">table_and_columns</replaceable> is:</phrase>
+
+    <replaceable class="parameter">table_object</replaceable> [ ( <replaceable class="parameter">column_name</replaceable> [, ... ] ) ] [ WHERE ( <replaceable class="parameter">expression</replaceable> ) ]
+
+<phrase>and <replaceable class="parameter">except_table_object</replaceable> is:</phrase>
+
+    TABLE <replaceable class="parameter">table_object</replaceable> [, ... ]
+
+<phrase>and <replaceable class="parameter">table_object</replaceable> is:</phrase>
+
+   [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
 </synopsis>
  </refsynopsisdiv>
 
@@ -120,16 +136,6 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
     </listitem>
    </varlistentry>
 
-   <varlistentry id="sql-createpublication-params-for-all-tables">
-    <term><literal>FOR ALL TABLES</literal></term>
-    <listitem>
-     <para>
-      Marks the publication as one that replicates changes for all tables in
-      the database, including tables created in the future.
-     </para>
-    </listitem>
-   </varlistentry>
-
    <varlistentry id="sql-createpublication-params-for-tables-in-schema">
     <term><literal>FOR TABLES IN SCHEMA</literal></term>
     <listitem>
@@ -151,7 +157,7 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
      </para>
 
      <para>
-      When a partitioned table is published via schema level publication, all
+      When a partitioned table is published via a schema-level publication, all
       of its existing and future partitions are implicitly considered to be part of the
       publication, regardless of whether they are from the publication schema or not.
       So, even operations that are performed directly on a
@@ -161,11 +167,69 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
     </listitem>
    </varlistentry>
 
+   <varlistentry id="sql-createpublication-params-for-all-tables">
+    <term><literal>FOR ALL TABLES</literal></term>
+    <listitem>
+     <para>
+      Marks the publication as one that replicates changes for all tables in
+      the database, including tables created in the future. Tables listed in
+      <literal>EXCEPT</literal> clause are excluded from the publication.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="sql-createpublication-params-for-all-sequences">
+    <term><literal>FOR ALL SEQUENCES</literal></term>
+    <listitem>
+     <para>
+      Marks the publication as one that synchronizes changes for all sequences
+      in the database, including sequences created in the future.
+     </para>
+
+     <para>
+      Only persistent sequences are included in the publication. Temporary
+      sequences and unlogged sequences are excluded from the publication.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="sql-createpublication-params-for-except-table">
+    <term><literal>EXCEPT</literal></term>
+    <listitem>
+     <para>
+      This clause specifies a list of tables to be excluded from the
+      publication.
+     </para>
+     <para>
+      For inherited tables, if <literal>ONLY</literal> is specified before the
+      table name, only that table is excluded from the publication. If
+      <literal>ONLY</literal> is not specified, the table and all its descendant
+      tables (if any) are excluded. Optionally, <literal>*</literal> can be
+      specified after the table name to explicitly indicate that descendant
+      tables are excluded.
+     </para>
+     <para>
+      For partitioned tables, only the root partitioned table may be specified
+      in <literal>EXCEPT</literal>. Doing so excludes the root table and
+      all of its partitions from replication. The optional
+      <literal>ONLY</literal> and <literal>*</literal> has no effect for
+      partitioned tables.
+     </para>
+     <para>
+      There can be a case where a subscription includes multiple publications.
+      In such a case, a table or partition that is included in one publication
+      but excluded (explicitly or implicitly) by the <literal>EXCEPT</literal>
+      clause of another is considered included for replication.
+     </para>
+    </listitem>
+   </varlistentry>
+
    <varlistentry id="sql-createpublication-params-with">
     <term><literal>WITH ( <replaceable class="parameter">publication_parameter</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] )</literal></term>
     <listitem>
      <para>
-      This clause specifies optional parameters for a publication.  The
+      This clause specifies optional parameters for a publication when
+      publishing tables. This clause is not applicable to sequences. The
       following parameters are supported:
 
       <variablelist>
@@ -174,7 +238,7 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
         <listitem>
          <para>
           This parameter determines which DML operations will be published by
-          the new publication to the subscribers.  The value is
+          the new publication to the subscribers.  The value is a
           comma-separated list of operations.  The allowed operations are
           <literal>insert</literal>, <literal>update</literal>,
           <literal>delete</literal>, and <literal>truncate</literal>.
@@ -214,7 +278,7 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
          <note>
           <para>
            If the subscriber is from a release prior to 18, then initial table
-           synchronization won't copy generated columns even if parameter
+           synchronization won't copy generated columns even if the parameter
            <literal>publish_generated_columns</literal> is <literal>stored</literal>
            in the publisher.
           </para>
@@ -231,13 +295,15 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
         <term><literal>publish_via_partition_root</literal> (<type>boolean</type>)</term>
         <listitem>
          <para>
-          This parameter determines whether changes in a partitioned table (or
-          on its partitions) contained in the publication will be published
-          using the identity and schema of the partitioned table rather than
-          that of the individual partitions that are actually changed; the
-          latter is the default.  Enabling this allows the changes to be
-          replicated into a non-partitioned table or a partitioned table
-          consisting of a different set of partitions.
+          This parameter controls how changes to a partitioned table (or any of
+          its partitions) are published.  When set to <literal>true</literal>,
+          changes are published using the identity and schema of the
+          root partitioned table.  When set to <literal>false</literal> (the
+          default), changes are published using the identity and schema of the
+          individual partitions where the changes actually occurred.  Enabling
+          this option allows the changes to be replicated into a
+          non-partitioned table or into a partitioned table whose partition
+          structure differs from that of the publisher.
          </para>
 
          <para>
@@ -279,10 +345,10 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
   <title>Notes</title>
 
   <para>
-   If <literal>FOR TABLE</literal>, <literal>FOR ALL TABLES</literal> or
-   <literal>FOR TABLES IN SCHEMA</literal> are not specified, then the
-   publication starts out with an empty set of tables.  That is useful if
-   tables or schemas are to be added later.
+   If <literal>FOR TABLE</literal>, <literal>FOR TABLES IN SCHEMA</literal>,
+   <literal>FOR ALL TABLES</literal> or <literal>FOR ALL SEQUENCES</literal>
+   are not specified, then the publication starts out with an empty set of
+   tables.  That is useful if tables or schemas are to be added later.
   </para>
 
   <para>
@@ -298,8 +364,9 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
 
   <para>
    To add a table to a publication, the invoking user must have ownership
-   rights on the table.  The <command>FOR ALL TABLES</command> and
-   <command>FOR TABLES IN SCHEMA</command> clauses require the invoking
+   rights on the table.  The <literal>FOR TABLES IN SCHEMA</literal>,
+   <literal>FOR ALL TABLES</literal> and
+   <literal>FOR ALL SEQUENCES</literal> clauses require the invoking
    user to be a superuser.
   </para>
 
@@ -367,6 +434,12 @@ CREATE PUBLICATION <replaceable class="parameter">name</replaceable>
    For a <command>MERGE</command> command, the publication will publish an
    <command>INSERT</command>, <command>UPDATE</command>, or <command>DELETE</command>
    for each row inserted, updated, or deleted.
+  </para>
+
+  <para>
+   For an <command>UPDATE/DELETE ... FOR PORTION OF</command> command, the
+   publication will publish an <command>UPDATE</command> or <command>DELETE</command>,
+   followed by one <command>INSERT</command> for each temporal leftover row inserted.
   </para>
 
   <para>
@@ -449,6 +522,38 @@ CREATE PUBLICATION sales_publication FOR TABLES IN SCHEMA marketing, sales;
 <programlisting>
 CREATE PUBLICATION users_filtered FOR TABLE users (user_id, firstname);
 </programlisting></para>
+
+  <para>
+   Create a publication that publishes all sequences for synchronization:
+<programlisting>
+CREATE PUBLICATION all_sequences FOR ALL SEQUENCES;
+</programlisting>
+  </para>
+
+  <para>
+   Create a publication that publishes all changes in all tables, and
+   all sequences for synchronization:
+<programlisting>
+CREATE PUBLICATION all_tables_sequences FOR ALL TABLES, ALL SEQUENCES;
+</programlisting>
+  </para>
+
+  <para>
+   Create a publication that publishes all changes in all tables except
+   <structname>users</structname> and <structname>departments</structname>:
+<programlisting>
+CREATE PUBLICATION all_tables_except FOR ALL TABLES EXCEPT (TABLE users, departments);
+</programlisting>
+  </para>
+
+  <para>
+   Create a publication that publishes all sequences for synchronization, and
+   all changes in all tables except <structname>users</structname> and
+   <structname>departments</structname>:
+<programlisting>
+CREATE PUBLICATION all_sequences_tables_except FOR ALL SEQUENCES, ALL TABLES EXCEPT (TABLE users, departments);
+</programlisting>
+  </para>
  </refsect1>
 
  <refsect1>

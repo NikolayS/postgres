@@ -7,8 +7,6 @@
  */
 #include "postgres.h"
 
-#include <math.h>
-
 #include "access/gist.h"
 #include "access/reloptions.h"
 #include "access/stratnum.h"
@@ -79,12 +77,12 @@ _ltree_compress(PG_FUNCTION_ARGS)
 			item = NEXTVAL(item);
 		}
 
-		retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		gistentryinit(*retval, PointerGetDatum(key),
 					  entry->rel, entry->page,
 					  entry->offset, false);
 	}
-	else if (!LTG_ISALLTRUE(entry->key))
+	else if (!LTG_ISALLTRUE(DatumGetPointer(entry->key)))
 	{
 		int32		i;
 		ltree_gist *key;
@@ -97,7 +95,7 @@ _ltree_compress(PG_FUNCTION_ARGS)
 		}
 
 		key = ltree_gist_alloc(true, sign, siglen, NULL, NULL);
-		retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		gistentryinit(*retval, PointerGetDatum(key),
 					  entry->rel, entry->page,
 					  entry->offset, false);
@@ -310,7 +308,7 @@ _ltree_picksplit(PG_FUNCTION_ARGS)
 
 	maxoff = OffsetNumberNext(maxoff);
 	/* sort before ... */
-	costvector = (SPLITCOST *) palloc(sizeof(SPLITCOST) * maxoff);
+	costvector = palloc_array(SPLITCOST, maxoff);
 	for (j = FirstOffsetNumber; j <= maxoff; j = OffsetNumberNext(j))
 	{
 		costvector[j - 1].pos = j;
@@ -508,8 +506,9 @@ _ltree_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	void	   *query = PG_DETOAST_DATUM(PG_GETARG_DATUM(1));
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	int			siglen = LTREE_GET_ASIGLEN();
 	ltree_gist *key = (ltree_gist *) DatumGetPointer(entry->key);

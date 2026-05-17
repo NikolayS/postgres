@@ -76,7 +76,6 @@ INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
 SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
 ORDER BY 1;
 
-
 SELECT relname, relkind,
     EXISTS(SELECT 1 FROM pg_class WHERE oid = c.reltoastrelid) AS hastoast
 FROM pg_class c WHERE relname LIKE 'clstr_tst%' ORDER BY relname;
@@ -229,10 +228,28 @@ SELECT relname, old.level, old.relkind, old.relfilenode = new.relfilenode FROM o
 CLUSTER clstrpart;
 ALTER TABLE clstrpart SET WITHOUT CLUSTER;
 ALTER TABLE clstrpart CLUSTER ON clstrpart_idx;
-DROP TABLE clstrpart;
+-- and they cannot get an index-ordered REPACK without an explicit index name
+REPACK clstrpart USING INDEX;
+
+-- Check that REPACK sets new relfilenodes: it should process exactly the same
+-- tables as CLUSTER did.
+DROP TABLE old_cluster_info;
+DROP TABLE new_cluster_info;
+CREATE TEMP TABLE old_cluster_info AS SELECT relname, level, relfilenode, relkind FROM pg_partition_tree('clstrpart'::regclass) AS tree JOIN pg_class c ON c.oid=tree.relid ;
+REPACK clstrpart USING INDEX clstrpart_idx;
+CREATE TEMP TABLE new_cluster_info AS SELECT relname, level, relfilenode, relkind FROM pg_partition_tree('clstrpart'::regclass) AS tree JOIN pg_class c ON c.oid=tree.relid ;
+SELECT relname, old.level, old.relkind, old.relfilenode = new.relfilenode FROM old_cluster_info AS old JOIN new_cluster_info AS new USING (relname) ORDER BY relname COLLATE "C";
+
+-- And finally the same for REPACK w/o index.
+DROP TABLE old_cluster_info;
+DROP TABLE new_cluster_info;
+CREATE TEMP TABLE old_cluster_info AS SELECT relname, level, relfilenode, relkind FROM pg_partition_tree('clstrpart'::regclass) AS tree JOIN pg_class c ON c.oid=tree.relid ;
+REPACK clstrpart;
+CREATE TEMP TABLE new_cluster_info AS SELECT relname, level, relfilenode, relkind FROM pg_partition_tree('clstrpart'::regclass) AS tree JOIN pg_class c ON c.oid=tree.relid ;
+SELECT relname, old.level, old.relkind, old.relfilenode = new.relfilenode FROM old_cluster_info AS old JOIN new_cluster_info AS new USING (relname) ORDER BY relname COLLATE "C";
 
 -- Ownership of partitions is checked
-CREATE TABLE ptnowner(i int unique) PARTITION BY LIST (i);
+CREATE TABLE ptnowner(i int unique not null) PARTITION BY LIST (i);
 CREATE INDEX ptnowner_i_idx ON ptnowner(i);
 CREATE TABLE ptnowner1 PARTITION OF ptnowner FOR VALUES IN (1);
 CREATE ROLE regress_ptnowner;
@@ -248,8 +265,6 @@ CREATE TEMP TABLE ptnowner_oldnodes AS
 SET SESSION AUTHORIZATION regress_ptnowner;
 CLUSTER ptnowner USING ptnowner_i_idx;
 RESET SESSION AUTHORIZATION;
-SELECT a.relname, a.relfilenode=b.relfilenode FROM pg_class a
-  JOIN ptnowner_oldnodes b USING (oid) ORDER BY a.relname COLLATE "C";
 DROP TABLE ptnowner;
 DROP ROLE regress_ptnowner;
 
@@ -313,12 +328,113 @@ EXPLAIN (COSTS OFF) SELECT * FROM clstr_expression WHERE -a = -3 ORDER BY -a, b;
 SELECT * FROM clstr_expression WHERE -a = -3 ORDER BY -a, b;
 COMMIT;
 
+----------------------------------------------------------------------
+--
+-- REPACK
+--
+-- Note we cannot test working REPACK (CONCURRENTLY) here, because the
+-- tests are sometimes run with wal_level=minimal.  Tests for that appear
+-- elsewhere.
+--
+----------------------------------------------------------------------
+
+-- REPACK handles individual tables identically to CLUSTER, but it's worth
+-- checking if it handles table hierarchies identically as well.
+REPACK clstr_tst USING INDEX clstr_tst_c;
+
+-- Verify that inheritance link still works
+INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table 2');
+SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
+
+-- Verify that foreign key link still works
+INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
+
+SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
+ORDER BY 1;
+
+-- Verify partial analyze works
+REPACK (ANALYZE) clstr_tst (a);
+REPACK (ANALYZE) clstr_tst;
+REPACK (VERBOSE) clstr_tst (a);
+
+-- REPACK w/o argument performs no ordering, so we can only check which tables
+-- have the relfilenode changed.
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_old AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+
+SET SESSION AUTHORIZATION regress_clstr_user;
+SET client_min_messages = ERROR;  -- order of "skipping" warnings may vary
+REPACK;
+RESET client_min_messages;
+
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_new AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+
+-- Do the actual comparison. Unlike CLUSTER, clstr_3 should have been
+-- processed because there is nothing like clustering index here.
+SELECT o.relname FROM relnodes_old o
+JOIN relnodes_new n ON o.relname = n.relname
+WHERE o.relfilenode <> n.relfilenode
+ORDER BY o.relname;
+
+--
+-- Check concurrent mode requirements
+--
+
+-- Disallowed in catalogs
+REPACK (CONCURRENTLY) pg_class;
+
+-- Doesn't like partitioned tables
+REPACK (CONCURRENTLY) clstrpart;
+
+-- Doesn't support catalog tables
+REPACK (CONCURRENTLY) pg_class;
+
+-- Only support permanent tables, temp and unlogged tables are not supported
+CREATE TEMP TABLE repack_conc_temp (i int PRIMARY KEY);
+REPACK (CONCURRENTLY) repack_conc_temp;
+DROP TABLE repack_conc_temp;
+CREATE UNLOGGED TABLE repack_conc_unlogged (i int PRIMARY KEY);
+REPACK (CONCURRENTLY) repack_conc_unlogged;
+DROP TABLE repack_conc_unlogged;
+
+-- Doesn't support TOAST tables directly
+CREATE TABLE repack_conc_toast (t text);
+SELECT reltoastrelid::regclass AS toast_rel
+FROM pg_class WHERE oid = 'repack_conc_toast'::regclass \gset
+\set VERBOSITY sqlstate
+REPACK (CONCURRENTLY) :toast_rel;
+\set VERBOSITY default
+DROP TABLE repack_conc_toast;
+
+-- Doesn't support tables with REPLICA IDENTITY NOTHING, even if they have a primary key
+CREATE TABLE repack_conc_replident (i int PRIMARY KEY);
+ALTER TABLE repack_conc_replident REPLICA IDENTITY NOTHING;
+REPACK (CONCURRENTLY) repack_conc_replident;
+
+-- Doesn't support tables without a primary key or replica identity index
+ALTER TABLE repack_conc_replident DROP CONSTRAINT repack_conc_replident_pkey;
+ALTER TABLE repack_conc_replident REPLICA IDENTITY DEFAULT;
+REPACK (CONCURRENTLY) repack_conc_replident;
+
+-- Doesn't support tables with deferrable primary keys
+ALTER TABLE repack_conc_replident ADD PRIMARY KEY (i) DEFERRABLE;
+REPACK (CONCURRENTLY) repack_conc_replident;
+
 -- clean up
+DROP TABLE repack_conc_replident;
 DROP TABLE clustertest;
 DROP TABLE clstr_1;
 DROP TABLE clstr_2;
 DROP TABLE clstr_3;
 DROP TABLE clstr_4;
 DROP TABLE clstr_expression;
+DROP TABLE clstrpart;
 
 DROP USER regress_clstr_user;

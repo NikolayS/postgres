@@ -57,7 +57,7 @@
  * calls in portal and cursor manipulations.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/tcop/dest.h
@@ -136,6 +136,8 @@ extern PGDLLIMPORT DestReceiver *None_Receiver; /* permanent receiver for
 
 extern void BeginCommand(CommandTag commandTag, CommandDest dest);
 extern DestReceiver *CreateDestReceiver(CommandDest dest);
+extern void EndCommandExtended(const QueryCompletion *qc, CommandDest dest,
+							   bool force_undecorated_output, bool noblock);
 extern void EndCommand(const QueryCompletion *qc, CommandDest dest,
 					   bool force_undecorated_output);
 extern void EndReplicationCommand(const char *commandTag);

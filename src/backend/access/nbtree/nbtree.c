@@ -8,7 +8,7 @@
  *	  This file contains only the public interface routines.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -30,11 +30,13 @@
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
+#include "storage/lwlock.h"
 #include "storage/read_stream.h"
 #include "utils/datum.h"
 #include "utils/fmgrprotos.h"
 #include "utils/index_selfuncs.h"
 #include "utils/memutils.h"
+#include "utils/wait_event.h"
 
 
 /*
@@ -93,6 +95,7 @@ typedef struct BTParallelScanDescData
 typedef struct BTParallelScanDescData *BTParallelScanDesc;
 
 
+static bool _bt_start_prim_scan(IndexScanDesc scan);
 static void _bt_parallel_serialize_arrays(Relation rel, BTParallelScanDesc btscan,
 										  BTScanOpaque so);
 static void _bt_parallel_restore_arrays(Relation rel, BTParallelScanDesc btscan,
@@ -114,62 +117,63 @@ static BTVacuumPosting btreevacuumposting(BTVacState *vstate,
 Datum
 bthandler(PG_FUNCTION_ARGS)
 {
-	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = BTMaxStrategyNumber,
+		.amsupport = BTNProcs,
+		.amoptsprocnum = BTOPTIONS_PROC,
+		.amcanorder = true,
+		.amcanorderbyop = false,
+		.amcanhash = false,
+		.amconsistentequality = true,
+		.amconsistentordering = true,
+		.amcanbackward = true,
+		.amcanunique = true,
+		.amcanmulticol = true,
+		.amoptionalkey = true,
+		.amsearcharray = true,
+		.amsearchnulls = true,
+		.amstorage = false,
+		.amclusterable = true,
+		.ampredlocks = true,
+		.amcanparallel = true,
+		.amcanbuildparallel = true,
+		.amcaninclude = true,
+		.amusemaintenanceworkmem = false,
+		.amsummarizing = false,
+		.amparallelvacuumoptions =
+		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP,
+		.amkeytype = InvalidOid,
 
-	amroutine->amstrategies = BTMaxStrategyNumber;
-	amroutine->amsupport = BTNProcs;
-	amroutine->amoptsprocnum = BTOPTIONS_PROC;
-	amroutine->amcanorder = true;
-	amroutine->amcanorderbyop = false;
-	amroutine->amcanhash = false;
-	amroutine->amconsistentequality = true;
-	amroutine->amconsistentordering = true;
-	amroutine->amcanbackward = true;
-	amroutine->amcanunique = true;
-	amroutine->amcanmulticol = true;
-	amroutine->amoptionalkey = true;
-	amroutine->amsearcharray = true;
-	amroutine->amsearchnulls = true;
-	amroutine->amstorage = false;
-	amroutine->amclusterable = true;
-	amroutine->ampredlocks = true;
-	amroutine->amcanparallel = true;
-	amroutine->amcanbuildparallel = true;
-	amroutine->amcaninclude = true;
-	amroutine->amusemaintenanceworkmem = false;
-	amroutine->amsummarizing = false;
-	amroutine->amparallelvacuumoptions =
-		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP;
-	amroutine->amkeytype = InvalidOid;
+		.ambuild = btbuild,
+		.ambuildempty = btbuildempty,
+		.aminsert = btinsert,
+		.aminsertcleanup = NULL,
+		.ambulkdelete = btbulkdelete,
+		.amvacuumcleanup = btvacuumcleanup,
+		.amcanreturn = btcanreturn,
+		.amcostestimate = btcostestimate,
+		.amgettreeheight = btgettreeheight,
+		.amoptions = btoptions,
+		.amproperty = btproperty,
+		.ambuildphasename = btbuildphasename,
+		.amvalidate = btvalidate,
+		.amadjustmembers = btadjustmembers,
+		.ambeginscan = btbeginscan,
+		.amrescan = btrescan,
+		.amgettuple = btgettuple,
+		.amgetbitmap = btgetbitmap,
+		.amendscan = btendscan,
+		.ammarkpos = btmarkpos,
+		.amrestrpos = btrestrpos,
+		.amestimateparallelscan = btestimateparallelscan,
+		.aminitparallelscan = btinitparallelscan,
+		.amparallelrescan = btparallelrescan,
+		.amtranslatestrategy = bttranslatestrategy,
+		.amtranslatecmptype = bttranslatecmptype,
+	};
 
-	amroutine->ambuild = btbuild;
-	amroutine->ambuildempty = btbuildempty;
-	amroutine->aminsert = btinsert;
-	amroutine->aminsertcleanup = NULL;
-	amroutine->ambulkdelete = btbulkdelete;
-	amroutine->amvacuumcleanup = btvacuumcleanup;
-	amroutine->amcanreturn = btcanreturn;
-	amroutine->amcostestimate = btcostestimate;
-	amroutine->amgettreeheight = btgettreeheight;
-	amroutine->amoptions = btoptions;
-	amroutine->amproperty = btproperty;
-	amroutine->ambuildphasename = btbuildphasename;
-	amroutine->amvalidate = btvalidate;
-	amroutine->amadjustmembers = btadjustmembers;
-	amroutine->ambeginscan = btbeginscan;
-	amroutine->amrescan = btrescan;
-	amroutine->amgettuple = btgettuple;
-	amroutine->amgetbitmap = btgetbitmap;
-	amroutine->amendscan = btendscan;
-	amroutine->ammarkpos = btmarkpos;
-	amroutine->amrestrpos = btrestrpos;
-	amroutine->amestimateparallelscan = btestimateparallelscan;
-	amroutine->aminitparallelscan = btinitparallelscan;
-	amroutine->amparallelrescan = btparallelrescan;
-	amroutine->amtranslatestrategy = bttranslatestrategy;
-	amroutine->amtranslatecmptype = bttranslatecmptype;
-
-	PG_RETURN_POINTER(amroutine);
+	PG_RETURN_POINTER(&amroutine);
 }
 
 /*
@@ -228,6 +232,8 @@ btgettuple(IndexScanDesc scan, ScanDirection dir)
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	bool		res;
 
+	Assert(scan->heapRelation != NULL);
+
 	/* btree indexes are never lossy */
 	scan->xs_recheck = false;
 
@@ -258,8 +264,7 @@ btgettuple(IndexScanDesc scan, ScanDirection dir)
 				 * just forget any excess entries.
 				 */
 				if (so->killedItems == NULL)
-					so->killedItems = (int *)
-						palloc(MaxTIDsPerBTreePage * sizeof(int));
+					so->killedItems = palloc_array(int, MaxTIDsPerBTreePage);
 				if (so->numKilled < MaxTIDsPerBTreePage)
 					so->killedItems[so->numKilled++] = so->currPos.itemIndex;
 			}
@@ -274,7 +279,7 @@ btgettuple(IndexScanDesc scan, ScanDirection dir)
 		if (res)
 			break;
 		/* ... otherwise see if we need another primitive index scan */
-	} while (so->numArrayKeys && _bt_start_prim_scan(scan, dir));
+	} while (so->numArrayKeys && _bt_start_prim_scan(scan));
 
 	return res;
 }
@@ -288,6 +293,8 @@ btgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	int64		ntids = 0;
 	ItemPointer heapTid;
+
+	Assert(scan->heapRelation == NULL);
 
 	/* Each loop iteration performs another primitive index scan */
 	do
@@ -320,7 +327,7 @@ btgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 			}
 		}
 		/* Now see if we need another primitive index scan */
-	} while (so->numArrayKeys && _bt_start_prim_scan(scan, ForwardScanDirection));
+	} while (so->numArrayKeys && _bt_start_prim_scan(scan));
 
 	return ntids;
 }
@@ -341,7 +348,7 @@ btbeginscan(Relation rel, int nkeys, int norderbys)
 	scan = RelationGetIndexScan(rel, nkeys, norderbys);
 
 	/* allocate private workspace */
-	so = (BTScanOpaque) palloc(sizeof(BTScanOpaqueData));
+	so = palloc_object(BTScanOpaqueData);
 	BTScanPosInvalidate(so->currPos);
 	BTScanPosInvalidate(so->markPos);
 	if (scan->numberOfKeys > 0)
@@ -393,6 +400,26 @@ btrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 		BTScanPosInvalidate(so->currPos);
 	}
 
+	/*
+	 * We prefer to eagerly drop leaf page pins before btgettuple returns.
+	 * This avoids making VACUUM wait to acquire a cleanup lock on the page.
+	 *
+	 * We cannot safely drop leaf page pins during index-only scans due to a
+	 * race condition involving VACUUM setting pages all-visible in the VM.
+	 * It's also unsafe for plain index scans that use a non-MVCC snapshot.
+	 *
+	 * Also opt out of dropping leaf page pins eagerly during bitmap scans.
+	 * Pins cannot be held for more than an instant during bitmap scans either
+	 * way, so we might as well avoid wasting cycles on acquiring page LSNs.
+	 *
+	 * See nbtree/README section on making concurrent TID recycling safe.
+	 *
+	 * Note: so->dropPin should never change across rescans.
+	 */
+	so->dropPin = (!scan->xs_want_itup &&
+				   IsMVCCLikeSnapshot(scan->xs_snapshot) &&
+				   scan->heapRelation != NULL);
+
 	so->markItemIndex = -1;
 	so->needPrimScan = false;
 	so->scanBehind = false;
@@ -405,16 +432,6 @@ btrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	 * not already done in a previous rescan call.  To save on palloc
 	 * overhead, both workspaces are allocated as one palloc block; only this
 	 * function and btendscan know that.
-	 *
-	 * NOTE: this data structure also makes it safe to return data from a
-	 * "name" column, even though btree name_ops uses an underlying storage
-	 * datatype of cstring.  The risk there is that "name" is supposed to be
-	 * padded to NAMEDATALEN, but the actual index tuple is probably shorter.
-	 * However, since we only return data out of tuples sitting in the
-	 * currTuples array, a fetch of NAMEDATALEN bytes can at worst pull some
-	 * data out of the markTuples array --- running off the end of memory for
-	 * a SIGSEGV is not possible.  Yeah, this is ugly as sin, but it beats
-	 * adding special-case treatment for name_ops elsewhere.
 	 */
 	if (scan->xs_want_itup && so->currTuples == NULL)
 	{
@@ -587,8 +604,11 @@ btestimateparallelscan(Relation rel, int nkeys, int norderbys)
 		 * also require a skip array.
 		 *
 		 * Every skip array must have space to store its scan key's sk_flags.
+		 * We also need space for each skip array's unused btps_arrElems slot
+		 * (we need to be able to subscript btps_arrElems using a simple
+		 * so->arrayKeys[]-wise offset for any subsequent SAOP arrays).
 		 */
-		estnbtreeshared = add_size(estnbtreeshared, sizeof(int));
+		estnbtreeshared = add_size(estnbtreeshared, sizeof(int) * 2);
 
 		/* Consider space required to store a datum of opclass input type */
 		attr = TupleDescCompactAttr(rel->rd_att, attnum - 1);
@@ -620,6 +640,75 @@ btestimateparallelscan(Relation rel, int nkeys, int norderbys)
 	}
 
 	return estnbtreeshared;
+}
+
+/*
+ * _bt_start_prim_scan() -- start scheduled primitive index scan?
+ *
+ * Returns true if _bt_checkkeys scheduled another primitive index scan, just
+ * as the last one ended.  Otherwise returns false, indicating that the array
+ * keys are now fully exhausted.
+ *
+ * Only call here during scans with one or more equality type array scan keys,
+ * after _bt_first or _bt_next return false.
+ */
+static bool
+_bt_start_prim_scan(IndexScanDesc scan)
+{
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+
+	Assert(so->numArrayKeys);
+
+	so->scanBehind = so->oppositeDirCheck = false;	/* reset */
+
+	/*
+	 * Array keys are advanced within _bt_checkkeys when the scan reaches the
+	 * leaf level (more precisely, they're advanced when the scan reaches the
+	 * end of each distinct set of array elements).  This process avoids
+	 * repeat access to leaf pages (across multiple primitive index scans) by
+	 * advancing the scan's array keys when it allows the primitive index scan
+	 * to find nearby matching tuples (or when it eliminates ranges of array
+	 * key space that can't possibly be satisfied by any index tuple).
+	 *
+	 * _bt_checkkeys sets a simple flag variable to schedule another primitive
+	 * index scan.  The flag tells us what to do.
+	 *
+	 * We cannot rely on _bt_first always reaching _bt_checkkeys.  There are
+	 * various cases where that won't happen.  For example, if the index is
+	 * completely empty, then _bt_first won't call _bt_readpage/_bt_checkkeys.
+	 * We also don't expect a call to _bt_checkkeys during searches for a
+	 * non-existent value that happens to be lower/higher than any existing
+	 * value in the index.
+	 *
+	 * We don't require special handling for these cases -- we don't need to
+	 * be explicitly instructed to _not_ perform another primitive index scan.
+	 * It's up to code under the control of _bt_first to always set the flag
+	 * when another primitive index scan will be required.
+	 *
+	 * This works correctly, even with the tricky cases listed above, which
+	 * all involve access to leaf pages "near the boundaries of the key space"
+	 * (whether it's from a leftmost/rightmost page, or an imaginary empty
+	 * leaf root page).  If _bt_checkkeys cannot be reached by a primitive
+	 * index scan for one set of array keys, then it also won't be reached for
+	 * any later set ("later" in terms of the direction that we scan the index
+	 * and advance the arrays).  The array keys won't have advanced in these
+	 * cases, but that's the correct behavior (even _bt_advance_array_keys
+	 * won't always advance the arrays at the point they become "exhausted").
+	 */
+	if (so->needPrimScan)
+	{
+		/*
+		 * Flag was set -- must call _bt_first again, which will reset the
+		 * scan's needPrimScan flag
+		 */
+		return true;
+	}
+
+	/* The top-level index scan ran out of tuples in this scan direction */
+	if (scan->parallel_scan != NULL)
+		_bt_parallel_done(scan);
+
+	return false;
 }
 
 /*
@@ -1038,7 +1127,7 @@ btbulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 
 	/* allocate stats if first time through, else re-use existing struct */
 	if (stats == NULL)
-		stats = (IndexBulkDeleteResult *) palloc0(sizeof(IndexBulkDeleteResult));
+		stats = palloc0_object(IndexBulkDeleteResult);
 
 	/* Establish the vacuum cycle ID to use for this scan */
 	/* The ENSURE stuff ensures we clean up shared memory on failure */
@@ -1099,7 +1188,7 @@ btvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 		 * We handle the problem by making num_index_tuples an estimate in
 		 * cleanup-only case.
 		 */
-		stats = (IndexBulkDeleteResult *) palloc0(sizeof(IndexBulkDeleteResult));
+		stats = palloc0_object(IndexBulkDeleteResult);
 		btvacuumscan(info, stats, NULL, NULL, 0);
 		stats->estimated_count = true;
 	}

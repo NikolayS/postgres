@@ -3,7 +3,7 @@
  * pg_rewind.c
  *	  Synchronizes a PostgreSQL data directory to a new timeline
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *-------------------------------------------------------------------------
  */
@@ -32,6 +32,19 @@
 #include "rewind_source.h"
 #include "storage/bufpage.h"
 
+/*
+ * Timeline histories for both clusters, populated by timelines_match().
+ */
+typedef struct TimelineHistoriesData
+{
+	TimeLineHistoryEntry *source,
+			   *target;
+	int			sourceNentries,
+				targetNentries;
+}			TimelineHistoriesData;
+
+typedef TimelineHistoriesData * TimelineHistories;
+
 static void usage(const char *progname);
 
 static void perform_rewind(filemap_t *filemap, rewind_source *source,
@@ -53,6 +66,9 @@ static void findCommonAncestorTimeline(TimeLineHistoryEntry *a_history,
 									   TimeLineHistoryEntry *b_history,
 									   int b_nentries,
 									   XLogRecPtr *recptr, int *tliIndex);
+static inline bool matchingTimelineUUID(TimeLineHistoryEntry *a, TimeLineHistoryEntry *b);
+static bool matchAndFetchTimelines(TimeLineID source_tli, TimeLineID target_tli,
+							TimelineHistories timelineHistories);
 static void ensureCleanShutdown(const char *argv0);
 static void disconnect_atexit(void);
 
@@ -141,12 +157,14 @@ main(int argc, char **argv)
 	int			c;
 	XLogRecPtr	divergerec;
 	int			lastcommontliIndex;
+	TimelineHistoriesData timelineHistories;
 	XLogRecPtr	chkptrec;
 	TimeLineID	chkpttli;
 	XLogRecPtr	chkptredo;
 	TimeLineID	source_tli;
 	TimeLineID	target_tli;
 	XLogRecPtr	target_wal_endrec;
+	XLogSegNo	last_common_segno;
 	size_t		size;
 	char	   *buffer;
 	bool		no_ensure_shutdown = false;
@@ -299,10 +317,12 @@ main(int argc, char **argv)
 
 	atexit(disconnect_atexit);
 
-	/*
-	 * Ok, we have all the options and we're ready to start. First, connect to
-	 * remote server.
-	 */
+	/* Ok, we have all the options and we're ready to start. */
+	if (dry_run)
+		pg_log_info("Executing in dry-run mode.\n"
+					"The target directory will not be modified.");
+
+	/* First, connect to remote server. */
 	if (connstr_source)
 	{
 		conn = PQconnectdb(connstr_source);
@@ -369,12 +389,22 @@ main(int argc, char **argv)
 	 *
 	 * If both clusters are already on the same timeline, there's nothing to
 	 * do.
+	 *
+	 * This also handles the case when two servers independently promoted to the
+	 * same timeline ID: one crashed after writing the history file but before
+	 * its EOR WAL record was distributed, so a second standby promoted
+	 * independently.  The history files produced by those two promotions carry
+	 * different UUIDs.
+	 *
+	 * When the clusters are on different timelines we locate the fork point via
+	 * findCommonAncestorTimeline.
 	 */
-	if (target_tli == source_tli)
+	if (matchAndFetchTimelines(source_tli, target_tli, &timelineHistories))
 	{
 		pg_log_info("source and target cluster are on the same timeline");
+		pfree(timelineHistories.source);
 		rewind_needed = false;
-		target_wal_endrec = 0;
+		target_wal_endrec = InvalidXLogRecPtr;
 	}
 	else
 	{
@@ -386,16 +416,24 @@ main(int argc, char **argv)
 		 * Retrieve timelines for both source and target, and find the point
 		 * where they diverged.
 		 */
-		sourceHistory = getTimelineHistory(source_tli, true, &sourceNentries);
-		targetHistory = getTimelineHistory(target_tli, false, &targetNentries);
+		targetHistory = timelineHistories.target;
+		targetNentries = timelineHistories.targetNentries;
+		sourceHistory = timelineHistories.source;
+		sourceNentries = timelineHistories.sourceNentries;
 
 		findCommonAncestorTimeline(sourceHistory, sourceNentries,
 								   targetHistory, targetNentries,
 								   &divergerec, &lastcommontliIndex);
 
-		pg_log_info("servers diverged at WAL location %X/%X on timeline %u",
+		pg_log_info("servers diverged at WAL location %X/%08X on timeline %u",
 					LSN_FORMAT_ARGS(divergerec),
 					targetHistory[lastcommontliIndex].tli);
+
+		/*
+		 * Convert the divergence LSN to a segment number, that will be used
+		 * to decide how WAL segments should be processed.
+		 */
+		XLByteToSeg(divergerec, last_common_segno, ControlFile_target.xlog_seg_size);
 
 		/*
 		 * Don't need the source history anymore. The target history is still
@@ -461,7 +499,7 @@ main(int argc, char **argv)
 
 	findLastCheckpoint(datadir_target, divergerec, lastcommontliIndex,
 					   &chkptrec, &chkpttli, &chkptredo, restore_command);
-	pg_log_info("rewinding from last common checkpoint at %X/%X on timeline %u",
+	pg_log_info("rewinding from last common checkpoint at %X/%08X on timeline %u",
 				LSN_FORMAT_ARGS(chkptrec), chkpttli);
 
 	/* Initialize the hash table to track the status of each file */
@@ -492,7 +530,7 @@ main(int argc, char **argv)
 	 * We have collected all information we need from both systems. Decide
 	 * what to do with each file.
 	 */
-	filemap = decide_file_actions();
+	filemap = decide_file_actions(last_common_segno);
 	if (showprogress)
 		calculate_totals(filemap);
 
@@ -505,9 +543,9 @@ main(int argc, char **argv)
 	 */
 	if (showprogress)
 	{
-		pg_log_info("need to copy %lu MB (total source directory size is %lu MB)",
-					(unsigned long) (filemap->fetch_size / (1024 * 1024)),
-					(unsigned long) (filemap->total_size / (1024 * 1024)));
+		pg_log_info("need to copy %" PRIu64 " MB (total source directory size is %" PRIu64 " MB)",
+					filemap->fetch_size / (1024 * 1024),
+					filemap->total_size / (1024 * 1024));
 
 		fetch_size = filemap->fetch_size;
 		fetch_done = 0;
@@ -843,9 +881,9 @@ progress_report(bool finished)
 static XLogRecPtr
 MinXLogRecPtr(XLogRecPtr a, XLogRecPtr b)
 {
-	if (XLogRecPtrIsInvalid(a))
+	if (!XLogRecPtrIsValid(a))
 		return b;
-	else if (XLogRecPtrIsInvalid(b))
+	else if (!XLogRecPtrIsValid(b))
 		return a;
 	else
 		return Min(a, b);
@@ -865,7 +903,7 @@ getTimelineHistory(TimeLineID tli, bool is_source, int *nentries)
 	 */
 	if (tli == 1)
 	{
-		history = (TimeLineHistoryEntry *) pg_malloc(sizeof(TimeLineHistoryEntry));
+		history = pg_malloc0_object(TimeLineHistoryEntry);
 		history->tli = tli;
 		history->begin = history->end = InvalidXLogRecPtr;
 		*nentries = 1;
@@ -902,13 +940,71 @@ getTimelineHistory(TimeLineID tli, bool is_source, int *nentries)
 			TimeLineHistoryEntry *entry;
 
 			entry = &history[i];
-			pg_log_debug("%u: %X/%X - %X/%X", entry->tli,
+			pg_log_debug("%u: %X/%08X - %X/%08X", entry->tli,
 						 LSN_FORMAT_ARGS(entry->begin),
 						 LSN_FORMAT_ARGS(entry->end));
 		}
 	}
 
 	return history;
+}
+
+/*
+ * Return true if two per-entry promotion UUIDs are compatible.
+ *
+ * A zero UUID means the history file predates this fix (or the entry is
+ * synthetic).  Zero on either side means "unknown; treat as matching" so
+ * that pg_rewind degrades gracefully when rewinding against an old server.
+ */
+static inline bool
+matchingTimelineUUID(TimeLineHistoryEntry *a, TimeLineHistoryEntry *b)
+{
+	static const pg_uuid_t zero = {{0}};
+
+	if (memcmp(&a->tluuid, &zero, UUID_LEN) == 0 || memcmp(&b->tluuid, &zero, UUID_LEN) == 0)
+		return true;
+	return memcmp(&a->tluuid, &b->tluuid, UUID_LEN) == 0;
+}
+
+/*
+ * Fetch the timeline history for both clusters, store them in tlh, and return
+ * true if the clusters are on the same timeline (no rewind needed).
+ *
+ * tlh is always fully populated on return regardless of the result, so the
+ * caller can pass tlh->source / tlh->target directly to
+ * findCommonAncestorTimeline() when the return value is false.
+ *
+ * TLI 1 always returns true: it is the original timeline and has no promotion
+ * UUID.  For TLI greater than 2, the UUID in entry[Nentries - 2] identifies the
+ * promotion that created the current TLI; a zero UUID (old history file or
+ * synthetic entry) is treated as matching.
+ */
+static bool
+matchAndFetchTimelines(TimeLineID source_tli, TimeLineID target_tli, TimelineHistories tlh)
+{
+	static const pg_uuid_t zero = {{0}};
+	pg_uuid_t  *a,
+			   *b;
+
+	tlh->source = getTimelineHistory(source_tli, true, &tlh->sourceNentries);
+	tlh->target = getTimelineHistory(target_tli, false, &tlh->targetNentries);
+
+	if (source_tli != target_tli)
+		return false;
+
+	/* TLI 1 has no promotion UUID; always treat as the same timeline. */
+	if (tlh->sourceNentries < 2 || tlh->targetNentries < 2)
+		return true;
+
+	a = &tlh->source[tlh->sourceNentries - 2].tluuid;
+	b = &tlh->target[tlh->targetNentries - 2].tluuid;
+
+	if (memcmp(a, &zero, UUID_LEN) == 0)
+		return true;
+	if (memcmp(b, &zero, UUID_LEN) == 0)
+		return true;
+
+	return memcmp(a, b, UUID_LEN) == 0;
 }
 
 /*
@@ -927,17 +1023,30 @@ findCommonAncestorTimeline(TimeLineHistoryEntry *a_history, int a_nentries,
 
 	/*
 	 * Trace the history forward, until we hit the timeline diverge. It may
-	 * still be possible that the source and target nodes used the same
-	 * timeline number in their history but with different start position
-	 * depending on the history files that each node has fetched in previous
-	 * recovery processes. Hence check the start position of the new timeline
-	 * as well and move down by one extra timeline entry if they do not match.
+	 * still be possible that the source and target nodes used the same timeline
+	 * number in their history but with different start position depending on
+	 * the history files that each node has fetched in previous recovery
+	 * processes. Hence check the start position of the new timeline as well and
+	 * move down by one extra timeline entry if they do not match.
+	 *
+	 * We also compare timeline UUIDs when both sides carry one.  Two servers
+	 * that independently promoted to the same timeline ID produce history files
+	 * with the same name (e.g. 00000003.history); in a shared WAL archive the
+	 * second file silently overwrites the first.  pg_rewind fetches each
+	 * server's history file directly from that server, so it sees both UUIDs.
+	 *
+	 * The timeline UUID stored in history entry[i] is the UUID of the promotion
+	 * that created entry[i+1], i.e. the UUID of TLI entry[i+1].tli.  So to
+	 * check whether entry[i] itself represents the same timeline on both sides
+	 * we look at entry[i-1].tluuid (for i > 0).  TLI 1 (i == 0) is always the
+	 * same: it is the original timeline and has no promotion UUID.
 	 */
 	n = Min(a_nentries, b_nentries);
 	for (i = 0; i < n; i++)
 	{
 		if (a_history[i].tli != b_history[i].tli ||
-			a_history[i].begin != b_history[i].begin)
+			a_history[i].begin != b_history[i].begin ||
+			(i > 0 && !matchingTimelineUUID(&a_history[i - 1], &b_history[i - 1])))
 			break;
 	}
 
@@ -981,8 +1090,8 @@ createBackupLabel(XLogRecPtr startpoint, TimeLineID starttli, XLogRecPtr checkpo
 	strftime(strfbuf, sizeof(strfbuf), "%Y-%m-%d %H:%M:%S %Z", tmp);
 
 	len = snprintf(buf, sizeof(buf),
-				   "START WAL LOCATION: %X/%X (file %s)\n"
-				   "CHECKPOINT LOCATION: %X/%X\n"
+				   "START WAL LOCATION: %X/%08X (file %s)\n"
+				   "CHECKPOINT LOCATION: %X/%08X\n"
 				   "BACKUP METHOD: pg_rewind\n"
 				   "BACKUP FROM: standby\n"
 				   "START TIME: %s\n",
@@ -1026,8 +1135,8 @@ digestControlFile(ControlFileData *ControlFile, const char *content,
 				  size_t size)
 {
 	if (size != PG_CONTROL_FILE_SIZE)
-		pg_fatal("unexpected control file size %d, expected %d",
-				 (int) size, PG_CONTROL_FILE_SIZE);
+		pg_fatal("unexpected control file size %zu, expected %d",
+				 size, PG_CONTROL_FILE_SIZE);
 
 	memcpy(ControlFile, content, sizeof(ControlFileData));
 

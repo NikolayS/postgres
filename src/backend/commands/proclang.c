@@ -3,7 +3,7 @@
  * proclang.c
  *	  PostgreSQL LANGUAGE support code.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -13,6 +13,7 @@
  */
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "access/table.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"

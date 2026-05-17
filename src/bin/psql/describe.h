@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * src/bin/psql/describe.h
  */
@@ -114,7 +114,7 @@ extern bool listExtensions(const char *pattern);
 extern bool listExtensionContents(const char *pattern);
 
 /* \dX */
-extern bool listExtendedStats(const char *pattern);
+extern bool listExtendedStats(const char *pattern, bool verbose);
 
 /* \dy */
 extern bool listEventTriggers(const char *pattern, bool verbose);

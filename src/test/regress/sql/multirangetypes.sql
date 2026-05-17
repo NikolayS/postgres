@@ -414,6 +414,28 @@ SELECT nummultirange(numrange(1,3), numrange(4,5)) - nummultirange(numrange(2,9)
 SELECT nummultirange(numrange(1,2), numrange(4,5)) - nummultirange(numrange(8,9));
 SELECT nummultirange(numrange(1,2), numrange(4,5)) - nummultirange(numrange(-2,0), numrange(8,9));
 
+-- multirange_minus_multi
+SELECT multirange_minus_multi(nummultirange(), nummultirange());
+SELECT multirange_minus_multi(nummultirange(), nummultirange(numrange(1,2)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2)), nummultirange());
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(3,4)), nummultirange());
+SELECT multirange_minus_multi(nummultirange(numrange(1,2)), nummultirange(numrange(1,2)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2)), nummultirange(numrange(2,4)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2)), nummultirange(numrange(3,4)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,4)), nummultirange(numrange(1,2)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,4)), nummultirange(numrange(2,3)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,4)), nummultirange(numrange(0,8)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,4)), nummultirange(numrange(0,2)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,8)), nummultirange(numrange(0,2), numrange(3,4)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,8)), nummultirange(numrange(2,3), numrange(5,null)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(-2,0)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(2,4)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(3,5)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(0,9)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,3), numrange(4,5)), nummultirange(numrange(2,9)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(8,9)));
+SELECT multirange_minus_multi(nummultirange(numrange(1,2), numrange(4,5)), nummultirange(numrange(-2,0), numrange(8,9)));
+
 -- intersection
 SELECT nummultirange() * nummultirange();
 SELECT nummultirange() * nummultirange(numrange(1,2));
@@ -814,6 +836,9 @@ create type two_ints_range as range (subtype = two_ints);
 select *, row_to_json(upper(t)) as u from
   (values (two_ints_multirange(two_ints_range(row(1,2), row(3,4)))),
           (two_ints_multirange(two_ints_range(row(5,6), row(7,8))))) v(t);
+
+-- this must be rejected to avoid self-inclusion issues:
+alter type two_ints add attribute c two_ints_multirange;
 
 drop type two_ints cascade;
 

@@ -3,7 +3,7 @@
  *
  * PostgreSQL write-ahead log manager
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/xlog.h
@@ -13,6 +13,7 @@
 
 #include "access/xlogbackup.h"
 #include "access/xlogdefs.h"
+#include "replication/logicalctl.h"
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
@@ -56,6 +57,7 @@ extern PGDLLIMPORT int CommitDelay;
 extern PGDLLIMPORT int CommitSiblings;
 extern PGDLLIMPORT bool track_wal_io_timing;
 extern PGDLLIMPORT int wal_decode_buffer_size;
+extern PGDLLIMPORT int data_checksums;
 
 extern PGDLLIMPORT int CheckPointSegments;
 
@@ -94,6 +96,7 @@ typedef enum RecoveryState
 } RecoveryState;
 
 extern PGDLLIMPORT int wal_level;
+extern PGDLLIMPORT bool XLogLogicalInfo;
 
 /* Is WAL archiving enabled (always or only while server is running normally)? */
 #define XLogArchivingActive() \
@@ -117,13 +120,22 @@ extern PGDLLIMPORT int wal_level;
  * of the bits make it to disk, but the checksum wouldn't match.  Also WAL-log
  * them if forced by wal_log_hints=on.
  */
-#define XLogHintBitIsNeeded() (DataChecksumsEnabled() || wal_log_hints)
+#define XLogHintBitIsNeeded() (wal_log_hints || DataChecksumsNeedWrite())
 
 /* Do we need to WAL-log information required only for Hot Standby and logical replication? */
 #define XLogStandbyInfoActive() (wal_level >= WAL_LEVEL_REPLICA)
 
-/* Do we need to WAL-log information required only for logical replication? */
-#define XLogLogicalInfoActive() (wal_level >= WAL_LEVEL_LOGICAL)
+/*
+ * Do we need to WAL-log information required only for logical replication?
+ *
+ * When XLogLogicalInfoActive() returns true, it enables logical-decoding-related
+ * WAL logging as if wal_level were set to 'logical', even if it's actually set
+ * to 'replica'. Note that XLogLogicalInfo is a process-local cache and can
+ * change until an XID is assigned to the transaction. In other words, it
+ * ensures that the same result is returned within an XID-assigned transaction.
+ */
+#define XLogLogicalInfoActive() \
+	 (wal_level >= WAL_LEVEL_LOGICAL || XLogLogicalInfo)
 
 #ifdef WAL_DEBUG
 extern PGDLLIMPORT bool XLOG_DEBUG;
@@ -139,10 +151,9 @@ extern PGDLLIMPORT bool XLOG_DEBUG;
 #define CHECKPOINT_IS_SHUTDOWN	0x0001	/* Checkpoint is for shutdown */
 #define CHECKPOINT_END_OF_RECOVERY	0x0002	/* Like shutdown checkpoint, but
 											 * issued at end of WAL recovery */
-#define CHECKPOINT_IMMEDIATE	0x0004	/* Do it without delays */
+#define CHECKPOINT_FAST			0x0004	/* Do it without delays */
 #define CHECKPOINT_FORCE		0x0008	/* Force even if no activity */
-#define CHECKPOINT_FLUSH_ALL	0x0010	/* Flush all pages, including those
-										 * belonging to unlogged tables */
+#define CHECKPOINT_FLUSH_UNLOGGED	0x0010	/* Flush unlogged tables */
 /* These are important to RequestCheckpoint */
 #define CHECKPOINT_WAIT			0x0020	/* Wait for completion */
 #define CHECKPOINT_REQUESTED	0x0040	/* Checkpoint request has been made */
@@ -203,6 +214,7 @@ extern XLogRecPtr XLogInsertRecord(struct XLogRecData *rdata,
 								   XLogRecPtr fpw_lsn,
 								   uint8 flags,
 								   int num_fpi,
+								   uint64 fpi_bytes,
 								   bool topxid_included);
 extern void XLogFlush(XLogRecPtr record);
 extern bool XLogBackgroundFlush(void);
@@ -215,10 +227,14 @@ extern XLogSegNo XLogGetLastRemovedSegno(void);
 extern XLogSegNo XLogGetOldestSegno(TimeLineID tli);
 extern void XLogSetAsyncXactLSN(XLogRecPtr asyncXactLSN);
 extern void XLogSetReplicationSlotMinimumLSN(XLogRecPtr lsn);
+extern XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
 
 extern void xlog_redo(struct XLogReaderState *record);
+extern void xlog2_redo(struct XLogReaderState *record);
 extern void xlog_desc(StringInfo buf, struct XLogReaderState *record);
+extern void xlog2_desc(StringInfo buf, struct XLogReaderState *record);
 extern const char *xlog_identify(uint8 info);
+extern const char *xlog2_identify(uint8 info);
 
 extern void issue_xlog_fsync(int fd, XLogSegNo segno, TimeLineID tli);
 
@@ -226,15 +242,25 @@ extern bool RecoveryInProgress(void);
 extern RecoveryState GetRecoveryState(void);
 extern bool XLogInsertAllowed(void);
 extern XLogRecPtr GetXLogInsertRecPtr(void);
+extern XLogRecPtr GetXLogInsertEndRecPtr(void);
 extern XLogRecPtr GetXLogWriteRecPtr(void);
 
 extern uint64 GetSystemIdentifier(void);
 extern char *GetMockAuthenticationNonce(void);
-extern bool DataChecksumsEnabled(void);
+extern bool DataChecksumsNeedWrite(void);
+extern bool DataChecksumsNeedVerify(void);
+extern bool DataChecksumsOn(void);
+extern bool DataChecksumsOff(void);
+extern bool DataChecksumsInProgressOn(void);
+extern void SetDataChecksumsOnInProgress(void);
+extern void SetDataChecksumsOn(void);
+extern void SetDataChecksumsOff(void);
+extern const char *show_data_checksums(void);
+extern const char *get_checksum_state_string(uint32 state);
+extern void InitLocalDataChecksumState(void);
+extern void SetLocalDataChecksumState(uint32 data_checksum_version);
 extern bool GetDefaultCharSignedness(void);
 extern XLogRecPtr GetFakeLSNForUnloggedRel(void);
-extern Size XLOGShmemSize(void);
-extern void XLOGShmemInit(void);
 extern void BootStrapXLOG(uint32 data_checksum_version);
 extern void InitializeWalConsistencyChecking(void);
 extern void LocalProcessControlFile(bool reset);
@@ -246,6 +272,7 @@ extern bool CreateRestartPoint(int flags);
 extern WALAvailability GetWALAvailability(XLogRecPtr targetLSN);
 extern void XLogPutNextOid(Oid nextOid);
 extern XLogRecPtr XLogRestorePoint(const char *rpName);
+extern XLogRecPtr XLogAssignLSN(void);
 extern void UpdateFullPageWrites(void);
 extern void GetFullPageWriteInfo(XLogRecPtr *RedoRecPtr_p, bool *doPageWrites_p);
 extern XLogRecPtr GetRedoRecPtr(void);
@@ -256,6 +283,8 @@ extern TimeLineID GetWALInsertionTimeLineIfSet(void);
 extern XLogRecPtr GetLastImportantRecPtr(void);
 
 extern void SetWalWriterSleeping(bool sleeping);
+
+extern void WakeupCheckpointer(void);
 
 extern Size WALReadFromBuffers(char *dstbuf, XLogRecPtr startptr, Size count,
 							   TimeLineID tli);
@@ -269,6 +298,7 @@ extern void SwitchIntoArchiveRecovery(XLogRecPtr EndRecPtr, TimeLineID replayTLI
 extern void ReachedEndOfBackup(XLogRecPtr EndRecPtr, TimeLineID tli);
 extern void SetInstallXLogFileSegmentActive(void);
 extern bool IsInstallXLogFileSegmentActive(void);
+extern void ResetInstallXLogFileSegmentActive(void);
 extern void XLogShutdownWalRcv(void);
 
 /*

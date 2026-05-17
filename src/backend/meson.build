@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_build_deps = [backend_code]
 backend_sources = []
@@ -39,6 +39,12 @@ subdir('po', if_found: libintl)
 
 backend_link_args = []
 backend_link_depends = []
+
+
+# On Windows also make the backend depend on dbghelp, for backtrace support
+if host_system == 'windows' and cc.get_id() == 'msvc'
+  backend_build_deps += cc.find_library('dbghelp')
+endif
 
 
 # On windows when compiling with msvc we need to make postgres export all its
@@ -91,6 +97,25 @@ if cc.get_id() == 'msvc'
   # be restricted to b_pch=true.
   backend_link_with += postgres_lib
 
+elif host_system == 'aix'
+  # The '.' argument leads mkldexport.sh to emit "#! .", which refers to the
+  # main executable, allowing extension libraries to resolve their undefined
+  # symbols to symbols in the postgres binary.
+  postgres_imp = custom_target('postgres.imp',
+    command: [files('port/aix/mkldexport.sh'), '@INPUT@', '.'],
+    input: postgres_lib,
+    output: 'postgres.imp',
+    capture: true,
+    install: true,
+    install_dir: dir_lib_pkg,
+    build_by_default: false,
+  )
+  # -Wl,-bE:exportfile indicates these symbols are exported by postgres binary
+  backend_link_args += '-Wl,-bE:@0@'.format(postgres_imp.full_path())
+  backend_link_depends += postgres_imp
+  install_data(
+	'port/aix/mkldexport.sh',
+	install_dir: dir_pgxs / 'src/backend/port/aix')
 endif
 
 backend_input = []
@@ -141,7 +166,7 @@ postgres = executable('postgres',
 backend_targets += postgres
 
 pg_mod_c_args = cflags_mod
-pg_mod_cpp_args = cxxflags_mod
+pg_mod_cxx_args = cxxflags_mod
 pg_mod_link_args = ldflags_sl + ldflags_mod
 pg_mod_link_depend = []
 
@@ -169,14 +194,14 @@ backend_mod_code = declare_dependency(
   compile_args: pg_mod_c_args,
   include_directories: postgres_inc,
   link_args: pg_mod_link_args,
-  sources: generated_headers + generated_backend_headers,
+  sources: generated_backend_headers_stamp,
   dependencies: backend_mod_deps,
 )
 
 # normal extension modules
 pg_mod_args = default_mod_args + {
   'dependencies': [backend_mod_code],
-  'cpp_args': pg_mod_cpp_args,
+  'cpp_args': pg_mod_cxx_args,
   'link_depends': pg_mod_link_depend,
 }
 
@@ -194,5 +219,6 @@ pg_test_mod_args = pg_mod_args + {
 subdir('jit/llvm')
 subdir('replication/libpqwalreceiver')
 subdir('replication/pgoutput')
+subdir('replication/pgrepack')
 subdir('snowball')
 subdir('utils/mb/conversion_procs')

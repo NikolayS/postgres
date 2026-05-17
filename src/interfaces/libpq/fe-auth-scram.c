@@ -3,7 +3,7 @@
  * fe-auth-scram.c
  *	   The front-end (client) implementation of SCRAM authentication.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -819,7 +819,7 @@ calculate_client_proof(fe_scram_state *state,
 					   strlen(state->server_first_message)) < 0 ||
 		pg_hmac_update(ctx, (uint8 *) ",", 1) < 0 ||
 		pg_hmac_update(ctx,
-					   (uint8 *) client_final_message_without_proof,
+					   (const uint8 *) client_final_message_without_proof,
 					   strlen(client_final_message_without_proof)) < 0 ||
 		pg_hmac_final(ctx, ClientSignature, state->key_length) < 0)
 	{

@@ -21,10 +21,6 @@
  *	void S_UNLOCK(slock_t *lock)
  *		Unlock a previously acquired lock.
  *
- *	bool S_LOCK_FREE(slock_t *lock)
- *		Tests if the lock is free. Returns true if free, false if locked.
- *		This does *not* change the state of the lock.
- *
  *	void SPIN_DELAY(void)
  *		Delay operation to occur inside spinlock wait loop.
  *
@@ -79,7 +75,7 @@
  *	instruction.  Equivalent OS-supplied mutex routines could be used too.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	  src/include/storage/s_lock.h
@@ -119,6 +115,10 @@
  * gcc from thinking it can cache the values of shared-memory fields
  * across the asm code.  Add "cc" if your asm code changes the condition
  * code register, and also list any temp registers the code uses.
+ *
+ * If you need branch target labels within the asm block, include "%="
+ * in the label names to make them distinct across multiple asm blocks
+ * within a source file.
  *----------
  */
 
@@ -130,7 +130,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	slock_t		_res = 1;
@@ -147,11 +147,11 @@ tas(volatile slock_t *lock)
 	 * leave it alone.
 	 */
 	__asm__ __volatile__(
-		"	cmpb	$0,%1	\n"
-		"	jne		1f		\n"
-		"	lock			\n"
-		"	xchgb	%0,%1	\n"
-		"1: \n"
+		"	cmpb	$0,%1		\n"
+		"	jne		TAS%=_out	\n"
+		"	lock				\n"
+		"	xchgb	%0,%1		\n"
+		"TAS%=_out: \n"
 :		"+q"(_res), "+m"(*lock)
 :		/* no inputs */
 :		"memory", "cc");
@@ -160,7 +160,7 @@ tas(volatile slock_t *lock)
 
 #define SPIN_DELAY() spin_delay()
 
-static __inline__ void
+static inline void
 spin_delay(void)
 {
 	/*
@@ -211,7 +211,7 @@ typedef unsigned char slock_t;
  */
 #define TAS_SPIN(lock)    (*(lock) ? 1 : TAS(lock))
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	slock_t		_res = 1;
@@ -227,7 +227,7 @@ tas(volatile slock_t *lock)
 
 #define SPIN_DELAY() spin_delay()
 
-static __inline__ void
+static inline void
 spin_delay(void)
 {
 	/*
@@ -255,7 +255,7 @@ spin_delay(void)
 
 typedef int slock_t;
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	return __sync_lock_test_and_set(lock, 1);
@@ -273,7 +273,7 @@ tas(volatile slock_t *lock)
 
 #define SPIN_DELAY() spin_delay()
 
-static __inline__ void
+static inline void
 spin_delay(void)
 {
 	/*
@@ -298,7 +298,7 @@ typedef unsigned int slock_t;
 
 #define TAS(lock)	   tas(lock)
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	int			_res = 0;
@@ -327,15 +327,15 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	slock_t		_res;
 
 	/*
-	 *	See comment in src/backend/port/tas/sunstudio_sparc.s for why this
-	 *	uses "ldstub", and that file uses "cas".  gcc currently generates
-	 *	sparcv7-targeted binaries, so "cas" use isn't possible.
+	 * "cas" would be better than "ldstub", but it is only present on
+	 * sparcv8plus and later, while some platforms still support sparcv7 or
+	 * sparcv8.  Also, "cas" requires that the system be running in TSO mode.
 	 */
 	__asm__ __volatile__(
 		"	ldstub	[%2], %0	\n"
@@ -412,7 +412,7 @@ typedef unsigned int slock_t;
  * But if the spinlock is in ordinary memory, we can use lwsync instead for
  * better performance.
  */
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	slock_t _t;
@@ -421,17 +421,17 @@ tas(volatile slock_t *lock)
 	__asm__ __volatile__(
 "	lwarx   %0,0,%3,1	\n"
 "	cmpwi   %0,0		\n"
-"	bne     1f			\n"
+"	bne     TAS%=_fail	\n"
 "	addi    %0,%0,1		\n"
 "	stwcx.  %0,0,%3		\n"
-"	beq     2f			\n"
-"1: \n"
+"	beq     TAS%=_ok	\n"
+"TAS%=_fail: \n"
 "	li      %1,1		\n"
-"	b       3f			\n"
-"2: \n"
+"	b       TAS%=_out	\n"
+"TAS%=_ok: \n"
 "	lwsync				\n"
 "	li      %1,0		\n"
-"3: \n"
+"TAS%=_out: \n"
 :	"=&b"(_t), "=r"(_res), "+m"(*lock)
 :	"r"(lock)
 :	"memory", "cc");
@@ -478,7 +478,7 @@ typedef unsigned int slock_t;
 #define MIPS_SET_MIPS2
 #endif
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	volatile slock_t *_l = lock;
@@ -540,7 +540,7 @@ do \
 
 typedef int slock_t;
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	return __sync_lock_test_and_set(lock, 1);
@@ -555,7 +555,7 @@ tas(volatile slock_t *lock)
 
 typedef char slock_t;
 
-static __inline__ int
+static inline int
 tas(volatile slock_t *lock)
 {
 	return __sync_lock_test_and_set(lock, 1);
@@ -594,24 +594,6 @@ tas(volatile slock_t *lock)
 
 #if !defined(HAS_TEST_AND_SET)	/* We didn't trigger above, let's try here */
 
-/* These are in sunstudio_(sparc|x86).s */
-
-#if defined(__SUNPRO_C) && (defined(__i386) || defined(__x86_64__) || defined(__sparc__) || defined(__sparc))
-#define HAS_TEST_AND_SET
-
-#if defined(__i386) || defined(__x86_64__) || defined(__sparcv9) || defined(__sparcv8plus)
-typedef unsigned int slock_t;
-#else
-typedef unsigned char slock_t;
-#endif
-
-extern slock_t pg_atomic_cas(volatile slock_t *lock, slock_t with,
-									  slock_t cmp);
-
-#define TAS(a) (pg_atomic_cas((a), 1, 0) != 0)
-#endif
-
-
 #ifdef _MSC_VER
 typedef LONG slock_t;
 
@@ -620,13 +602,24 @@ typedef LONG slock_t;
 
 #define SPIN_DELAY() spin_delay()
 
-/* If using Visual C++ on Win64, inline assembly is unavailable.
- * Use a _mm_pause intrinsic instead of rep nop.
- */
-#if defined(_WIN64)
+#ifdef _M_ARM64
 static __forceinline void
 spin_delay(void)
 {
+	/*
+	 * Research indicates ISB is better than __yield() on AArch64.  See
+	 * https://postgr.es/m/1c2a29b8-5b1e-44f7-a871-71ec5fefc120%40app.fastmail.com.
+	 */
+	__isb(_ARM64_BARRIER_SY);
+}
+#elif defined(_WIN64)
+static __forceinline void
+spin_delay(void)
+{
+	/*
+	 * If using Visual C++ on Win64, inline assembly is unavailable.
+	 * Use a _mm_pause intrinsic instead of rep nop.
+	 */
 	_mm_pause();
 }
 #else
@@ -639,11 +632,20 @@ spin_delay(void)
 #endif
 
 #include <intrin.h>
-#pragma intrinsic(_ReadWriteBarrier)
 
+#ifdef _M_ARM64
+
+/* _ReadWriteBarrier() is insufficient on non-TSO architectures. */
+#pragma intrinsic(_InterlockedExchange)
+#define S_UNLOCK(lock) _InterlockedExchange(lock, 0)
+
+#else
+
+#pragma intrinsic(_ReadWriteBarrier)
 #define S_UNLOCK(lock)	\
 	do { _ReadWriteBarrier(); (*(lock)) = 0; } while (0)
 
+#endif
 #endif
 
 
@@ -664,10 +666,6 @@ spin_delay(void)
 #define S_LOCK(lock) \
 	(TAS(lock) ? s_lock((lock), __FILE__, __LINE__, __func__) : 0)
 #endif	 /* S_LOCK */
-
-#if !defined(S_LOCK_FREE)
-#define S_LOCK_FREE(lock)	(*(lock) == 0)
-#endif	 /* S_LOCK_FREE */
 
 #if !defined(S_UNLOCK)
 /*

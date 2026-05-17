@@ -1,4 +1,4 @@
-# Copyright (c) 2025, PostgreSQL Global Development Group
+# Copyright (c) 2025-2026, PostgreSQL Global Development Group
 
 validator_sources = files(
   'validator.c',
@@ -77,9 +77,11 @@ tests += {
       't/002_client.pl',
     ],
     'env': {
-      'PYTHON': python.path(),
+      'PYTHON': python.full_path(),
       'with_libcurl': oauth_flow_supported ? 'yes' : 'no',
       'with_python': 'yes',
+      'cert_dir': meson.project_source_root() / 'src/test/ssl/ssl',
     },
+    'deps': [oauth_hook_client],
   },
 }

@@ -4,7 +4,7 @@
  *	  routines for dealing with posting lists.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -84,7 +84,7 @@
 #define MaxBytesPerInteger				7
 
 static inline uint64
-itemptr_to_uint64(const ItemPointer iptr)
+itemptr_to_uint64(const ItemPointerData *iptr)
 {
 	uint64		val;
 
@@ -194,7 +194,7 @@ decode_varbyte(unsigned char **ptr)
  * byte at the end, if any, is zero.
  */
 GinPostingList *
-ginCompressPostingList(const ItemPointer ipd, int nipd, int maxsize,
+ginCompressPostingList(const ItemPointerData *ipd, int nipd, int maxsize,
 					   int *nwritten)
 {
 	uint64		prev;

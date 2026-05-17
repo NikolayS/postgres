@@ -2,7 +2,7 @@
  * bgworker.c
  *		POSTGRES pluggable background workers implementation
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/postmaster/bgworker.c
@@ -13,11 +13,13 @@
 #include "postgres.h"
 
 #include "access/parallel.h"
+#include "commands/repack.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port/atomics.h"
 #include "postmaster/bgworker_internals.h"
+#include "postmaster/datachecksum_state.h"
 #include "postmaster/postmaster.h"
 #include "replication/logicallauncher.h"
 #include "replication/logicalworker.h"
@@ -26,13 +28,16 @@
 #include "storage/lwlock.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/shmem.h"
+#include "storage/subsystems.h"
 #include "tcop/tcopprot.h"
 #include "utils/ascii.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/timeout.h"
+#include "utils/wait_event.h"
 
 /*
  * The postmaster's list of registered background workers, in private memory.
@@ -107,6 +112,14 @@ struct BackgroundWorkerHandle
 
 static BackgroundWorkerArray *BackgroundWorkerData;
 
+static void BackgroundWorkerShmemRequest(void *arg);
+static void BackgroundWorkerShmemInit(void *arg);
+
+const ShmemCallbacks BackgroundWorkerShmemCallbacks = {
+	.request_fn = BackgroundWorkerShmemRequest,
+	.init_fn = BackgroundWorkerShmemInit,
+};
+
 /*
  * List of internal background worker entry points.  We need this for
  * reasons explained in LookupBackgroundWorkerFunction(), below.
@@ -119,19 +132,40 @@ static const struct
 
 {
 	{
-		"ParallelWorkerMain", ParallelWorkerMain
+		.fn_name = "ApplyLauncherMain",
+		.fn_addr = ApplyLauncherMain
 	},
 	{
-		"ApplyLauncherMain", ApplyLauncherMain
+		.fn_name = "ApplyWorkerMain",
+		.fn_addr = ApplyWorkerMain
 	},
 	{
-		"ApplyWorkerMain", ApplyWorkerMain
+		.fn_name = "ParallelApplyWorkerMain",
+		.fn_addr = ParallelApplyWorkerMain
 	},
 	{
-		"ParallelApplyWorkerMain", ParallelApplyWorkerMain
+		.fn_name = "ParallelWorkerMain",
+		.fn_addr = ParallelWorkerMain
 	},
 	{
-		"TablesyncWorkerMain", TablesyncWorkerMain
+		.fn_name = "RepackWorkerMain",
+		.fn_addr = RepackWorkerMain
+	},
+	{
+		.fn_name = "SequenceSyncWorkerMain",
+		.fn_addr = SequenceSyncWorkerMain
+	},
+	{
+		.fn_name = "TableSyncWorkerMain",
+		.fn_addr = TableSyncWorkerMain
+	},
+	{
+		.fn_name = "DataChecksumsWorkerLauncherMain",
+		.fn_addr = DataChecksumsWorkerLauncherMain
+	},
+	{
+		.fn_name = "DataChecksumsWorkerMain",
+		.fn_addr = DataChecksumsWorkerMain
 	}
 };
 
@@ -140,10 +174,10 @@ static bgworker_main_type LookupBackgroundWorkerFunction(const char *libraryname
 
 
 /*
- * Calculate shared memory needed.
+ * Register shared memory needed for background workers.
  */
-Size
-BackgroundWorkerShmemSize(void)
+static void
+BackgroundWorkerShmemRequest(void *arg)
 {
 	Size		size;
 
@@ -151,66 +185,58 @@ BackgroundWorkerShmemSize(void)
 	size = offsetof(BackgroundWorkerArray, slot);
 	size = add_size(size, mul_size(max_worker_processes,
 								   sizeof(BackgroundWorkerSlot)));
-
-	return size;
+	ShmemRequestStruct(.name = "Background Worker Data",
+					   .size = size,
+					   .ptr = (void **) &BackgroundWorkerData,
+		);
 }
 
 /*
- * Initialize shared memory.
+ * Initialize shared memory for background workers.
  */
-void
-BackgroundWorkerShmemInit(void)
+static void
+BackgroundWorkerShmemInit(void *arg)
 {
-	bool		found;
+	dlist_iter	iter;
+	int			slotno = 0;
 
-	BackgroundWorkerData = ShmemInitStruct("Background Worker Data",
-										   BackgroundWorkerShmemSize(),
-										   &found);
-	if (!IsUnderPostmaster)
+	BackgroundWorkerData->total_slots = max_worker_processes;
+	BackgroundWorkerData->parallel_register_count = 0;
+	BackgroundWorkerData->parallel_terminate_count = 0;
+
+	/*
+	 * Copy contents of worker list into shared memory.  Record the shared
+	 * memory slot assigned to each worker.  This ensures a 1-to-1
+	 * correspondence between the postmaster's private list and the array in
+	 * shared memory.
+	 */
+	dlist_foreach(iter, &BackgroundWorkerList)
 	{
-		dlist_iter	iter;
-		int			slotno = 0;
+		BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
+		RegisteredBgWorker *rw;
 
-		BackgroundWorkerData->total_slots = max_worker_processes;
-		BackgroundWorkerData->parallel_register_count = 0;
-		BackgroundWorkerData->parallel_terminate_count = 0;
-
-		/*
-		 * Copy contents of worker list into shared memory.  Record the shared
-		 * memory slot assigned to each worker.  This ensures a 1-to-1
-		 * correspondence between the postmaster's private list and the array
-		 * in shared memory.
-		 */
-		dlist_foreach(iter, &BackgroundWorkerList)
-		{
-			BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
-			RegisteredBgWorker *rw;
-
-			rw = dlist_container(RegisteredBgWorker, rw_lnode, iter.cur);
-			Assert(slotno < max_worker_processes);
-			slot->in_use = true;
-			slot->terminate = false;
-			slot->pid = InvalidPid;
-			slot->generation = 0;
-			rw->rw_shmem_slot = slotno;
-			rw->rw_worker.bgw_notify_pid = 0;	/* might be reinit after crash */
-			memcpy(&slot->worker, &rw->rw_worker, sizeof(BackgroundWorker));
-			++slotno;
-		}
-
-		/*
-		 * Mark any remaining slots as not in use.
-		 */
-		while (slotno < max_worker_processes)
-		{
-			BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
-
-			slot->in_use = false;
-			++slotno;
-		}
+		rw = dlist_container(RegisteredBgWorker, rw_lnode, iter.cur);
+		Assert(slotno < max_worker_processes);
+		slot->in_use = true;
+		slot->terminate = false;
+		slot->pid = InvalidPid;
+		slot->generation = 0;
+		rw->rw_shmem_slot = slotno;
+		rw->rw_worker.bgw_notify_pid = 0;	/* might be reinit after crash */
+		memcpy(&slot->worker, &rw->rw_worker, sizeof(BackgroundWorker));
+		++slotno;
 	}
-	else
-		Assert(found);
+
+	/*
+	 * Mark any remaining slots as not in use.
+	 */
+	while (slotno < max_worker_processes)
+	{
+		BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
+
+		slot->in_use = false;
+		++slotno;
+	}
 }
 
 /*
@@ -613,6 +639,7 @@ ResetBackgroundWorkerCrashTimes(void)
 			 * resetting.
 			 */
 			rw->rw_crashed_at = 0;
+			rw->rw_pid = 0;
 
 			/*
 			 * If there was anyone waiting for it, they're history.
@@ -661,6 +688,17 @@ SanityCheckBackgroundWorker(BackgroundWorker *worker, int elevel)
 		/* XXX other checks? */
 	}
 
+	/* Interruptible workers require a database connection */
+	if ((worker->bgw_flags & BGWORKER_INTERRUPTIBLE) &&
+		!(worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION))
+	{
+		ereport(elevel,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("background worker \"%s\": cannot make background workers interruptible without database access",
+						worker->bgw_name)));
+		return false;
+	}
+
 	if ((worker->bgw_restart_time < 0 &&
 		 worker->bgw_restart_time != BGW_NEVER_RESTART) ||
 		(worker->bgw_restart_time > USECS_PER_DAY / 1000))
@@ -697,20 +735,6 @@ SanityCheckBackgroundWorker(BackgroundWorker *worker, int elevel)
 }
 
 /*
- * Standard SIGTERM handler for background workers
- */
-static void
-bgworker_die(SIGNAL_ARGS)
-{
-	sigprocmask(SIG_SETMASK, &BlockSig, NULL);
-
-	ereport(FATAL,
-			(errcode(ERRCODE_ADMIN_SHUTDOWN),
-			 errmsg("terminating background worker \"%s\" due to administrator command",
-					MyBgworkerEntry->bgw_type)));
-}
-
-/*
  * Main entry point for background worker processes.
  */
 void
@@ -737,7 +761,6 @@ BackgroundWorkerMain(const void *startup_data, size_t startup_data_len)
 	}
 
 	MyBgworkerEntry = worker;
-	MyBackendType = B_BG_WORKER;
 	init_ps_display(worker->bgw_name);
 
 	Assert(GetProcessingMode() == InitProcessing);
@@ -762,19 +785,19 @@ BackgroundWorkerMain(const void *startup_data, size_t startup_data_len)
 	}
 	else
 	{
-		pqsignal(SIGINT, SIG_IGN);
-		pqsignal(SIGUSR1, SIG_IGN);
-		pqsignal(SIGFPE, SIG_IGN);
+		pqsignal(SIGINT, PG_SIG_IGN);
+		pqsignal(SIGUSR1, PG_SIG_IGN);
+		pqsignal(SIGFPE, PG_SIG_IGN);
 	}
-	pqsignal(SIGTERM, bgworker_die);
+	pqsignal(SIGTERM, die);
 	/* SIGQUIT handler was already set up by InitPostmasterChild */
-	pqsignal(SIGHUP, SIG_IGN);
+	pqsignal(SIGHUP, PG_SIG_IGN);
 
 	InitializeTimeouts();		/* establishes SIGALRM handler */
 
-	pqsignal(SIGPIPE, SIG_IGN);
-	pqsignal(SIGUSR2, SIG_IGN);
-	pqsignal(SIGCHLD, SIG_DFL);
+	pqsignal(SIGPIPE, PG_SIG_IGN);
+	pqsignal(SIGUSR2, PG_SIG_IGN);
+	pqsignal(SIGCHLD, PG_SIG_DFL);
 
 	/*
 	 * If an exception is encountered, processing resumes here.
@@ -852,7 +875,7 @@ void
 BackgroundWorkerInitializeConnection(const char *dbname, const char *username, uint32 flags)
 {
 	BackgroundWorker *worker = MyBgworkerEntry;
-	bits32		init_flags = 0; /* never honor session_preload_libraries */
+	uint32		init_flags = 0; /* never honor session_preload_libraries */
 
 	/* ignore datallowconn and ACL_CONNECT? */
 	if (flags & BGWORKER_BYPASS_ALLOWCONN)
@@ -886,7 +909,7 @@ void
 BackgroundWorkerInitializeConnectionByOid(Oid dboid, Oid useroid, uint32 flags)
 {
 	BackgroundWorker *worker = MyBgworkerEntry;
-	bits32		init_flags = 0; /* never honor session_preload_libraries */
+	uint32		init_flags = 0; /* never honor session_preload_libraries */
 
 	/* ignore datallowconn and ACL_CONNECT? */
 	if (flags & BGWORKER_BYPASS_ALLOWCONN)
@@ -1128,7 +1151,7 @@ RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
 	 */
 	if (success && handle)
 	{
-		*handle = palloc(sizeof(BackgroundWorkerHandle));
+		*handle = palloc_object(BackgroundWorkerHandle);
 		(*handle)->slot = slotno;
 		(*handle)->generation = generation;
 	}
@@ -1394,4 +1417,49 @@ GetBackgroundWorkerTypeByPid(pid_t pid)
 		return NULL;
 
 	return result;
+}
+
+/*
+ * Terminate all background workers connected to the given database, if the
+ * workers can be interrupted.
+ */
+void
+TerminateBackgroundWorkersForDatabase(Oid databaseId)
+{
+	bool		signal_postmaster = false;
+
+	elog(DEBUG1, "attempting worker termination for database %u",
+		 databaseId);
+
+	LWLockAcquire(BackgroundWorkerLock, LW_EXCLUSIVE);
+
+	/*
+	 * Iterate through slots, looking for workers connected to the given
+	 * database.
+	 */
+	for (int slotno = 0; slotno < BackgroundWorkerData->total_slots; slotno++)
+	{
+		BackgroundWorkerSlot *slot = &BackgroundWorkerData->slot[slotno];
+
+		if (slot->in_use &&
+			(slot->worker.bgw_flags & BGWORKER_INTERRUPTIBLE))
+		{
+			PGPROC	   *proc = BackendPidGetProc(slot->pid);
+
+			if (proc && proc->databaseId == databaseId)
+			{
+				slot->terminate = true;
+				signal_postmaster = true;
+
+				elog(DEBUG1, "termination requested for worker (PID %d) on database %u",
+					 (int) slot->pid, databaseId);
+			}
+		}
+	}
+
+	LWLockRelease(BackgroundWorkerLock);
+
+	/* Make sure the postmaster notices the change to shared memory. */
+	if (signal_postmaster)
+		SendPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE);
 }

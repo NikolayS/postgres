@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pgc_files = [
   'test1',
@@ -6,6 +6,7 @@ pgc_files = [
   'test3',
   'test4',
   'test5',
+  'test6',
 ]
 
 foreach pgc_file : pgc_files

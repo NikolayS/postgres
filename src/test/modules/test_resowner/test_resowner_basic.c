@@ -3,7 +3,7 @@
  * test_resowner_basic.c
  *		Test basic ResourceOwner functionality
  *
- * Copyright (c) 2022-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2022-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_resowner/test_resowner_basic.c
@@ -35,13 +35,13 @@ static const ResourceOwnerDesc string_desc = {
 static void
 ReleaseString(Datum res)
 {
-	elog(NOTICE, "releasing string: %s", DatumGetPointer(res));
+	elog(NOTICE, "releasing string: %s", DatumGetCString(res));
 }
 
 static char *
 PrintString(Datum res)
 {
-	return psprintf("test string \"%s\"", DatumGetPointer(res));
+	return psprintf("test string \"%s\"", DatumGetCString(res));
 }
 
 /* demonstrates phases and priorities between a parent and child context */

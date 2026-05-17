@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'clog.c',
@@ -24,6 +24,7 @@ backend_sources += files(
   'xlogrecovery.c',
   'xlogstats.c',
   'xlogutils.c',
+  'xlogwait.c',
 )
 
 # used by frontend programs to build a frontend xlogreader

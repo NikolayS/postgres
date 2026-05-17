@@ -3,7 +3,7 @@
  *
  * Functions for reading and writing timeline history files.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/timeline.h
@@ -13,6 +13,7 @@
 
 #include "access/xlogdefs.h"
 #include "nodes/pg_list.h"
+#include "utils/uuid.h"
 
 /*
  * A list of these structs describes the timeline history of the server. Each
@@ -22,9 +23,10 @@
  * pointers of all the entries form a contiguous line from beginning of time
  * to infinity.
  */
-typedef struct
+typedef struct TimeLineHistoryEntry
 {
 	TimeLineID	tli;
+	pg_uuid_t	tluuid;			/* from history file; zero if unknown */
 	XLogRecPtr	begin;			/* inclusive */
 	XLogRecPtr	end;			/* exclusive, InvalidXLogRecPtr means infinity */
 } TimeLineHistoryEntry;
@@ -33,6 +35,7 @@ extern List *readTimeLineHistory(TimeLineID targetTLI);
 extern bool existsTimeLineHistory(TimeLineID probeTLI);
 extern TimeLineID findNewestTimeLine(TimeLineID startTLI);
 extern void writeTimeLineHistory(TimeLineID newTLI, TimeLineID parentTLI,
+								 const pg_uuid_t *newTLUUID,
 								 XLogRecPtr switchpoint, char *reason);
 extern void writeTimeLineHistoryFile(TimeLineID tli, char *content, int size);
 extern void restoreTimeLineHistoryFiles(TimeLineID begin, TimeLineID end);

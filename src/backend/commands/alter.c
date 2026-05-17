@@ -3,7 +3,7 @@
  * alter.c
  *	  Drivers for generic alter commands
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -117,27 +117,21 @@ report_namespace_conflict(Oid classId, const char *name, Oid nspOid)
 	switch (classId)
 	{
 		case ConversionRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("conversion \"%s\" already exists in schema \"%s\"");
 			break;
 		case StatisticExtRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("statistics object \"%s\" already exists in schema \"%s\"");
 			break;
 		case TSParserRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("text search parser \"%s\" already exists in schema \"%s\"");
 			break;
 		case TSDictionaryRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("text search dictionary \"%s\" already exists in schema \"%s\"");
 			break;
 		case TSTemplateRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("text search template \"%s\" already exists in schema \"%s\"");
 			break;
 		case TSConfigRelationId:
-			Assert(OidIsValid(nspOid));
 			msgfmt = gettext_noop("text search configuration \"%s\" already exists in schema \"%s\"");
 			break;
 		default:
@@ -165,8 +159,8 @@ static void
 AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
 {
 	Oid			classId = RelationGetRelid(rel);
-	int			oidCacheId = get_object_catcache_oid(classId);
-	int			nameCacheId = get_object_catcache_name(classId);
+	SysCacheIdentifier oidCacheId = get_object_catcache_oid(classId);
+	SysCacheIdentifier nameCacheId = get_object_catcache_name(classId);
 	AttrNumber	Anum_name = get_object_attnum_name(classId);
 	AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
 	AttrNumber	Anum_owner = get_object_attnum_owner(classId);
@@ -220,7 +214,7 @@ AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
 		Assert(!isnull);
 		ownerId = DatumGetObjectId(datum);
 
-		if (!has_privs_of_role(GetUserId(), DatumGetObjectId(ownerId)))
+		if (!has_privs_of_role(GetUserId(), ownerId))
 			aclcheck_error(ACLCHECK_NOT_OWNER, get_object_type(classId, objectId),
 						   old_name);
 
@@ -396,6 +390,7 @@ ExecRenameStmt(RenameStmt *stmt)
 		case OBJECT_MATVIEW:
 		case OBJECT_INDEX:
 		case OBJECT_FOREIGN_TABLE:
+		case OBJECT_PROPGRAPH:
 			return RenameRelation(stmt);
 
 		case OBJECT_COLUMN:
@@ -549,6 +544,7 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
 		case OBJECT_TABLE:
 		case OBJECT_VIEW:
 		case OBJECT_MATVIEW:
+		case OBJECT_PROPGRAPH:
 			address = AlterTableNamespace(stmt,
 										  oldSchemaAddr ? &oldNspOid : NULL);
 			break;
@@ -692,8 +688,8 @@ static Oid
 AlterObjectNamespace_internal(Relation rel, Oid objid, Oid nspOid)
 {
 	Oid			classId = RelationGetRelid(rel);
-	int			oidCacheId = get_object_catcache_oid(classId);
-	int			nameCacheId = get_object_catcache_name(classId);
+	SysCacheIdentifier oidCacheId = get_object_catcache_oid(classId);
+	SysCacheIdentifier nameCacheId = get_object_catcache_name(classId);
 	AttrNumber	Anum_name = get_object_attnum_name(classId);
 	AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
 	AttrNumber	Anum_owner = get_object_attnum_owner(classId);
@@ -882,6 +878,7 @@ ExecAlterOwnerStmt(AlterOwnerStmt *stmt)
 		case OBJECT_OPCLASS:
 		case OBJECT_OPFAMILY:
 		case OBJECT_PROCEDURE:
+		case OBJECT_PROPGRAPH:
 		case OBJECT_ROUTINE:
 		case OBJECT_STATISTIC_EXT:
 		case OBJECT_TABLESPACE:
@@ -890,11 +887,26 @@ ExecAlterOwnerStmt(AlterOwnerStmt *stmt)
 			{
 				ObjectAddress address;
 
-				address = get_object_address(stmt->objectType,
-											 stmt->object,
-											 NULL,
-											 AccessExclusiveLock,
-											 false);
+				if (stmt->relation)
+				{
+					Relation	relation;
+
+					address = get_object_address_rv(stmt->objectType,
+													stmt->relation,
+													NIL,
+													&relation,
+													AccessExclusiveLock,
+													false);
+					relation_close(relation, NoLock);
+				}
+				else
+				{
+					address = get_object_address(stmt->objectType,
+												 stmt->object,
+												 NULL,
+												 AccessExclusiveLock,
+												 false);
+				}
 
 				AlterObjectOwner_internal(address.classId, address.objectId,
 										  newowner);

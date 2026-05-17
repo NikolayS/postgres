@@ -1,7 +1,7 @@
 /*
  * AM-callable functions for BRIN indexes
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -10,7 +10,8 @@
 #ifndef BRIN_H
 #define BRIN_H
 
-#include "nodes/execnodes.h"
+#include "storage/block.h"
+#include "storage/dsm.h"
 #include "storage/shm_toc.h"
 #include "utils/relcache.h"
 

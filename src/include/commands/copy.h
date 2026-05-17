@@ -4,7 +4,7 @@
  *	  Definitions for using the POSTGRES copy command.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/copy.h
@@ -20,15 +20,12 @@
 #include "tcop/dest.h"
 
 /*
- * Represents whether a header line should be present, and whether it must
- * match the actual names (which implies "true").
+ * Represents whether a header line must match the actual names
+ * (which implies "true"), and whether it should be present.
  */
-typedef enum CopyHeaderChoice
-{
-	COPY_HEADER_FALSE = 0,
-	COPY_HEADER_TRUE,
-	COPY_HEADER_MATCH,
-} CopyHeaderChoice;
+#define COPY_HEADER_MATCH	-1
+#define COPY_HEADER_FALSE	0
+#define COPY_HEADER_TRUE	1
 
 /*
  * Represents where to save input processing errors.  More values to be added
@@ -38,6 +35,7 @@ typedef enum CopyOnErrorChoice
 {
 	COPY_ON_ERROR_STOP = 0,		/* immediately throw errors, default */
 	COPY_ON_ERROR_IGNORE,		/* ignore errors */
+	COPY_ON_ERROR_SET_NULL,		/* set error field to null */
 } CopyOnErrorChoice;
 
 /*
@@ -52,6 +50,17 @@ typedef enum CopyLogVerbosityChoice
 } CopyLogVerbosityChoice;
 
 /*
+ * Represents the format of the COPY operation.
+ */
+typedef enum CopyFormat
+{
+	COPY_FORMAT_TEXT = 0,
+	COPY_FORMAT_BINARY,
+	COPY_FORMAT_CSV,
+	COPY_FORMAT_JSON,
+} CopyFormat;
+
+/*
  * A struct to hold COPY options, in a parsed form. All of these are related
  * to formatting, except for 'freeze', which doesn't really belong here, but
  * it's expedient to parse it along with all the other options.
@@ -61,10 +70,10 @@ typedef struct CopyFormatOptions
 	/* parameters from the COPY command */
 	int			file_encoding;	/* file or remote side's character encoding,
 								 * -1 if not specified */
-	bool		binary;			/* binary format? */
+	CopyFormat	format;			/* format of the COPY operation */
 	bool		freeze;			/* freeze rows on loading? */
-	bool		csv_mode;		/* Comma Separated Value format? */
-	CopyHeaderChoice header_line;	/* header line? */
+	int			header_line;	/* number of lines to skip or COPY_HEADER_XXX
+								 * value (see the above) */
 	char	   *null_print;		/* NULL marker string (server encoding!) */
 	int			null_print_len; /* length of same */
 	char	   *null_print_client;	/* same converted to file encoding */
@@ -79,6 +88,7 @@ typedef struct CopyFormatOptions
 	List	   *force_notnull;	/* list of column names */
 	bool		force_notnull_all;	/* FORCE_NOT_NULL *? */
 	bool	   *force_notnull_flags;	/* per-column CSV FNN flags */
+	bool		force_array;	/* add JSON array decorations */
 	List	   *force_null;		/* list of column names */
 	bool		force_null_all; /* FORCE_NULL *? */
 	bool	   *force_null_flags;	/* per-column CSV FN flags */

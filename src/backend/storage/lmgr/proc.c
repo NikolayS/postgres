@@ -3,7 +3,7 @@
  * proc.c
  *	  routines to manage per-process shared memory data structure
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -33,9 +33,11 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+#include "access/clog.h"
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xlogutils.h"
+#include "access/xlogwait.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
@@ -50,8 +52,11 @@
 #include "storage/procsignal.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
+#include "storage/subsystems.h"
+#include "utils/injection_point.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
+#include "utils/wait_event.h"
 
 /* GUC variables */
 int			DeadlockTimeout = 1000;
@@ -60,26 +65,29 @@ int			LockTimeout = 0;
 int			IdleInTransactionSessionTimeout = 0;
 int			TransactionTimeout = 0;
 int			IdleSessionTimeout = 0;
-bool		log_lock_waits = false;
+bool		log_lock_waits = true;
 
 /* Pointer to this process's PGPROC struct, if any */
 PGPROC	   *MyProc = NULL;
 
-/*
- * This spinlock protects the freelist of recycled PGPROC structures.
- * We cannot use an LWLock because the LWLock manager depends on already
- * having a PGPROC and a wait semaphore!  But these structures are touched
- * relatively infrequently (only at backend startup or shutdown) and not for
- * very long, so a spinlock is okay.
- */
-NON_EXEC_STATIC slock_t *ProcStructLock = NULL;
-
 /* Pointers to shared-memory structures */
 PROC_HDR   *ProcGlobal = NULL;
+static void *AllProcsShmemPtr;
+static void *FastPathLockArrayShmemPtr;
 NON_EXEC_STATIC PGPROC *AuxiliaryProcs = NULL;
 PGPROC	   *PreparedXactProcs = NULL;
 
-static DeadLockState deadlock_state = DS_NOT_YET_CHECKED;
+static void ProcGlobalShmemRequest(void *arg);
+static void ProcGlobalShmemInit(void *arg);
+
+const ShmemCallbacks ProcGlobalShmemCallbacks = {
+	.request_fn = ProcGlobalShmemRequest,
+	.init_fn = ProcGlobalShmemInit,
+};
+
+static uint32 TotalProcs;
+static size_t ProcGlobalAllProcsShmemSize;
+static size_t FastPathLockArrayShmemSize;
 
 /* Is a deadlock check pending? */
 static volatile sig_atomic_t got_deadlock_timeout;
@@ -87,36 +95,16 @@ static volatile sig_atomic_t got_deadlock_timeout;
 static void RemoveProcFromArray(int code, Datum arg);
 static void ProcKill(int code, Datum arg);
 static void AuxiliaryProcKill(int code, Datum arg);
-static void CheckDeadLock(void);
+static DeadLockState CheckDeadLock(void);
 
 
 /*
- * Report shared-memory space needed by PGPROC.
+ * Calculate shared-memory space needed by Fast-Path locks.
  */
 static Size
-PGProcShmemSize(void)
+CalculateFastPathLockShmemSize(void)
 {
 	Size		size = 0;
-	Size		TotalProcs =
-		add_size(MaxBackends, add_size(NUM_AUXILIARY_PROCS, max_prepared_xacts));
-
-	size = add_size(size, mul_size(TotalProcs, sizeof(PGPROC)));
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->xids)));
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->subxidStates)));
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->statusFlags)));
-
-	return size;
-}
-
-/*
- * Report shared-memory space needed by Fast-Path locks.
- */
-static Size
-FastPathLockShmemSize(void)
-{
-	Size		size = 0;
-	Size		TotalProcs =
-		add_size(MaxBackends, add_size(NUM_AUXILIARY_PROCS, max_prepared_xacts));
 	Size		fpLockBitsSize,
 				fpRelIdSize;
 
@@ -129,29 +117,14 @@ FastPathLockShmemSize(void)
 
 	size = add_size(size, mul_size(TotalProcs, (fpLockBitsSize + fpRelIdSize)));
 
-	return size;
-}
-
-/*
- * Report shared-memory space needed by InitProcGlobal.
- */
-Size
-ProcGlobalShmemSize(void)
-{
-	Size		size = 0;
-
-	/* ProcGlobal */
-	size = add_size(size, sizeof(PROC_HDR));
-	size = add_size(size, sizeof(slock_t));
-
-	size = add_size(size, PGProcShmemSize());
-	size = add_size(size, FastPathLockShmemSize());
+	Assert(TotalProcs > 0);
+	Assert(size > 0);
 
 	return size;
 }
 
 /*
- * Report number of semaphores needed by InitProcGlobal.
+ * Report number of semaphores needed by ProcGlobalShmemInit.
  */
 int
 ProcGlobalSemas(void)
@@ -164,7 +137,67 @@ ProcGlobalSemas(void)
 }
 
 /*
- * InitProcGlobal -
+ * ProcGlobalShmemRequest
+ *	  Register shared memory needs.
+ *
+ * This is called during postmaster or standalone backend startup, and also
+ * during backend startup in EXEC_BACKEND mode.
+ */
+static void
+ProcGlobalShmemRequest(void *arg)
+{
+	Size		size;
+
+	/*
+	 * Reserve all the PGPROC structures we'll need.  There are six separate
+	 * consumers: (1) normal backends, (2) autovacuum workers and special
+	 * workers, (3) background workers, (4) walsenders, (5) auxiliary
+	 * processes, and (6) prepared transactions.  (For largely-historical
+	 * reasons, we combine autovacuum and special workers into one category
+	 * with a single freelist.)  Each PGPROC structure is dedicated to exactly
+	 * one of these purposes, and they do not move between groups.
+	 */
+	TotalProcs =
+		add_size(MaxBackends, add_size(NUM_AUXILIARY_PROCS, max_prepared_xacts));
+
+	size = 0;
+	size = add_size(size, mul_size(TotalProcs, sizeof(PGPROC)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->xids)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->subxidStates)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->statusFlags)));
+	ProcGlobalAllProcsShmemSize = size;
+	ShmemRequestStruct(.name = "PGPROC structures",
+					   .size = ProcGlobalAllProcsShmemSize,
+					   .ptr = &AllProcsShmemPtr,
+		);
+
+	if (!IsUnderPostmaster)
+		size = FastPathLockArrayShmemSize = CalculateFastPathLockShmemSize();
+	else
+		size = SHMEM_ATTACH_UNKNOWN_SIZE;
+	ShmemRequestStruct(.name = "Fast-Path Lock Array",
+					   .size = size,
+					   .ptr = &FastPathLockArrayShmemPtr,
+		);
+
+	/*
+	 * ProcGlobal is registered here in .ptr as usual, but it needs to be
+	 * propagated specially in EXEC_BACKEND mode, because ProcGlobal needs to
+	 * be accessed early at backend startup, before ShmemAttachRequested() has
+	 * been called.
+	 */
+	ShmemRequestStruct(.name = "Proc Header",
+					   .size = sizeof(PROC_HDR),
+					   .ptr = (void **) &ProcGlobal,
+		);
+
+	/* Let the semaphore implementation register its shared memory needs */
+	PGSemaphoreShmemRequest(ProcGlobalSemas());
+}
+
+
+/*
+ * ProcGlobalShmemInit -
  *	  Initialize the global process table during postmaster or standalone
  *	  backend startup.
  *
@@ -183,37 +216,25 @@ ProcGlobalSemas(void)
  *	  Another reason for creating semaphores here is that the semaphore
  *	  implementation typically requires us to create semaphores in the
  *	  postmaster, not in backends.
- *
- * Note: this is NOT called by individual backends under a postmaster,
- * not even in the EXEC_BACKEND case.  The ProcGlobal and AuxiliaryProcs
- * pointers must be propagated specially for EXEC_BACKEND operation.
  */
-void
-InitProcGlobal(void)
+static void
+ProcGlobalShmemInit(void *arg)
 {
+	char	   *ptr;
+	size_t		requestSize;
 	PGPROC	   *procs;
 	int			i,
 				j;
-	bool		found;
-	uint32		TotalProcs = MaxBackends + NUM_AUXILIARY_PROCS + max_prepared_xacts;
 
 	/* Used for setup of per-backend fast-path slots. */
 	char	   *fpPtr,
 			   *fpEndPtr PG_USED_FOR_ASSERTS_ONLY;
 	Size		fpLockBitsSize,
 				fpRelIdSize;
-	Size		requestSize;
-	char	   *ptr;
 
-	/* Create the ProcGlobal shared structure */
-	ProcGlobal = (PROC_HDR *)
-		ShmemInitStruct("Proc Header", sizeof(PROC_HDR), &found);
-	Assert(!found);
-
-	/*
-	 * Initialize the data structures.
-	 */
+	Assert(ProcGlobal);
 	ProcGlobal->spins_per_delay = DEFAULT_SPINS_PER_DELAY;
+	SpinLockInit(&ProcGlobal->freeProcsLock);
 	dlist_init(&ProcGlobal->freeProcs);
 	dlist_init(&ProcGlobal->autovacFreeProcs);
 	dlist_init(&ProcGlobal->bgworkerFreeProcs);
@@ -224,67 +245,54 @@ InitProcGlobal(void)
 	pg_atomic_init_u32(&ProcGlobal->procArrayGroupFirst, INVALID_PROC_NUMBER);
 	pg_atomic_init_u32(&ProcGlobal->clogGroupFirst, INVALID_PROC_NUMBER);
 
-	/*
-	 * Create and initialize all the PGPROC structures we'll need.  There are
-	 * six separate consumers: (1) normal backends, (2) autovacuum workers and
-	 * special workers, (3) background workers, (4) walsenders, (5) auxiliary
-	 * processes, and (6) prepared transactions.  (For largely-historical
-	 * reasons, we combine autovacuum and special workers into one category
-	 * with a single freelist.)  Each PGPROC structure is dedicated to exactly
-	 * one of these purposes, and they do not move between groups.
-	 */
-	requestSize = PGProcShmemSize();
-
-	ptr = ShmemInitStruct("PGPROC structures",
-						  requestSize,
-						  &found);
-
+	ptr = AllProcsShmemPtr;
+	requestSize = ProcGlobalAllProcsShmemSize;
 	MemSet(ptr, 0, requestSize);
 
+	/* Carve out the allProcs array from the shared memory area */
 	procs = (PGPROC *) ptr;
-	ptr = (char *) ptr + TotalProcs * sizeof(PGPROC);
+	ptr = ptr + TotalProcs * sizeof(PGPROC);
 
 	ProcGlobal->allProcs = procs;
 	/* XXX allProcCount isn't really all of them; it excludes prepared xacts */
 	ProcGlobal->allProcCount = MaxBackends + NUM_AUXILIARY_PROCS;
 
 	/*
-	 * Allocate arrays mirroring PGPROC fields in a dense manner. See
+	 * Carve out arrays mirroring PGPROC fields in a dense manner. See
 	 * PROC_HDR.
 	 *
 	 * XXX: It might make sense to increase padding for these arrays, given
 	 * how hotly they are accessed.
 	 */
 	ProcGlobal->xids = (TransactionId *) ptr;
-	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->xids));
+	ptr = ptr + (TotalProcs * sizeof(*ProcGlobal->xids));
 
 	ProcGlobal->subxidStates = (XidCacheStatus *) ptr;
-	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->subxidStates));
+	ptr = ptr + (TotalProcs * sizeof(*ProcGlobal->subxidStates));
 
 	ProcGlobal->statusFlags = (uint8 *) ptr;
-	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->statusFlags));
+	ptr = ptr + (TotalProcs * sizeof(*ProcGlobal->statusFlags));
 
-	/* make sure wer didn't overflow */
+	/* make sure we didn't overflow */
 	Assert((ptr > (char *) procs) && (ptr <= (char *) procs + requestSize));
 
 	/*
-	 * Allocate arrays for fast-path locks. Those are variable-length, so
+	 * Initialize arrays for fast-path locks. Those are variable-length, so
 	 * can't be included in PGPROC directly. We allocate a separate piece of
 	 * shared memory and then divide that between backends.
 	 */
 	fpLockBitsSize = MAXALIGN(FastPathLockGroupsPerBackend * sizeof(uint64));
 	fpRelIdSize = MAXALIGN(FastPathLockSlotsPerBackend() * sizeof(Oid));
 
-	requestSize = FastPathLockShmemSize();
-
-	fpPtr = ShmemInitStruct("Fast-Path Lock Array",
-							requestSize,
-							&found);
-
-	MemSet(fpPtr, 0, requestSize);
+	fpPtr = FastPathLockArrayShmemPtr;
+	requestSize = FastPathLockArrayShmemSize;
+	memset(fpPtr, 0, requestSize);
 
 	/* For asserts checking we did not overflow. */
 	fpEndPtr = fpPtr + requestSize;
+
+	/* Initialize semaphores */
+	PGSemaphoreInit(ProcGlobalSemas());
 
 	for (i = 0; i < TotalProcs; i++)
 	{
@@ -309,7 +317,7 @@ InitProcGlobal(void)
 		 * dummy PGPROCs don't need these though - they're never associated
 		 * with a real process
 		 */
-		if (i < MaxBackends + NUM_AUXILIARY_PROCS)
+		if (i < FIRST_PREPARED_XACT_PROC_NUMBER)
 		{
 			proc->sem = PGSemaphoreCreate();
 			InitSharedLatch(&(proc->procLatch));
@@ -328,25 +336,25 @@ InitProcGlobal(void)
 		if (i < MaxConnections)
 		{
 			/* PGPROC for normal backend, add to freeProcs list */
-			dlist_push_tail(&ProcGlobal->freeProcs, &proc->links);
+			dlist_push_tail(&ProcGlobal->freeProcs, &proc->freeProcsLink);
 			proc->procgloballist = &ProcGlobal->freeProcs;
 		}
 		else if (i < MaxConnections + autovacuum_worker_slots + NUM_SPECIAL_WORKER_PROCS)
 		{
 			/* PGPROC for AV or special worker, add to autovacFreeProcs list */
-			dlist_push_tail(&ProcGlobal->autovacFreeProcs, &proc->links);
+			dlist_push_tail(&ProcGlobal->autovacFreeProcs, &proc->freeProcsLink);
 			proc->procgloballist = &ProcGlobal->autovacFreeProcs;
 		}
 		else if (i < MaxConnections + autovacuum_worker_slots + NUM_SPECIAL_WORKER_PROCS + max_worker_processes)
 		{
 			/* PGPROC for bgworker, add to bgworkerFreeProcs list */
-			dlist_push_tail(&ProcGlobal->bgworkerFreeProcs, &proc->links);
+			dlist_push_tail(&ProcGlobal->bgworkerFreeProcs, &proc->freeProcsLink);
 			proc->procgloballist = &ProcGlobal->bgworkerFreeProcs;
 		}
 		else if (i < MaxBackends)
 		{
 			/* PGPROC for walsender, add to walsenderFreeProcs list */
-			dlist_push_tail(&ProcGlobal->walsenderFreeProcs, &proc->links);
+			dlist_push_tail(&ProcGlobal->walsenderFreeProcs, &proc->freeProcsLink);
 			proc->procgloballist = &ProcGlobal->walsenderFreeProcs;
 		}
 
@@ -374,13 +382,7 @@ InitProcGlobal(void)
 	 * processes and prepared transactions.
 	 */
 	AuxiliaryProcs = &procs[MaxBackends];
-	PreparedXactProcs = &procs[MaxBackends + NUM_AUXILIARY_PROCS];
-
-	/* Create ProcStructLock spinlock, too */
-	ProcStructLock = (slock_t *) ShmemInitStruct("ProcStructLock spinlock",
-												 sizeof(slock_t),
-												 &found);
-	SpinLockInit(ProcStructLock);
+	PreparedXactProcs = &procs[FIRST_PREPARED_XACT_PROC_NUMBER];
 }
 
 /*
@@ -411,7 +413,7 @@ InitProcess(void)
 
 	/*
 	 * Decide which list should supply our PGPROC.  This logic must match the
-	 * way the freelists were constructed in InitProcGlobal().
+	 * way the freelists were constructed in ProcGlobalShmemInit().
 	 */
 	if (AmAutoVacuumWorkerProcess() || AmSpecialWorkerProcess())
 		procgloballist = &ProcGlobal->autovacFreeProcs;
@@ -426,17 +428,17 @@ InitProcess(void)
 	 * Try to get a proc struct from the appropriate free list.  If this
 	 * fails, we must be out of PGPROC structures (not to mention semaphores).
 	 *
-	 * While we are holding the ProcStructLock, also copy the current shared
+	 * While we are holding the spinlock, also copy the current shared
 	 * estimate of spins_per_delay to local storage.
 	 */
-	SpinLockAcquire(ProcStructLock);
+	SpinLockAcquire(&ProcGlobal->freeProcsLock);
 
 	set_spins_per_delay(ProcGlobal->spins_per_delay);
 
 	if (!dlist_is_empty(procgloballist))
 	{
-		MyProc = dlist_container(PGPROC, links, dlist_pop_head_node(procgloballist));
-		SpinLockRelease(ProcStructLock);
+		MyProc = dlist_container(PGPROC, freeProcsLink, dlist_pop_head_node(procgloballist));
+		SpinLockRelease(&ProcGlobal->freeProcsLock);
 	}
 	else
 	{
@@ -446,7 +448,7 @@ InitProcess(void)
 		 * error message.  XXX do we need to give a different failure message
 		 * in the autovacuum case?
 		 */
-		SpinLockRelease(ProcStructLock);
+		SpinLockRelease(&ProcGlobal->freeProcsLock);
 		if (AmWalSenderProcess())
 			ereport(FATAL,
 					(errcode(ERRCODE_TOO_MANY_CONNECTIONS),
@@ -466,9 +468,9 @@ InitProcess(void)
 
 	/*
 	 * Initialize all fields of MyProc, except for those previously
-	 * initialized by InitProcGlobal.
+	 * initialized by ProcGlobalShmemInit.
 	 */
-	dlist_node_init(&MyProc->links);
+	dlist_node_init(&MyProc->freeProcsLink);
 	MyProc->waitStatus = PROC_WAIT_STATUS_OK;
 	MyProc->fpVXIDLock = false;
 	MyProc->fpLocalTransactionId = InvalidLocalTransactionId;
@@ -481,7 +483,7 @@ InitProcess(void)
 	MyProc->databaseId = InvalidOid;
 	MyProc->roleId = InvalidOid;
 	MyProc->tempNamespaceId = InvalidOid;
-	MyProc->isRegularBackend = AmRegularBackendProcess();
+	MyProc->backendType = MyBackendType;
 	MyProc->delayChkptFlags = 0;
 	MyProc->statusFlags = 0;
 	/* NB -- autovac launcher intentionally does not set IS_AUTOVACUUM */
@@ -490,6 +492,7 @@ InitProcess(void)
 	MyProc->lwWaiting = LW_WS_NOT_WAITING;
 	MyProc->lwWaitMode = 0;
 	MyProc->waitLock = NULL;
+	dlist_node_init(&MyProc->waitLink);
 	MyProc->waitProcLock = NULL;
 	pg_atomic_write_u64(&MyProc->waitStart, 0);
 #ifdef USE_ASSERT_CHECKING
@@ -501,10 +504,10 @@ InitProcess(void)
 			Assert(dlist_is_empty(&(MyProc->myProcLocks[i])));
 	}
 #endif
-	MyProc->recoveryConflictPending = false;
+	pg_atomic_write_u32(&MyProc->pendingRecoveryConflicts, 0);
 
 	/* Initialize fields for sync rep */
-	MyProc->waitLSN = 0;
+	MyProc->waitLSN = InvalidXLogRecPtr;
 	MyProc->syncRepState = SYNC_REP_NOT_WAITING;
 	dlist_node_init(&MyProc->syncRepLinks);
 
@@ -598,7 +601,7 @@ InitProcessPhase2(void)
  * This is called by bgwriter and similar processes so that they will have a
  * MyProc value that's real enough to let them wait for LWLocks.  The PGPROC
  * and sema that are assigned are one of the extra ones created during
- * InitProcGlobal.
+ * ProcGlobalShmemInit.
  *
  * Auxiliary processes are presently not expected to wait for real (lockmgr)
  * locks, so we need not set up the deadlock checker.  They are never added
@@ -631,13 +634,13 @@ InitAuxiliaryProcess(void)
 		RegisterPostmasterChildActive();
 
 	/*
-	 * We use the ProcStructLock to protect assignment and releasing of
+	 * We use the freeProcsLock to protect assignment and releasing of
 	 * AuxiliaryProcs entries.
 	 *
-	 * While we are holding the ProcStructLock, also copy the current shared
+	 * While we are holding the spinlock, also copy the current shared
 	 * estimate of spins_per_delay to local storage.
 	 */
-	SpinLockAcquire(ProcStructLock);
+	SpinLockAcquire(&ProcGlobal->freeProcsLock);
 
 	set_spins_per_delay(ProcGlobal->spins_per_delay);
 
@@ -652,7 +655,7 @@ InitAuxiliaryProcess(void)
 	}
 	if (proctype >= NUM_AUXILIARY_PROCS)
 	{
-		SpinLockRelease(ProcStructLock);
+		SpinLockRelease(&ProcGlobal->freeProcsLock);
 		elog(FATAL, "all AuxiliaryProcs are in use");
 	}
 
@@ -660,16 +663,16 @@ InitAuxiliaryProcess(void)
 	/* use volatile pointer to prevent code rearrangement */
 	((volatile PGPROC *) auxproc)->pid = MyProcPid;
 
-	SpinLockRelease(ProcStructLock);
+	SpinLockRelease(&ProcGlobal->freeProcsLock);
 
 	MyProc = auxproc;
 	MyProcNumber = GetNumberFromPGProc(MyProc);
 
 	/*
 	 * Initialize all fields of MyProc, except for those previously
-	 * initialized by InitProcGlobal.
+	 * initialized by ProcGlobalShmemInit.
 	 */
-	dlist_node_init(&MyProc->links);
+	dlist_node_init(&MyProc->freeProcsLink);
 	MyProc->waitStatus = PROC_WAIT_STATUS_OK;
 	MyProc->fpVXIDLock = false;
 	MyProc->fpLocalTransactionId = InvalidLocalTransactionId;
@@ -680,12 +683,13 @@ InitAuxiliaryProcess(void)
 	MyProc->databaseId = InvalidOid;
 	MyProc->roleId = InvalidOid;
 	MyProc->tempNamespaceId = InvalidOid;
-	MyProc->isRegularBackend = false;
+	MyProc->backendType = MyBackendType;
 	MyProc->delayChkptFlags = 0;
 	MyProc->statusFlags = 0;
 	MyProc->lwWaiting = LW_WS_NOT_WAITING;
 	MyProc->lwWaitMode = 0;
 	MyProc->waitLock = NULL;
+	dlist_node_init(&MyProc->waitLink);
 	MyProc->waitProcLock = NULL;
 	pg_atomic_write_u64(&MyProc->waitStart, 0);
 #ifdef USE_ASSERT_CHECKING
@@ -697,6 +701,7 @@ InitAuxiliaryProcess(void)
 			Assert(dlist_is_empty(&(MyProc->myProcLocks[i])));
 	}
 #endif
+	pg_atomic_write_u32(&MyProc->pendingRecoveryConflicts, 0);
 
 	/*
 	 * Acquire ownership of the PGPROC's latch, so that we can use WaitLatch
@@ -786,7 +791,7 @@ HaveNFreeProcs(int n, int *nfree)
 	Assert(n > 0);
 	Assert(nfree);
 
-	SpinLockAcquire(ProcStructLock);
+	SpinLockAcquire(&ProcGlobal->freeProcsLock);
 
 	*nfree = 0;
 	dlist_foreach(iter, &ProcGlobal->freeProcs)
@@ -796,7 +801,7 @@ HaveNFreeProcs(int n, int *nfree)
 			break;
 	}
 
-	SpinLockRelease(ProcStructLock);
+	SpinLockRelease(&ProcGlobal->freeProcsLock);
 
 	return (*nfree == n);
 }
@@ -846,7 +851,7 @@ LockErrorCleanup(void)
 	partitionLock = LockHashPartitionLock(lockAwaited->hashcode);
 	LWLockAcquire(partitionLock, LW_EXCLUSIVE);
 
-	if (!dlist_node_is_detached(&MyProc->links))
+	if (!dlist_node_is_detached(&MyProc->waitLink))
 	{
 		/* We could not have been granted the lock yet */
 		RemoveFromWaitQueue(MyProc, lockAwaited->hashcode);
@@ -947,6 +952,11 @@ ProcKill(int code, Datum arg)
 	 */
 	LWLockReleaseAll();
 
+	/*
+	 * Cleanup waiting for LSN if any.
+	 */
+	WaitLSNCleanup();
+
 	/* Cancel any pending condition variable sleep, too */
 	ConditionVariableCancelSleep();
 
@@ -972,9 +982,9 @@ ProcKill(int code, Datum arg)
 				procgloballist = leader->procgloballist;
 
 				/* Leader exited first; return its PGPROC. */
-				SpinLockAcquire(ProcStructLock);
-				dlist_push_head(procgloballist, &leader->links);
-				SpinLockRelease(ProcStructLock);
+				SpinLockAcquire(&ProcGlobal->freeProcsLock);
+				dlist_push_head(procgloballist, &leader->freeProcsLink);
+				SpinLockRelease(&ProcGlobal->freeProcsLock);
 			}
 		}
 		else if (leader != MyProc)
@@ -1005,7 +1015,7 @@ ProcKill(int code, Datum arg)
 	proc->vxid.lxid = InvalidTransactionId;
 
 	procgloballist = proc->procgloballist;
-	SpinLockAcquire(ProcStructLock);
+	SpinLockAcquire(&ProcGlobal->freeProcsLock);
 
 	/*
 	 * If we're still a member of a locking group, that means we're a leader
@@ -1018,17 +1028,13 @@ ProcKill(int code, Datum arg)
 		Assert(dlist_is_empty(&proc->lockGroupMembers));
 
 		/* Return PGPROC structure (and semaphore) to appropriate freelist */
-		dlist_push_tail(procgloballist, &proc->links);
+		dlist_push_tail(procgloballist, &proc->freeProcsLink);
 	}
 
 	/* Update shared estimate of spins_per_delay */
 	ProcGlobal->spins_per_delay = update_spins_per_delay(ProcGlobal->spins_per_delay);
 
-	SpinLockRelease(ProcStructLock);
-
-	/* wake autovac launcher if needed -- see comments in FreeWorkerInfo */
-	if (AutovacuumLauncherPid != 0)
-		kill(AutovacuumLauncherPid, SIGUSR2);
+	SpinLockRelease(&ProcGlobal->freeProcsLock);
 }
 
 /*
@@ -1068,7 +1074,7 @@ AuxiliaryProcKill(int code, Datum arg)
 	MyProcNumber = INVALID_PROC_NUMBER;
 	DisownLatch(&proc->procLatch);
 
-	SpinLockAcquire(ProcStructLock);
+	SpinLockAcquire(&ProcGlobal->freeProcsLock);
 
 	/* Mark auxiliary proc no longer in use */
 	proc->pid = 0;
@@ -1078,7 +1084,7 @@ AuxiliaryProcKill(int code, Datum arg)
 	/* Update shared estimate of spins_per_delay */
 	ProcGlobal->spins_per_delay = update_spins_per_delay(ProcGlobal->spins_per_delay);
 
-	SpinLockRelease(ProcStructLock);
+	SpinLockRelease(&ProcGlobal->freeProcsLock);
 }
 
 /*
@@ -1211,7 +1217,7 @@ JoinWaitQueue(LOCALLOCK *locallock, LockMethod lockMethodTable, bool dontWait)
 
 		dclist_foreach(iter, waitQueue)
 		{
-			PGPROC	   *proc = dlist_container(PGPROC, links, iter.cur);
+			PGPROC	   *proc = dlist_container(PGPROC, waitLink, iter.cur);
 
 			/*
 			 * If we're part of the same locking group as this waiter, its
@@ -1275,9 +1281,9 @@ JoinWaitQueue(LOCALLOCK *locallock, LockMethod lockMethodTable, bool dontWait)
 	 * Insert self into queue, at the position determined above.
 	 */
 	if (insert_before)
-		dclist_insert_before(waitQueue, &insert_before->links, &MyProc->links);
+		dclist_insert_before(waitQueue, &insert_before->waitLink, &MyProc->waitLink);
 	else
-		dclist_push_tail(waitQueue, &MyProc->links);
+		dclist_push_tail(waitQueue, &MyProc->waitLink);
 
 	lock->waitMask |= LOCKBIT_ON(lockmode);
 
@@ -1315,7 +1321,9 @@ ProcSleep(LOCALLOCK *locallock)
 	TimestampTz standbyWaitStart = 0;
 	bool		allow_autovacuum_cancel = true;
 	bool		logged_recovery_conflict = false;
+	bool		logged_lock_wait = false;
 	ProcWaitStatus myWaitStatus;
+	DeadLockState deadlock_state;
 
 	/* The caller must've armed the on-error cleanup mechanism */
 	Assert(GetAwaitedLock() == locallock);
@@ -1441,7 +1449,7 @@ ProcSleep(LOCALLOCK *locallock)
 					 * because the startup process here has already waited
 					 * longer than deadlock_timeout.
 					 */
-					LogRecoveryConflict(PROCSIG_RECOVERY_CONFLICT_LOCK,
+					LogRecoveryConflict(RECOVERY_CONFLICT_LOCK,
 										standbyWaitStart, now,
 										cnt > 0 ? vxids : NULL, true);
 					logged_recovery_conflict = true;
@@ -1456,7 +1464,7 @@ ProcSleep(LOCALLOCK *locallock)
 			/* check for deadlocks first, as that's probably log-worthy */
 			if (got_deadlock_timeout)
 			{
-				CheckDeadLock();
+				deadlock_state = CheckDeadLock();
 				got_deadlock_timeout = false;
 			}
 			CHECK_FOR_INTERRUPTS();
@@ -1553,105 +1561,134 @@ ProcSleep(LOCALLOCK *locallock)
 		}
 
 		/*
-		 * If awoken after the deadlock check interrupt has run, and
-		 * log_lock_waits is on, then report about the wait.
+		 * If awoken after the deadlock check interrupt has run, increment the
+		 * lock statistics counters and if log_lock_waits is on, then report
+		 * about the wait.
 		 */
-		if (log_lock_waits && deadlock_state != DS_NOT_YET_CHECKED)
+		if (deadlock_state != DS_NOT_YET_CHECKED)
 		{
-			StringInfoData buf,
-						lock_waiters_sbuf,
-						lock_holders_sbuf;
-			const char *modename;
 			long		secs;
 			int			usecs;
 			long		msecs;
-			int			lockHoldersNum = 0;
 
-			initStringInfo(&buf);
-			initStringInfo(&lock_waiters_sbuf);
-			initStringInfo(&lock_holders_sbuf);
-
-			DescribeLockTag(&buf, &locallock->tag.lock);
-			modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid,
-									   lockmode);
+			INJECTION_POINT("deadlock-timeout-fired", NULL);
 			TimestampDifference(get_timeout_start_time(DEADLOCK_TIMEOUT),
 								GetCurrentTimestamp(),
 								&secs, &usecs);
 			msecs = secs * 1000 + usecs / 1000;
 			usecs = usecs % 1000;
 
-			/* Gather a list of all lock holders and waiters */
-			LWLockAcquire(partitionLock, LW_SHARED);
-			GetLockHoldersAndWaiters(locallock, &lock_holders_sbuf,
-									 &lock_waiters_sbuf, &lockHoldersNum);
-			LWLockRelease(partitionLock);
+			/* Increment the lock statistics counters if done waiting. */
+			if (myWaitStatus == PROC_WAIT_STATUS_OK)
+				pgstat_count_lock_waits(locallock->tag.lock.locktag_type, msecs);
 
-			if (deadlock_state == DS_SOFT_DEADLOCK)
-				ereport(LOG,
-						(errmsg("process %d avoided deadlock for %s on %s by rearranging queue order after %ld.%03d ms",
-								MyProcPid, modename, buf.data, msecs, usecs),
-						 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
-											   "Processes holding the lock: %s. Wait queue: %s.",
-											   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
-			else if (deadlock_state == DS_HARD_DEADLOCK)
+			if (log_lock_waits)
 			{
-				/*
-				 * This message is a bit redundant with the error that will be
-				 * reported subsequently, but in some cases the error report
-				 * might not make it to the log (eg, if it's caught by an
-				 * exception handler), and we want to ensure all long-wait
-				 * events get logged.
-				 */
-				ereport(LOG,
-						(errmsg("process %d detected deadlock while waiting for %s on %s after %ld.%03d ms",
-								MyProcPid, modename, buf.data, msecs, usecs),
-						 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
-											   "Processes holding the lock: %s. Wait queue: %s.",
-											   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
-			}
+				StringInfoData buf,
+							lock_waiters_sbuf,
+							lock_holders_sbuf;
+				const char *modename;
+				int			lockHoldersNum = 0;
 
-			if (myWaitStatus == PROC_WAIT_STATUS_WAITING)
-				ereport(LOG,
-						(errmsg("process %d still waiting for %s on %s after %ld.%03d ms",
-								MyProcPid, modename, buf.data, msecs, usecs),
-						 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
-											   "Processes holding the lock: %s. Wait queue: %s.",
-											   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
-			else if (myWaitStatus == PROC_WAIT_STATUS_OK)
-				ereport(LOG,
-						(errmsg("process %d acquired %s on %s after %ld.%03d ms",
-								MyProcPid, modename, buf.data, msecs, usecs)));
-			else
-			{
-				Assert(myWaitStatus == PROC_WAIT_STATUS_ERROR);
+				initStringInfo(&buf);
+				initStringInfo(&lock_waiters_sbuf);
+				initStringInfo(&lock_holders_sbuf);
 
-				/*
-				 * Currently, the deadlock checker always kicks its own
-				 * process, which means that we'll only see
-				 * PROC_WAIT_STATUS_ERROR when deadlock_state ==
-				 * DS_HARD_DEADLOCK, and there's no need to print redundant
-				 * messages.  But for completeness and future-proofing, print
-				 * a message if it looks like someone else kicked us off the
-				 * lock.
-				 */
-				if (deadlock_state != DS_HARD_DEADLOCK)
+				DescribeLockTag(&buf, &locallock->tag.lock);
+				modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid,
+										   lockmode);
+
+				/* Gather a list of all lock holders and waiters */
+				LWLockAcquire(partitionLock, LW_SHARED);
+				GetLockHoldersAndWaiters(locallock, &lock_holders_sbuf,
+										 &lock_waiters_sbuf, &lockHoldersNum);
+				LWLockRelease(partitionLock);
+
+				if (deadlock_state == DS_SOFT_DEADLOCK)
 					ereport(LOG,
-							(errmsg("process %d failed to acquire %s on %s after %ld.%03d ms",
+							(errmsg("process %d avoided deadlock for %s on %s by rearranging queue order after %ld.%03d ms",
 									MyProcPid, modename, buf.data, msecs, usecs),
 							 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
 												   "Processes holding the lock: %s. Wait queue: %s.",
 												   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
+				else if (deadlock_state == DS_HARD_DEADLOCK)
+				{
+					/*
+					 * This message is a bit redundant with the error that
+					 * will be reported subsequently, but in some cases the
+					 * error report might not make it to the log (eg, if it's
+					 * caught by an exception handler), and we want to ensure
+					 * all long-wait events get logged.
+					 */
+					ereport(LOG,
+							(errmsg("process %d detected deadlock while waiting for %s on %s after %ld.%03d ms",
+									MyProcPid, modename, buf.data, msecs, usecs),
+							 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
+												   "Processes holding the lock: %s. Wait queue: %s.",
+												   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
+				}
+
+				if (myWaitStatus == PROC_WAIT_STATUS_WAITING)
+				{
+					/*
+					 * Guard the "still waiting on lock" log message so it is
+					 * reported at most once while waiting for the lock.
+					 *
+					 * Without this guard, the message can be emitted whenever
+					 * the lock-wait sleep is interrupted (for example by
+					 * SIGHUP for config reload or by
+					 * client_connection_check_interval). For example, if
+					 * client_connection_check_interval is set very low (e.g.,
+					 * 100 ms), the message could be logged repeatedly,
+					 * flooding the log and making it difficult to use.
+					 */
+					if (!logged_lock_wait)
+					{
+						ereport(LOG,
+								(errmsg("process %d still waiting for %s on %s after %ld.%03d ms",
+										MyProcPid, modename, buf.data, msecs, usecs),
+								 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
+													   "Processes holding the lock: %s. Wait queue: %s.",
+													   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
+						logged_lock_wait = true;
+					}
+				}
+				else if (myWaitStatus == PROC_WAIT_STATUS_OK)
+					ereport(LOG,
+							(errmsg("process %d acquired %s on %s after %ld.%03d ms",
+									MyProcPid, modename, buf.data, msecs, usecs)));
+				else
+				{
+					Assert(myWaitStatus == PROC_WAIT_STATUS_ERROR);
+
+					/*
+					 * Currently, the deadlock checker always kicks its own
+					 * process, which means that we'll only see
+					 * PROC_WAIT_STATUS_ERROR when deadlock_state ==
+					 * DS_HARD_DEADLOCK, and there's no need to print
+					 * redundant messages.  But for completeness and
+					 * future-proofing, print a message if it looks like
+					 * someone else kicked us off the lock.
+					 */
+					if (deadlock_state != DS_HARD_DEADLOCK)
+						ereport(LOG,
+								(errmsg("process %d failed to acquire %s on %s after %ld.%03d ms",
+										MyProcPid, modename, buf.data, msecs, usecs),
+								 (errdetail_log_plural("Process holding the lock: %s. Wait queue: %s.",
+													   "Processes holding the lock: %s. Wait queue: %s.",
+													   lockHoldersNum, lock_holders_sbuf.data, lock_waiters_sbuf.data))));
+				}
+				pfree(buf.data);
+				pfree(lock_holders_sbuf.data);
+				pfree(lock_waiters_sbuf.data);
 			}
 
 			/*
 			 * At this point we might still need to wait for the lock. Reset
-			 * state so we don't print the above messages again.
+			 * state so we don't print the above messages again if
+			 * log_lock_waits is on.
 			 */
 			deadlock_state = DS_NO_DEADLOCK;
-
-			pfree(buf.data);
-			pfree(lock_holders_sbuf.data);
-			pfree(lock_waiters_sbuf.data);
 		}
 	} while (myWaitStatus == PROC_WAIT_STATUS_WAITING);
 
@@ -1682,7 +1719,7 @@ ProcSleep(LOCALLOCK *locallock)
 	 * startup process waited longer than deadlock_timeout for it.
 	 */
 	if (InHotStandby && logged_recovery_conflict)
-		LogRecoveryConflict(PROCSIG_RECOVERY_CONFLICT_LOCK,
+		LogRecoveryConflict(RECOVERY_CONFLICT_LOCK,
 							standbyWaitStart, GetCurrentTimestamp(),
 							NULL, false);
 
@@ -1698,7 +1735,7 @@ ProcSleep(LOCALLOCK *locallock)
 /*
  * ProcWakeup -- wake up a process by setting its latch.
  *
- *	 Also remove the process from the wait queue and set its links invalid.
+ *	 Also remove the process from the wait queue and set its waitLink invalid.
  *
  * The appropriate lock partition lock must be held by caller.
  *
@@ -1710,19 +1747,19 @@ ProcSleep(LOCALLOCK *locallock)
 void
 ProcWakeup(PGPROC *proc, ProcWaitStatus waitStatus)
 {
-	if (dlist_node_is_detached(&proc->links))
+	if (dlist_node_is_detached(&proc->waitLink))
 		return;
 
 	Assert(proc->waitStatus == PROC_WAIT_STATUS_WAITING);
 
 	/* Remove process from wait queue */
-	dclist_delete_from_thoroughly(&proc->waitLock->waitProcs, &proc->links);
+	dclist_delete_from_thoroughly(&proc->waitLock->waitProcs, &proc->waitLink);
 
 	/* Clean up process' state and pass it the ok/fail signal */
 	proc->waitLock = NULL;
 	proc->waitProcLock = NULL;
 	proc->waitStatus = waitStatus;
-	pg_atomic_write_u64(&MyProc->waitStart, 0);
+	pg_atomic_write_u64(&proc->waitStart, 0);
 
 	/* And awaken it */
 	SetLatch(&proc->procLatch);
@@ -1747,7 +1784,7 @@ ProcLockWakeup(LockMethod lockMethodTable, LOCK *lock)
 
 	dclist_foreach_modify(miter, waitQueue)
 	{
-		PGPROC	   *proc = dlist_container(PGPROC, links, miter.cur);
+		PGPROC	   *proc = dlist_container(PGPROC, waitLink, miter.cur);
 		LOCKMODE	lockmode = proc->waitLockMode;
 
 		/*
@@ -1779,14 +1816,14 @@ ProcLockWakeup(LockMethod lockMethodTable, LOCK *lock)
  *
  * We only get to this routine, if DEADLOCK_TIMEOUT fired while waiting for a
  * lock to be released by some other process.  Check if there's a deadlock; if
- * not, just return.  (But signal ProcSleep to log a message, if
- * log_lock_waits is true.)  If we have a real deadlock, remove ourselves from
- * the lock's wait queue and signal an error to ProcSleep.
+ * not, just return.  If we have a real deadlock, remove ourselves from the
+ * lock's wait queue.
  */
-static void
+static DeadLockState
 CheckDeadLock(void)
 {
 	int			i;
+	DeadLockState result;
 
 	/*
 	 * Acquire exclusive lock on the entire shared lock data structures. Must
@@ -1811,19 +1848,21 @@ CheckDeadLock(void)
 	 * We check by looking to see if we've been unlinked from the wait queue.
 	 * This is safe because we hold the lock partition lock.
 	 */
-	if (MyProc->links.prev == NULL ||
-		MyProc->links.next == NULL)
+	if (dlist_node_is_detached(&MyProc->waitLink))
+	{
+		result = DS_NO_DEADLOCK;
 		goto check_done;
+	}
 
 #ifdef LOCK_DEBUG
 	if (Debug_deadlocks)
 		DumpAllLocks();
 #endif
 
-	/* Run the deadlock check, and set deadlock_state for use by ProcSleep */
-	deadlock_state = DeadLockCheck(MyProc);
+	/* Run the deadlock check */
+	result = DeadLockCheck(MyProc);
 
-	if (deadlock_state == DS_HARD_DEADLOCK)
+	if (result == DS_HARD_DEADLOCK)
 	{
 		/*
 		 * Oops.  We have a deadlock.
@@ -1835,7 +1874,7 @@ CheckDeadLock(void)
 		 *
 		 * RemoveFromWaitQueue sets MyProc->waitStatus to
 		 * PROC_WAIT_STATUS_ERROR, so ProcSleep will report an error after we
-		 * return from the signal handler.
+		 * return.
 		 */
 		Assert(MyProc->waitLock != NULL);
 		RemoveFromWaitQueue(MyProc, LockTagHashCode(&(MyProc->waitLock->tag)));
@@ -1862,6 +1901,8 @@ CheckDeadLock(void)
 check_done:
 	for (i = NUM_LOCK_PARTITIONS; --i >= 0;)
 		LWLockRelease(LockHashPartitionLockByIndex(i));
+
+	return result;
 }
 
 /*
@@ -1988,7 +2029,7 @@ ProcSendSignal(ProcNumber procNumber)
 	if (procNumber < 0 || procNumber >= ProcGlobal->allProcCount)
 		elog(ERROR, "procNumber out of range");
 
-	SetLatch(&ProcGlobal->allProcs[procNumber].procLatch);
+	SetLatch(&GetPGProcByNumber(procNumber)->procLatch);
 }
 
 /*

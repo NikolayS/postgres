@@ -6,7 +6,7 @@
  * As of Postgres 8.0, pg_cast describes not only type coercion functions
  * but also length coercion functions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_cast.h
@@ -29,6 +29,8 @@
  *		typedef struct FormData_pg_cast
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_cast,2605,CastRelationId)
 {
 	Oid			oid;			/* oid */
@@ -48,6 +50,8 @@ CATALOG(pg_cast,2605,CastRelationId)
 	/* cast method */
 	char		castmethod;
 } FormData_pg_cast;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_cast corresponds to a pointer to a tuple with

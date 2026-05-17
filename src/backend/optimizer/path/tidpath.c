@@ -27,7 +27,7 @@
  * "CTID relop pseudoconstant", where relop is one of >,>=,<,<=, and
  * AND-clauses composed of such conditions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -490,9 +490,8 @@ ec_member_matches_ctid(PlannerInfo *root, RelOptInfo *rel,
 
 /*
  * create_tidscan_paths
- *	  Create paths corresponding to direct TID scans of the given rel.
- *
- *	  Candidate paths are added to the rel's pathlist (using add_path).
+ *	  Create paths corresponding to direct TID scans of the given rel and add
+ *	  them to the corresponding path list via add_path or add_partial_path.
  */
 bool
 create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel)
@@ -500,18 +499,19 @@ create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel)
 	List	   *tidquals;
 	List	   *tidrangequals;
 	bool		isCurrentOf;
+	bool		enabled = (rel->pgs_mask & PGS_TIDSCAN) != 0;
 
 	/*
 	 * If any suitable quals exist in the rel's baserestrict list, generate a
 	 * plain (unparameterized) TidPath with them.
 	 *
-	 * We skip this when enable_tidscan = false, except when the qual is
+	 * We skip this when TID scans are disabled, except when the qual is
 	 * CurrentOfExpr. In that case, a TID scan is the only correct path.
 	 */
 	tidquals = TidQualFromRestrictInfoList(root, rel->baserestrictinfo, rel,
 										   &isCurrentOf);
 
-	if (tidquals != NIL && (enable_tidscan || isCurrentOf))
+	if (tidquals != NIL && (enabled || isCurrentOf))
 	{
 		/*
 		 * This path uses no join clauses, but it could still have required
@@ -533,7 +533,7 @@ create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel)
 	}
 
 	/* Skip the rest if TID scans are disabled. */
-	if (!enable_tidscan)
+	if (!enabled)
 		return false;
 
 	/*
@@ -553,7 +553,24 @@ create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel)
 
 		add_path(rel, (Path *) create_tidrangescan_path(root, rel,
 														tidrangequals,
-														required_outer));
+														required_outer,
+														0));
+
+		/* If appropriate, consider parallel tid range scan. */
+		if (rel->consider_parallel && required_outer == NULL)
+		{
+			int			parallel_workers;
+
+			parallel_workers = compute_parallel_worker(rel, rel->pages, -1,
+													   max_parallel_workers_per_gather);
+
+			if (parallel_workers > 0)
+				add_partial_path(rel, (Path *) create_tidrangescan_path(root,
+																		rel,
+																		tidrangequals,
+																		required_outer,
+																		parallel_workers));
+		}
 	}
 
 	/*

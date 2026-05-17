@@ -9,7 +9,7 @@
 #   The main Makefile in this directory defers to this helper file when
 #   building the sslfiles-related targets.
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/test/ssl/sslfiles.mk
@@ -31,6 +31,7 @@ SERVERS := server-cn-and-alt-names \
 	server-ip-in-dnsname \
 	server-single-alt-name \
 	server-multiple-alt-names \
+	server-localhost-alt-names \
 	server-no-names \
 	server-revoked
 CLIENTS := client client-dn client-revoked client_ext client-long \

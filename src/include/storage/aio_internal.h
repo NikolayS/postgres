@@ -5,7 +5,7 @@
  *    internally.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/aio_internal.h
@@ -20,6 +20,8 @@
 #include "port/pg_iovec.h"
 #include "storage/aio.h"
 #include "storage/condition_variable.h"
+#include "storage/ipc.h"
+#include "storage/shmem.h"
 
 
 /*
@@ -92,17 +94,23 @@ typedef enum PgAioHandleState
 
 struct ResourceOwnerData;
 
-/* typedef is in aio_types.h */
+/*
+ * Typedef is in aio_types.h
+ *
+ * We don't use the underlying enums for state, target and op to avoid wasting
+ * space. We tried using bitfields, but several compilers generate rather
+ * horrid code for that.
+ */
 struct PgAioHandle
 {
 	/* all state updates should go through pgaio_io_update_state() */
-	PgAioHandleState state:8;
+	uint8		state;
 
 	/* what are we operating on */
-	PgAioTargetID target:8;
+	uint8		target;
 
 	/* which IO operation */
-	PgAioOp		op:8;
+	uint8		op;
 
 	/* bitfield of PgAioHandleFlags */
 	uint8		flags;
@@ -261,20 +269,8 @@ typedef struct IoMethodOps
 	 */
 	bool		wait_on_fd_before_close;
 
-
 	/* global initialization */
-
-	/*
-	 * Amount of additional shared memory to reserve for the io_method. Called
-	 * just like a normal ipci.c style *Size() function. Optional.
-	 */
-	size_t		(*shmem_size) (void);
-
-	/*
-	 * Initialize shared memory. First time is true if AIO's shared memory was
-	 * just initialized, false otherwise. Optional.
-	 */
-	void		(*shmem_init) (bool first_time);
+	ShmemCallbacks shmem_callbacks;
 
 	/*
 	 * Per-backend initialization. Optional.
@@ -322,6 +318,21 @@ typedef struct IoMethodOps
 	 */
 	void		(*wait_one) (PgAioHandle *ioh,
 							 uint64 ref_generation);
+
+	/* ---
+	 * Check if IO has already completed. Optional.
+	 *
+	 * Some IO methods need to poll a kernel object to see if IO has already
+	 * completed in the background. This callback allows to do so.
+	 *
+	 * This callback may not wait for IO to complete, however it is allowed,
+	 * although not desirable, to wait for short-lived locks. It is ok from a
+	 * correctness perspective to not process any/all available completions,
+	 * it just can lead to inferior performance.
+	 * ---
+	 */
+	void		(*check_one) (PgAioHandle *ioh,
+							  uint64 ref_generation);
 } IoMethodOps;
 
 

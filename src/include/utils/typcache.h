@@ -6,7 +6,7 @@
  * The type cache exists to speed lookup of certain information about data
  * types that is not directly available from a type's pg_type row.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/typcache.h
@@ -183,7 +183,7 @@ extern void InitDomainConstraintRef(Oid type_id, DomainConstraintRef *ref,
 
 extern void UpdateDomainConstraintRef(DomainConstraintRef *ref);
 
-extern bool DomainHasConstraints(Oid type_id);
+extern bool DomainHasConstraints(Oid type_id, bool *has_volatile);
 
 extern TupleDesc lookup_rowtype_tupdesc(Oid type_id, int32 typmod);
 

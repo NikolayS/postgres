@@ -3,7 +3,7 @@
  * tsquery.c
  *	  I/O functions for tsquery
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -120,7 +120,7 @@ get_modifiers(char *buf, int16 *weight, bool *prefix)
 		return buf;
 
 	buf++;
-	while (*buf && pg_mblen(buf) == 1)
+	while (*buf && pg_mblen_cstr(buf) == 1)
 	{
 		switch (*buf)
 		{
@@ -259,12 +259,12 @@ parse_or_operator(TSQueryParserState pstate)
 		return false;
 
 	/* it shouldn't be a part of any word */
-	if (t_iseq(ptr, '-') || t_iseq(ptr, '_') || t_isalnum(ptr))
+	if (t_iseq(ptr, '-') || t_iseq(ptr, '_') || t_isalnum_cstr(ptr))
 		return false;
 
 	for (;;)
 	{
-		ptr += pg_mblen(ptr);
+		ptr += pg_mblen_cstr(ptr);
 
 		if (*ptr == '\0')		/* got end of string without operand */
 			return false;
@@ -390,7 +390,7 @@ gettoken_query_standard(TSQueryParserState state, int8 *operator,
 				break;
 		}
 
-		state->buf += pg_mblen(state->buf);
+		state->buf += pg_mblen_cstr(state->buf);
 	}
 }
 
@@ -502,7 +502,7 @@ gettoken_query_websearch(TSQueryParserState state, int8 *operator,
 				break;
 		}
 
-		state->buf += pg_mblen(state->buf);
+		state->buf += pg_mblen_cstr(state->buf);
 	}
 }
 
@@ -534,7 +534,7 @@ pushOperator(TSQueryParserState state, int8 oper, int16 distance)
 
 	Assert(oper == OP_NOT || oper == OP_AND || oper == OP_OR || oper == OP_PHRASE);
 
-	tmp = (QueryOperator *) palloc0(sizeof(QueryOperator));
+	tmp = palloc0_object(QueryOperator);
 	tmp->type = QI_OPR;
 	tmp->oper = oper;
 	tmp->distance = (oper == OP_PHRASE) ? distance : 0;
@@ -559,7 +559,7 @@ pushValue_internal(TSQueryParserState state, pg_crc32 valcrc, int distance, int 
 				 errmsg("operand is too long in tsquery: \"%s\"",
 						state->buffer)));
 
-	tmp = (QueryOperand *) palloc0(sizeof(QueryOperand));
+	tmp = palloc0_object(QueryOperand);
 	tmp->type = QI_VAL;
 	tmp->weight = weight;
 	tmp->prefix = prefix;
@@ -617,7 +617,7 @@ pushStop(TSQueryParserState state)
 {
 	QueryOperand *tmp;
 
-	tmp = (QueryOperand *) palloc0(sizeof(QueryOperand));
+	tmp = palloc0_object(QueryOperand);
 	tmp->type = QI_VALSTOP;
 
 	state->polstr = lcons(tmp, state->polstr);
@@ -671,7 +671,7 @@ cleanOpStack(TSQueryParserState state,
 static void
 makepol(TSQueryParserState state,
 		PushFunction pushval,
-		Datum opaque)
+		void *opaque)
 {
 	int8		operator = 0;
 	ts_tokentype type;
@@ -816,7 +816,7 @@ findoprnd(QueryItem *ptr, int size, bool *needcleanup)
 TSQuery
 parse_tsquery(char *buf,
 			  PushFunction pushval,
-			  Datum opaque,
+			  void *opaque,
 			  int flags,
 			  Node *escontext)
 {
@@ -939,7 +939,7 @@ parse_tsquery(char *buf,
 }
 
 static void
-pushval_asis(Datum opaque, TSQueryParserState state, char *strval, int lenval,
+pushval_asis(void *opaque, TSQueryParserState state, char *strval, int lenval,
 			 int16 weight, bool prefix)
 {
 	pushValue(state, strval, lenval, weight, prefix);
@@ -956,7 +956,7 @@ tsqueryin(PG_FUNCTION_ARGS)
 
 	PG_RETURN_TSQUERY(parse_tsquery(in,
 									pushval_asis,
-									PointerGetDatum(NULL),
+									NULL,
 									0,
 									escontext));
 }
@@ -1014,9 +1014,8 @@ infix(INFIX *in, int parentPriority, bool rightPhraseOp)
 				*(in->cur) = '\\';
 				in->cur++;
 			}
-			COPYCHAR(in->cur, op);
 
-			clen = pg_mblen(op);
+			clen = ts_copychar_cstr(in->cur, op);
 			op += clen;
 			in->cur += clen;
 		}
@@ -1101,7 +1100,7 @@ infix(INFIX *in, int parentPriority, bool rightPhraseOp)
 		nrm.curpol = in->curpol;
 		nrm.op = in->op;
 		nrm.buflen = 16;
-		nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+		nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 
 		/* get right operand */
 		infix(&nrm, priority, (op == OP_PHRASE));
@@ -1157,7 +1156,7 @@ tsqueryout(PG_FUNCTION_ARGS)
 	}
 	nrm.curpol = GETQUERY(query);
 	nrm.buflen = 32;
-	nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+	nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 	*(nrm.cur) = '\0';
 	nrm.op = GETOPERAND(query);
 	infix(&nrm, -1 /* lowest priority */ , false);
@@ -1385,7 +1384,7 @@ tsquerytree(PG_FUNCTION_ARGS)
 	{
 		nrm.curpol = q;
 		nrm.buflen = 32;
-		nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+		nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 		*(nrm.cur) = '\0';
 		nrm.op = GETOPERAND(query);
 		infix(&nrm, -1, false);

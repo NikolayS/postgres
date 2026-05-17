@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 btree_gin_sources = files(
   'btree_gin.c',
@@ -22,6 +22,7 @@ install_data(
   'btree_gin--1.0--1.1.sql',
   'btree_gin--1.1--1.2.sql',
   'btree_gin--1.2--1.3.sql',
+  'btree_gin--1.3--1.4.sql',
   kwargs: contrib_data_args,
 )
 

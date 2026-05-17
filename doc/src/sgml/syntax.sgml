@@ -438,30 +438,6 @@ SELECT 'foo'      'bar';
      will check that the character conversion is possible.
     </para>
 
-    <caution>
-    <para>
-     If the configuration parameter
-     <xref linkend="guc-standard-conforming-strings"/> is <literal>off</literal>,
-     then <productname>PostgreSQL</productname> recognizes backslash escapes
-     in both regular and escape string constants.  However, as of
-     <productname>PostgreSQL</productname> 9.1, the default is <literal>on</literal>, meaning
-     that backslash escapes are recognized only in escape string constants.
-     This behavior is more standards-compliant, but might break applications
-     which rely on the historical behavior, where backslash escapes
-     were always recognized.  As a workaround, you can set this parameter
-     to <literal>off</literal>, but it is better to migrate away from using backslash
-     escapes.  If you need to use a backslash escape to represent a special
-     character, write the string constant with an <literal>E</literal>.
-    </para>
-
-    <para>
-     In addition to <varname>standard_conforming_strings</varname>, the configuration
-     parameters <xref linkend="guc-escape-string-warning"/> and
-     <xref linkend="guc-backslash-quote"/> govern treatment of backslashes
-     in string constants.
-    </para>
-    </caution>
-
     <para>
      The character with the code zero cannot be in a string constant.
     </para>
@@ -531,17 +507,6 @@ U&amp;'d!0061t!+000061' UESCAPE '!'
      If the server encoding is not UTF-8, the Unicode code point identified
      by one of these escape sequences is converted to the actual server
      encoding; an error is reported if that's not possible.
-    </para>
-
-    <para>
-     Also, the Unicode escape syntax for string constants only works
-     when the configuration
-     parameter <xref linkend="guc-standard-conforming-strings"/> is
-     turned on.  This is because otherwise this syntax could confuse
-     clients that parse the SQL statements to the point that it could
-     lead to SQL injections and similar security issues.  If the
-     parameter is set to off, this syntax will be rejected with an
-     error message.
     </para>
    </sect3>
 
@@ -1834,8 +1799,8 @@ FROM generate_series(1,10) AS s(i);
     The syntax of a window function call is one of the following:
 
 <synopsis>
-<replaceable>function_name</replaceable> (<optional><replaceable>expression</replaceable> <optional>, <replaceable>expression</replaceable> ... </optional></optional>) [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER <replaceable>window_name</replaceable>
-<replaceable>function_name</replaceable> (<optional><replaceable>expression</replaceable> <optional>, <replaceable>expression</replaceable> ... </optional></optional>) [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER ( <replaceable class="parameter">window_definition</replaceable> )
+<replaceable>function_name</replaceable> (<optional><replaceable>expression</replaceable> <optional>, <replaceable>expression</replaceable> ... </optional></optional>) <optional>null treatment</optional> [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER <replaceable>window_name</replaceable>
+<replaceable>function_name</replaceable> (<optional><replaceable>expression</replaceable> <optional>, <replaceable>expression</replaceable> ... </optional></optional>) <optional>null treatment</optional> [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER ( <replaceable class="parameter">window_definition</replaceable> )
 <replaceable>function_name</replaceable> ( * ) [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER <replaceable>window_name</replaceable>
 <replaceable>function_name</replaceable> ( * ) [ FILTER ( WHERE <replaceable>filter_clause</replaceable> ) ] OVER ( <replaceable class="parameter">window_definition</replaceable> )
 </synopsis>
@@ -1873,7 +1838,9 @@ EXCLUDE NO OTHERS
 
    <para>
     Here, <replaceable>expression</replaceable> represents any value
-    expression that does not itself contain window function calls.
+    expression that does not itself contain window function calls. Some
+    non-aggregate functions allow a <literal>null treatment</literal> clause,
+    described in <xref linkend="functions-window"/>.
    </para>
 
    <para>
@@ -2048,7 +2015,7 @@ EXCLUDE NO OTHERS
 
    <para>
     The built-in window functions are described in <xref
-    linkend="functions-window-table"/>.  Other window functions can be added by
+    linkend="functions-window-table"/>. Other window functions can be added by
     the user.  Also, any built-in or user-defined general-purpose or
     statistical aggregate can be used as a window function.  (Ordered-set
     and hypothetical-set aggregates cannot presently be used as window functions.)
@@ -2428,8 +2395,8 @@ SELECT ROW(1,2.5,'this is a test');
     which will be expanded to a list of the elements of the row value,
     just as occurs when the <literal>.*</literal> syntax is used at the top level
     of a <command>SELECT</command> list (see <xref linkend="rowtypes-usage"/>).
-    For example, if table <literal>t</literal> has
-    columns <literal>f1</literal> and <literal>f2</literal>, these are the same:
+    For example, if table <structname>t</structname> has
+    columns <structfield>f1</structfield> and <structfield>f2</structfield>, these are the same:
 <programlisting>
 SELECT ROW(t.*, 42) FROM t;
 SELECT ROW(t.f1, t.f2, 42) FROM t;

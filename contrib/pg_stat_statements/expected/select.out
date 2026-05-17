@@ -208,6 +208,7 @@ DEALLOCATE pgss_test;
 SELECT calls, rows, query FROM pg_stat_statements ORDER BY query COLLATE "C";
  calls | rows |                                    query                                     
 -------+------+------------------------------------------------------------------------------
+     1 |    1 | PREPARE pgss_test (int) AS SELECT $1, $2 LIMIT $3
      4 |    4 | SELECT $1                                                                   +
        |      |   -- but this one will appear                                               +
        |      |   AS "text"
@@ -221,7 +222,6 @@ SELECT calls, rows, query FROM pg_stat_statements ORDER BY query COLLATE "C";
      2 |    2 | SELECT $1 AS "int" ORDER BY 1
      1 |    2 | SELECT $1 AS i UNION SELECT $2 ORDER BY i
      1 |    1 | SELECT $1 || $2
-     1 |    1 | SELECT $1, $2 LIMIT $3
      2 |    2 | SELECT DISTINCT $1 AS "int"
      0 |    0 | SELECT calls, rows, query FROM pg_stat_statements ORDER BY query COLLATE "C"
      1 |    1 | SELECT pg_stat_statements_reset() IS NOT NULL AS t
@@ -237,6 +237,65 @@ SELECT pg_stat_statements_reset() IS NOT NULL AS t;
 ---
  t
 (1 row)
+
+-- normalization of constants and parameters, with constant locations
+-- recorded one or more times.
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+ t 
+---
+ t
+(1 row)
+
+SELECT WHERE '1' IN ('1'::int, '3'::int::text);
+--
+(1 row)
+
+SELECT WHERE (1, 2) IN ((1, 2), (2, 3));
+--
+(1 row)
+
+SELECT WHERE (3, 4) IN ((5, 6), (8, 7));
+--
+(0 rows)
+
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+                                 query                                  | calls 
+------------------------------------------------------------------------+-------
+ SELECT WHERE $1 IN ($2::int, $3::int::text)                            |     1
+ SELECT WHERE ($1, $2) IN (($3, $4), ($5, $6))                          |     2
+ SELECT pg_stat_statements_reset() IS NOT NULL AS t                     |     1
+ SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C" |     0
+(4 rows)
+
+-- with the last element being an explicit function call with an argument, ensure
+-- the normalization of the squashing interval is correct.
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+ t 
+---
+ t
+(1 row)
+
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+ t 
+---
+ t
+(1 row)
+
+SELECT WHERE 1 IN (1, int4(1), int4(2));
+--
+(1 row)
+
+SELECT WHERE 1 = ANY (ARRAY[1, int4(1), int4(2)]);
+--
+(1 row)
+
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+                                 query                                  | calls 
+------------------------------------------------------------------------+-------
+ SELECT WHERE $1 IN ($2 /*, ... */)                                     |     2
+ SELECT pg_stat_statements_reset() IS NOT NULL AS t                     |     1
+ SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C" |     0
+(3 rows)
 
 --
 -- queries with locking clauses
@@ -400,6 +459,102 @@ SELECT COUNT(*) FROM pg_stat_statements WHERE query LIKE '%FETCH FIRST%';
      2
 (1 row)
 
+-- GROUP BY, HAVING, GROUPING
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY b;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a, b;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY b, a;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY GROUPING SETS(a, ());
+ count 
+-------
+     1
+     1
+(2 rows)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY GROUPING SETS(b, ());
+ count 
+-------
+     1
+     1
+(2 rows)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a HAVING a = 1;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a HAVING a = 2;
+ count 
+-------
+(0 rows)
+
+SELECT COUNT(*) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY b HAVING b = 1;
+ count 
+-------
+(0 rows)
+
+SELECT GROUPING(a) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a;
+ grouping 
+----------
+        0
+(1 row)
+
+SELECT GROUPING(b) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY b;
+ grouping 
+----------
+        0
+(1 row)
+
+SELECT GROUPING(b) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY a, b;
+ grouping 
+----------
+        0
+(1 row)
+
+SELECT GROUPING(b) FROM (VALUES (1::INT, 2::INT)) AS t(a, b) GROUP BY b, a;
+ grouping 
+----------
+        0
+(1 row)
+
+SELECT calls, query FROM pg_stat_statements WHERE query LIKE '%GROUP BY%' ORDER BY query COLLATE "C";
+ calls |                                           query                                           
+-------+-------------------------------------------------------------------------------------------
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY GROUPING SETS(a, ())
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY GROUPING SETS(b, ())
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY a
+     2 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY a HAVING a = $3
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY a, b
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY b
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY b HAVING b = $3
+     1 | SELECT COUNT(*) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY b, a
+     1 | SELECT GROUPING(a) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY a
+     1 | SELECT GROUPING(b) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY a, b
+     1 | SELECT GROUPING(b) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY b
+     1 | SELECT GROUPING(b) FROM (VALUES ($1::INT, $2::INT)) AS t(a, b) GROUP BY b, a
+(12 rows)
+
 -- GROUP BY [DISTINCT]
 SELECT a, b, c
 FROM (VALUES (1, 2, 3), (4, NULL, 6), (7, 8, 9)) AS t (a, b, c)
@@ -489,7 +644,7 @@ SELECT (
 SELECT COUNT(*) FROM pg_stat_statements WHERE query LIKE '%SELECT GROUPING%';
  count 
 -------
-     2
+     6
 (1 row)
 
 SELECT pg_stat_statements_reset() IS NOT NULL AS t;

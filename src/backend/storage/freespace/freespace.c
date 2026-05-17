@@ -4,7 +4,7 @@
  *	  POSTGRES free space map for quickly finding free space in relations
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -231,8 +231,18 @@ XLogRecordPageWithFreeSpace(RelFileLocator rlocator, BlockNumber heapBlk,
 	if (PageIsNew(page))
 		PageInit(page, BLCKSZ, 0);
 
+	/*
+	 * Changes to FSM are usually marked as changed using MarkBufferDirtyHint;
+	 * however, during recovery, it does nothing if checksums are enabled. It
+	 * is assumed that the page should not be dirtied during recovery while
+	 * modifying hints to prevent torn pages, since no new WAL data can be
+	 * generated at this point to store FPI. This is not relevant to the FSM
+	 * case, as its blocks are zeroed when a checksum mismatch occurs. So, we
+	 * need to use regular MarkBufferDirty here to mark the FSM block as
+	 * modified during recovery, otherwise changes to the FSM may be lost.
+	 */
 	if (fsm_set_avail(page, slot, new_cat))
-		MarkBufferDirtyHint(buf, false);
+		MarkBufferDirty(buf);
 	UnlockReleaseBuffer(buf);
 }
 
@@ -904,14 +914,19 @@ fsm_vacuum_page(Relation rel, FSMAddress addr,
 	max_avail = fsm_get_max_avail(page);
 
 	/*
-	 * Reset the next slot pointer. This encourages the use of low-numbered
-	 * pages, increasing the chances that a later vacuum can truncate the
-	 * relation.  We don't bother with a lock here, nor with marking the page
-	 * dirty if it wasn't already, since this is just a hint.
+	 * Try to reset the next slot pointer. This encourages the use of
+	 * low-numbered pages, increasing the chances that a later vacuum can
+	 * truncate the relation. We don't bother with marking the page dirty if
+	 * it wasn't already, since this is just a hint.
 	 */
-	((FSMPage) PageGetContents(page))->fp_next_slot = 0;
+	LockBuffer(buf, BUFFER_LOCK_SHARE);
+	if (BufferBeginSetHintBits(buf))
+	{
+		((FSMPage) PageGetContents(page))->fp_next_slot = 0;
+		BufferFinishSetHintBits(buf, false, false);
+	}
 
-	ReleaseBuffer(buf);
+	UnlockReleaseBuffer(buf);
 
 	return max_avail;
 }

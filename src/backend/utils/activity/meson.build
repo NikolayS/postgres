@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'backend_progress.c',
@@ -11,6 +11,7 @@ backend_sources += files(
   'pgstat_database.c',
   'pgstat_function.c',
   'pgstat_io.c',
+  'pgstat_lock.c',
   'pgstat_relation.c',
   'pgstat_replslot.c',
   'pgstat_shmem.c',
@@ -30,7 +31,6 @@ waitevent_sources = files(
 wait_event = static_library('wait_event_names',
   waitevent_sources,
   dependencies: [backend_code],
-  include_directories: include_directories('../../../include/utils'),
   kwargs: internal_lib_args,
 )
 

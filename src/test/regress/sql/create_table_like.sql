@@ -130,6 +130,7 @@ DROP TABLE inhz;
 -- including storage and comments
 CREATE TABLE ctlt1 (a text CHECK (length(a) > 2) ENFORCED PRIMARY KEY,
 	b text CHECK (length(b) > 100) NOT ENFORCED);
+ALTER TABLE ctlt1 ADD CONSTRAINT cc CHECK (length(b) > 100) NOT VALID;
 CREATE INDEX ctlt1_b_key ON ctlt1 (b);
 CREATE INDEX ctlt1_fnidx ON ctlt1 ((a || b));
 CREATE STATISTICS ctlt1_a_b_stat ON a,b FROM ctlt1;
@@ -143,9 +144,10 @@ COMMENT ON INDEX ctlt1_pkey IS 'index pkey';
 COMMENT ON INDEX ctlt1_b_key IS 'index b_key';
 ALTER TABLE ctlt1 ALTER COLUMN a SET STORAGE MAIN;
 
-CREATE TABLE ctlt2 (c text);
+CREATE TABLE ctlt2 (c text NOT NULL);
 ALTER TABLE ctlt2 ALTER COLUMN c SET STORAGE EXTERNAL;
 COMMENT ON COLUMN ctlt2.c IS 'C';
+COMMENT ON CONSTRAINT ctlt2_c_not_null ON ctlt2 IS 't2_c_not_null';
 
 CREATE TABLE ctlt3 (a text CHECK (length(a) < 5), c text CHECK (length(c) < 7));
 ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;
@@ -162,6 +164,7 @@ CREATE TABLE ctlt12_storage (LIKE ctlt1 INCLUDING STORAGE, LIKE ctlt2 INCLUDING 
 \d+ ctlt12_storage
 CREATE TABLE ctlt12_comments (LIKE ctlt1 INCLUDING COMMENTS, LIKE ctlt2 INCLUDING COMMENTS);
 \d+ ctlt12_comments
+SELECT conname, description FROM pg_description, pg_constraint c WHERE classoid = 'pg_constraint'::regclass AND objoid = c.oid AND c.conrelid = 'ctlt12_comments'::regclass;
 CREATE TABLE ctlt1_inh (LIKE ctlt1 INCLUDING CONSTRAINTS INCLUDING COMMENTS) INHERITS (ctlt1);
 \d+ ctlt1_inh
 SELECT description FROM pg_description, pg_constraint c WHERE classoid = 'pg_constraint'::regclass AND objoid = c.oid AND c.conrelid = 'ctlt1_inh'::regclass;
@@ -197,8 +200,18 @@ DROP TABLE ctlt1, ctlt2, ctlt3, ctlt4, ctlt12_storage, ctlt12_comments, ctlt1_in
 -- LIKE must respect NO INHERIT property of constraints
 CREATE TABLE noinh_con_copy (a int CHECK (a > 0) NO INHERIT, b int not null,
 	c int not null no inherit);
-CREATE TABLE noinh_con_copy1 (LIKE noinh_con_copy INCLUDING CONSTRAINTS);
+
+COMMENT ON CONSTRAINT noinh_con_copy_b_not_null ON noinh_con_copy IS 'not null b';
+COMMENT ON CONSTRAINT noinh_con_copy_c_not_null ON noinh_con_copy IS 'not null c no inherit';
+
+CREATE TABLE noinh_con_copy1 (LIKE noinh_con_copy INCLUDING CONSTRAINTS INCLUDING COMMENTS);
 \d+ noinh_con_copy1
+
+SELECT conname, description
+FROM  pg_description, pg_constraint c
+WHERE classoid = 'pg_constraint'::regclass
+AND   objoid = c.oid AND c.conrelid = 'noinh_con_copy1'::regclass
+ORDER BY conname COLLATE "C";
 
 -- fail, as partitioned tables don't allow NO INHERIT constraints
 CREATE TABLE noinh_con_copy1_parted (LIKE noinh_con_copy INCLUDING ALL)
@@ -262,6 +275,32 @@ CREATE FOREIGN TABLE ctl_foreign_table2(LIKE ctl_table INCLUDING ALL) SERVER ctl
 -- check separately.
 SELECT attname, attcompression FROM pg_attribute
   WHERE attrelid = 'ctl_foreign_table2'::regclass and attnum > 0 ORDER BY attnum;
+
+-- LIKE ... INCLUDING STATISTICS with dropped columns in the parent,
+-- so stxkeys attnums are not contiguous.
+CREATE TABLE ctl_stats3_parent (a int, b int, c int);
+ALTER TABLE ctl_stats3_parent DROP COLUMN b;
+CREATE STATISTICS ctl_stats3_stat ON a, c FROM ctl_stats3_parent;
+CREATE TABLE ctl_stats3_child (LIKE ctl_stats3_parent INCLUDING STATISTICS);
+CREATE TABLE ctl_stats4_parent (a int, b int, c int, d int);
+ALTER TABLE ctl_stats4_parent DROP COLUMN b;
+CREATE STATISTICS ctl_stats4_stat ON a, c FROM ctl_stats4_parent;
+CREATE TABLE ctl_stats4_child (LIKE ctl_stats4_parent INCLUDING STATISTICS);
+SELECT s.stxrelid::regclass AS relation,
+       array_agg(a.attname ORDER BY u.ord) AS stats_columns
+FROM pg_statistic_ext s
+CROSS JOIN LATERAL
+  unnest(s.stxkeys::int2[]) WITH ORDINALITY AS u(attnum, ord)
+JOIN pg_attribute a
+  ON a.attrelid = s.stxrelid AND a.attnum = u.attnum
+WHERE s.stxrelid IN ('ctl_stats3_child'::regclass,
+                     'ctl_stats4_child'::regclass)
+GROUP BY s.stxrelid
+ORDER BY s.stxrelid::regclass::text;
+DROP TABLE ctl_stats3_parent;
+DROP TABLE ctl_stats3_child;
+DROP TABLE ctl_stats4_parent;
+DROP TABLE ctl_stats4_child;
 
 DROP TABLE ctl_table;
 DROP FOREIGN TABLE ctl_foreign_table1;

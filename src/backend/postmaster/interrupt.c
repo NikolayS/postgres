@@ -3,7 +3,7 @@
  * interrupt.c
  *	  Interrupt handling routines.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -94,9 +94,8 @@ SignalHandlerForCrashExit(SIGNAL_ARGS)
  * shut down and exit.
  *
  * Typically, this handler would be used for SIGTERM, but some processes use
- * other signals. In particular, the checkpointer exits on SIGUSR2, and the WAL
- * writer and the logical replication parallel apply worker exits on either
- * SIGINT or SIGTERM.
+ * other signals. In particular, the checkpointer and parallel apply worker
+ * exit on SIGUSR2, and the WAL writer exits on either SIGINT or SIGTERM.
  *
  * ShutdownRequestPending should be checked at a convenient place within the
  * main loop, or else the main loop should call ProcessMainLoopInterrupts.

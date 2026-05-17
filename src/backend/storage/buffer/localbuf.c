@@ -4,7 +4,7 @@
  *	  local buffer manager. Fast buffer manager for temporary tables,
  *	  which never need to be WAL-logged or checkpointed, etc.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  *
@@ -25,6 +25,7 @@
 #include "utils/guc_hooks.h"
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
 #include "utils/resowner.h"
 
 
@@ -147,7 +148,7 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 	}
 	else
 	{
-		uint32		buf_state;
+		uint64		buf_state;
 
 		victim_buffer = GetLocalVictimBuffer();
 		bufid = -victim_buffer - 1;
@@ -164,10 +165,10 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 		 */
 		bufHdr->tag = newTag;
 
-		buf_state = pg_atomic_read_u32(&bufHdr->state);
+		buf_state = pg_atomic_read_u64(&bufHdr->state);
 		buf_state &= ~(BUF_FLAG_MASK | BUF_USAGECOUNT_MASK);
 		buf_state |= BM_TAG_VALID | BUF_USAGECOUNT_ONE;
-		pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+		pg_atomic_unlocked_write_u64(&bufHdr->state, buf_state);
 
 		*foundPtr = false;
 	}
@@ -188,9 +189,10 @@ FlushLocalBuffer(BufferDesc *bufHdr, SMgrRelation reln)
 
 	/*
 	 * Try to start an I/O operation.  There currently are no reasons for
-	 * StartLocalBufferIO to return false, so we raise an error in that case.
+	 * StartLocalBufferIO to return anything other than
+	 * BUFFER_IO_READY_FOR_IO, so we raise an error in that case.
 	 */
-	if (!StartLocalBufferIO(bufHdr, false, false))
+	if (StartLocalBufferIO(bufHdr, false, true, NULL) != BUFFER_IO_READY_FOR_IO)
 		elog(ERROR, "failed to start write IO on local buffer");
 
 	/* Find smgr relation for buffer */
@@ -198,7 +200,7 @@ FlushLocalBuffer(BufferDesc *bufHdr, SMgrRelation reln)
 		reln = smgropen(BufTagGetRelFileLocator(&bufHdr->tag),
 						MyProcNumber);
 
-	PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
+	PageSetChecksum(localpage, bufHdr->tag.blockNum);
 
 	io_start = pgstat_prepare_io_time(track_io_timing);
 
@@ -229,7 +231,7 @@ GetLocalVictimBuffer(void)
 	ResourceOwnerEnlarge(CurrentResourceOwner);
 
 	/*
-	 * Need to get a new buffer.  We use a clock sweep algorithm (essentially
+	 * Need to get a new buffer.  We use a clock-sweep algorithm (essentially
 	 * the same as what freelist.c does now...)
 	 */
 	trycounter = NLocBuffer;
@@ -244,12 +246,12 @@ GetLocalVictimBuffer(void)
 
 		if (LocalRefCount[victim_bufid] == 0)
 		{
-			uint32		buf_state = pg_atomic_read_u32(&bufHdr->state);
+			uint64		buf_state = pg_atomic_read_u64(&bufHdr->state);
 
 			if (BUF_STATE_GET_USAGECOUNT(buf_state) > 0)
 			{
 				buf_state -= BUF_USAGECOUNT_ONE;
-				pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+				pg_atomic_unlocked_write_u64(&bufHdr->state, buf_state);
 				trycounter = NLocBuffer;
 			}
 			else if (BUF_STATE_GET_REFCOUNT(buf_state) > 0)
@@ -285,13 +287,13 @@ GetLocalVictimBuffer(void)
 	 * this buffer is not referenced but it might still be dirty. if that's
 	 * the case, write it out before reusing it!
 	 */
-	if (pg_atomic_read_u32(&bufHdr->state) & BM_DIRTY)
+	if (pg_atomic_read_u64(&bufHdr->state) & BM_DIRTY)
 		FlushLocalBuffer(bufHdr, NULL);
 
 	/*
 	 * Remove the victim buffer from the hashtable and mark as invalid.
 	 */
-	if (pg_atomic_read_u32(&bufHdr->state) & BM_TAG_VALID)
+	if (pg_atomic_read_u64(&bufHdr->state) & BM_TAG_VALID)
 	{
 		InvalidateLocalBuffer(bufHdr, false);
 
@@ -305,16 +307,24 @@ GetLocalVictimBuffer(void)
 uint32
 GetLocalPinLimit(void)
 {
-	/* Every backend has its own temporary buffers, and can pin them all. */
-	return num_temp_buffers;
+	/*
+	 * Every backend has its own temporary buffers, but we leave headroom for
+	 * concurrent pin-holders -- like multiple scans in the same query.
+	 */
+	return num_temp_buffers / 4;
 }
 
 /* see GetAdditionalPinLimit() */
 uint32
 GetAdditionalLocalPinLimit(void)
 {
+	uint32		total = GetLocalPinLimit();
+
 	Assert(NLocalPinnedBuffers <= num_temp_buffers);
-	return num_temp_buffers - NLocalPinnedBuffers;
+
+	if (NLocalPinnedBuffers >= total)
+		return 0;
+	return total - NLocalPinnedBuffers;
 }
 
 /* see LimitAdditionalPins() */
@@ -372,7 +382,7 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		MemSet(buf_block, 0, BLCKSZ);
 	}
 
-	first_block = smgrnblocks(bmr.smgr, fork);
+	first_block = smgrnblocks(BMR_GET_SMGR(bmr), fork);
 
 	if (extend_upto != InvalidBlockNumber)
 	{
@@ -391,7 +401,7 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("cannot extend relation %s beyond %u blocks",
-						relpath(bmr.smgr->smgr_rlocator, fork).str,
+						relpath(BMR_GET_SMGR(bmr)->smgr_rlocator, fork).str,
 						MaxBlockNumber)));
 
 	for (uint32 i = 0; i < extend_by; i++)
@@ -408,14 +418,15 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 		/* in case we need to pin an existing buffer below */
 		ResourceOwnerEnlarge(CurrentResourceOwner);
 
-		InitBufferTag(&tag, &bmr.smgr->smgr_rlocator.locator, fork, first_block + i);
+		InitBufferTag(&tag, &BMR_GET_SMGR(bmr)->smgr_rlocator.locator, fork,
+					  first_block + i);
 
 		hresult = (LocalBufferLookupEnt *)
 			hash_search(LocalBufHash, &tag, HASH_ENTER, &found);
 		if (found)
 		{
 			BufferDesc *existing_hdr;
-			uint32		buf_state;
+			uint64		buf_state;
 
 			UnpinLocalBuffer(BufferDescriptorGetBuffer(victim_buf_hdr));
 
@@ -426,37 +437,37 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 			/*
 			 * Clear the BM_VALID bit, do StartLocalBufferIO() and proceed.
 			 */
-			buf_state = pg_atomic_read_u32(&existing_hdr->state);
+			buf_state = pg_atomic_read_u64(&existing_hdr->state);
 			Assert(buf_state & BM_TAG_VALID);
 			Assert(!(buf_state & BM_DIRTY));
 			buf_state &= ~BM_VALID;
-			pg_atomic_unlocked_write_u32(&existing_hdr->state, buf_state);
+			pg_atomic_unlocked_write_u64(&existing_hdr->state, buf_state);
 
 			/* no need to loop for local buffers */
-			StartLocalBufferIO(existing_hdr, true, false);
+			StartLocalBufferIO(existing_hdr, true, true, NULL);
 		}
 		else
 		{
-			uint32		buf_state = pg_atomic_read_u32(&victim_buf_hdr->state);
+			uint64		buf_state = pg_atomic_read_u64(&victim_buf_hdr->state);
 
-			Assert(!(buf_state & (BM_VALID | BM_TAG_VALID | BM_DIRTY | BM_JUST_DIRTIED)));
+			Assert(!(buf_state & (BM_VALID | BM_TAG_VALID | BM_DIRTY)));
 
 			victim_buf_hdr->tag = tag;
 
 			buf_state |= BM_TAG_VALID | BUF_USAGECOUNT_ONE;
 
-			pg_atomic_unlocked_write_u32(&victim_buf_hdr->state, buf_state);
+			pg_atomic_unlocked_write_u64(&victim_buf_hdr->state, buf_state);
 
 			hresult->id = victim_buf_id;
 
-			StartLocalBufferIO(victim_buf_hdr, true, false);
+			StartLocalBufferIO(victim_buf_hdr, true, true, NULL);
 		}
 	}
 
 	io_start = pgstat_prepare_io_time(track_io_timing);
 
 	/* actually extend relation */
-	smgrzeroextend(bmr.smgr, fork, first_block, extend_by, false);
+	smgrzeroextend(BMR_GET_SMGR(bmr), fork, first_block, extend_by, false);
 
 	pgstat_count_io_op_time(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_EXTEND,
 							io_start, 1, extend_by * BLCKSZ);
@@ -465,13 +476,13 @@ ExtendBufferedRelLocal(BufferManagerRelation bmr,
 	{
 		Buffer		buf = buffers[i];
 		BufferDesc *buf_hdr;
-		uint32		buf_state;
+		uint64		buf_state;
 
 		buf_hdr = GetLocalBufferDescriptor(-buf - 1);
 
-		buf_state = pg_atomic_read_u32(&buf_hdr->state);
+		buf_state = pg_atomic_read_u64(&buf_hdr->state);
 		buf_state |= BM_VALID;
-		pg_atomic_unlocked_write_u32(&buf_hdr->state, buf_state);
+		pg_atomic_unlocked_write_u64(&buf_hdr->state, buf_state);
 	}
 
 	*extended_by = extend_by;
@@ -490,7 +501,7 @@ MarkLocalBufferDirty(Buffer buffer)
 {
 	int			bufid;
 	BufferDesc *bufHdr;
-	uint32		buf_state;
+	uint64		buf_state;
 
 	Assert(BufferIsLocal(buffer));
 
@@ -504,64 +515,79 @@ MarkLocalBufferDirty(Buffer buffer)
 
 	bufHdr = GetLocalBufferDescriptor(bufid);
 
-	buf_state = pg_atomic_read_u32(&bufHdr->state);
+	buf_state = pg_atomic_read_u64(&bufHdr->state);
 
 	if (!(buf_state & BM_DIRTY))
 		pgBufferUsage.local_blks_dirtied++;
 
 	buf_state |= BM_DIRTY;
 
-	pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+	pg_atomic_unlocked_write_u64(&bufHdr->state, buf_state);
 }
 
 /*
- * Like StartBufferIO, but for local buffers
+ * Like StartSharedBufferIO, but for local buffers
  */
-bool
-StartLocalBufferIO(BufferDesc *bufHdr, bool forInput, bool nowait)
+StartBufferIOResult
+StartLocalBufferIO(BufferDesc *bufHdr, bool forInput, bool wait, PgAioWaitRef *io_wref)
 {
-	uint32		buf_state;
+	uint64		buf_state;
 
 	/*
 	 * With AIO the buffer could have IO in progress, e.g. when there are two
-	 * scans of the same relation. Either wait for the other IO or return
-	 * false.
+	 * scans of the same relation.  Either wait for the other IO (if wait =
+	 * true and io_wref == NULL) or return BUFFER_IO_IN_PROGRESS;
 	 */
 	if (pgaio_wref_valid(&bufHdr->io_wref))
 	{
-		PgAioWaitRef iow = bufHdr->io_wref;
+		PgAioWaitRef buf_wref = bufHdr->io_wref;
 
-		if (nowait)
-			return false;
+		if (io_wref != NULL)
+		{
+			/* We've already asynchronously started this IO, so join it */
+			*io_wref = buf_wref;
+			return BUFFER_IO_IN_PROGRESS;
+		}
 
-		pgaio_wref_wait(&iow);
+		/*
+		 * For temp buffers we should never need to wait in
+		 * StartLocalBufferIO() when called with io_wref == NULL while there
+		 * are staged IOs, as it's not allowed to call code that is not aware
+		 * of AIO while in batch mode.
+		 */
+		Assert(!pgaio_have_staged());
+
+		if (!wait)
+			return BUFFER_IO_IN_PROGRESS;
+
+		pgaio_wref_wait(&buf_wref);
 	}
 
 	/* Once we get here, there is definitely no I/O active on this buffer */
 
 	/* Check if someone else already did the I/O */
-	buf_state = pg_atomic_read_u32(&bufHdr->state);
+	buf_state = pg_atomic_read_u64(&bufHdr->state);
 	if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY))
 	{
-		return false;
+		return BUFFER_IO_ALREADY_DONE;
 	}
 
 	/* BM_IO_IN_PROGRESS isn't currently used for local buffers */
 
 	/* local buffers don't track IO using resowners */
 
-	return true;
+	return BUFFER_IO_READY_FOR_IO;
 }
 
 /*
  * Like TerminateBufferIO, but for local buffers
  */
 void
-TerminateLocalBufferIO(BufferDesc *bufHdr, bool clear_dirty, uint32 set_flag_bits,
+TerminateLocalBufferIO(BufferDesc *bufHdr, bool clear_dirty, uint64 set_flag_bits,
 					   bool release_aio)
 {
 	/* Only need to adjust flags */
-	uint32		buf_state = pg_atomic_read_u32(&bufHdr->state);
+	uint64		buf_state = pg_atomic_read_u64(&bufHdr->state);
 
 	/* BM_IO_IN_PROGRESS isn't currently used for local buffers */
 
@@ -580,7 +606,7 @@ TerminateLocalBufferIO(BufferDesc *bufHdr, bool clear_dirty, uint32 set_flag_bit
 	}
 
 	buf_state |= set_flag_bits;
-	pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+	pg_atomic_unlocked_write_u64(&bufHdr->state, buf_state);
 
 	/* local buffers don't track IO using resowners */
 
@@ -604,7 +630,7 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 {
 	Buffer		buffer = BufferDescriptorGetBuffer(bufHdr);
 	int			bufid = -buffer - 1;
-	uint32		buf_state;
+	uint64		buf_state;
 	LocalBufferLookupEnt *hresult;
 
 	/*
@@ -620,7 +646,7 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 		Assert(!pgaio_wref_valid(&bufHdr->io_wref));
 	}
 
-	buf_state = pg_atomic_read_u32(&bufHdr->state);
+	buf_state = pg_atomic_read_u64(&bufHdr->state);
 
 	/*
 	 * We need to test not just LocalRefCount[bufid] but also the BufferDesc
@@ -629,7 +655,7 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 	 */
 	if (check_unreferenced &&
 		(LocalRefCount[bufid] != 0 || BUF_STATE_GET_REFCOUNT(buf_state) != 0))
-		elog(ERROR, "block %u of %s is still referenced (local %u)",
+		elog(ERROR, "block %u of %s is still referenced (local %d)",
 			 bufHdr->tag.blockNum,
 			 relpathbackend(BufTagGetRelFileLocator(&bufHdr->tag),
 							MyProcNumber,
@@ -645,7 +671,7 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
 	ClearBufferTag(&bufHdr->tag);
 	buf_state &= ~BUF_FLAG_MASK;
 	buf_state &= ~BUF_USAGECOUNT_MASK;
-	pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+	pg_atomic_unlocked_write_u64(&bufHdr->state, buf_state);
 }
 
 /*
@@ -660,24 +686,31 @@ InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced)
  *		See DropRelationBuffers in bufmgr.c for more notes.
  */
 void
-DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber forkNum,
-						 BlockNumber firstDelBlock)
+DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber *forkNum,
+						 int nforks, BlockNumber *firstDelBlock)
 {
 	int			i;
+	int			j;
 
 	for (i = 0; i < NLocBuffer; i++)
 	{
 		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
-		uint32		buf_state;
+		uint64		buf_state;
 
-		buf_state = pg_atomic_read_u32(&bufHdr->state);
+		buf_state = pg_atomic_read_u64(&bufHdr->state);
 
-		if ((buf_state & BM_TAG_VALID) &&
-			BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator) &&
-			BufTagGetForkNum(&bufHdr->tag) == forkNum &&
-			bufHdr->tag.blockNum >= firstDelBlock)
+		if (!(buf_state & BM_TAG_VALID) ||
+			!BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator))
+			continue;
+
+		for (j = 0; j < nforks; j++)
 		{
-			InvalidateLocalBuffer(bufHdr, true);
+			if (BufTagGetForkNum(&bufHdr->tag) == forkNum[j] &&
+				bufHdr->tag.blockNum >= firstDelBlock[j])
+			{
+				InvalidateLocalBuffer(bufHdr, true);
+				break;
+			}
 		}
 	}
 }
@@ -697,9 +730,9 @@ DropRelationAllLocalBuffers(RelFileLocator rlocator)
 	for (i = 0; i < NLocBuffer; i++)
 	{
 		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
-		uint32		buf_state;
+		uint64		buf_state;
 
-		buf_state = pg_atomic_read_u32(&bufHdr->state);
+		buf_state = pg_atomic_read_u64(&bufHdr->state);
 
 		if ((buf_state & BM_TAG_VALID) &&
 			BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator))
@@ -795,11 +828,11 @@ InitLocalBuffers(void)
 bool
 PinLocalBuffer(BufferDesc *buf_hdr, bool adjust_usagecount)
 {
-	uint32		buf_state;
+	uint64		buf_state;
 	Buffer		buffer = BufferDescriptorGetBuffer(buf_hdr);
 	int			bufid = -buffer - 1;
 
-	buf_state = pg_atomic_read_u32(&buf_hdr->state);
+	buf_state = pg_atomic_read_u64(&buf_hdr->state);
 
 	if (LocalRefCount[bufid] == 0)
 	{
@@ -810,7 +843,7 @@ PinLocalBuffer(BufferDesc *buf_hdr, bool adjust_usagecount)
 		{
 			buf_state += BUF_USAGECOUNT_ONE;
 		}
-		pg_atomic_unlocked_write_u32(&buf_hdr->state, buf_state);
+		pg_atomic_unlocked_write_u64(&buf_hdr->state, buf_state);
 
 		/*
 		 * See comment in PinBuffer().
@@ -847,14 +880,14 @@ UnpinLocalBufferNoOwner(Buffer buffer)
 	if (--LocalRefCount[buffid] == 0)
 	{
 		BufferDesc *buf_hdr = GetLocalBufferDescriptor(buffid);
-		uint32		buf_state;
+		uint64		buf_state;
 
 		NLocalPinnedBuffers--;
 
-		buf_state = pg_atomic_read_u32(&buf_hdr->state);
+		buf_state = pg_atomic_read_u64(&buf_hdr->state);
 		Assert(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
 		buf_state -= BUF_REFCOUNT_ONE;
-		pg_atomic_unlocked_write_u32(&buf_hdr->state, buf_state);
+		pg_atomic_unlocked_write_u64(&buf_hdr->state, buf_state);
 
 		/* see comment in UnpinBufferNoOwner */
 		VALGRIND_MAKE_MEM_NOACCESS(LocalBufHdrGetBlock(buf_hdr), BLCKSZ);
@@ -925,10 +958,11 @@ GetLocalBufferStorage(void)
 		num_bufs = Min(num_bufs, MaxAllocSize / BLCKSZ);
 
 		/* Buffers should be I/O aligned. */
-		cur_block = (char *)
-			TYPEALIGN(PG_IO_ALIGN_SIZE,
-					  MemoryContextAlloc(LocalBufferContext,
-										 num_bufs * BLCKSZ + PG_IO_ALIGN_SIZE));
+		cur_block = MemoryContextAllocAligned(LocalBufferContext,
+											  num_bufs * BLCKSZ,
+											  PG_IO_ALIGN_SIZE,
+											  0);
+
 		next_buf_in_block = 0;
 		num_bufs_in_block = num_bufs;
 	}

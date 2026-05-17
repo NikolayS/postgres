@@ -8,7 +8,7 @@
  * or call FUNCAPI-callable functions or macros.
  *
  *
- * Copyright (c) 2002-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2002-2026, PostgreSQL Global Development Group
  *
  * src/include/funcapi.h
  *
@@ -296,7 +296,7 @@ HeapTupleGetDatum(const HeapTupleData *tuple)
 #define MAT_SRF_USE_EXPECTED_DESC	0x01	/* use expectedDesc as tupdesc. */
 #define MAT_SRF_BLESS				0x02	/* "Bless" a tuple descriptor with
 											 * BlessTupleDesc(). */
-extern void InitMaterializedSRF(FunctionCallInfo fcinfo, bits32 flags);
+extern void InitMaterializedSRF(FunctionCallInfo fcinfo, uint32 flags);
 
 extern FuncCallContext *init_MultiFuncCall(PG_FUNCTION_ARGS);
 extern FuncCallContext *per_MultiFuncCall(PG_FUNCTION_ARGS);

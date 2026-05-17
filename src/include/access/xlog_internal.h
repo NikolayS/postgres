@@ -11,7 +11,7 @@
  * Note: This file must be includable in both frontend and backend contexts,
  * to allow stand-alone tools like pg_receivewal to deal with WAL files.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/xlog_internal.h
@@ -22,16 +22,18 @@
 #include "access/xlogdefs.h"
 #include "access/xlogreader.h"
 #include "datatype/timestamp.h"
+#include "utils/uuid.h"
 #include "lib/stringinfo.h"
 #include "pgtime.h"
 #include "storage/block.h"
+#include "storage/checksum.h"
 #include "storage/relfilelocator.h"
 
 
 /*
  * Each page of XLOG file has a header like this:
  */
-#define XLOG_PAGE_MAGIC 0xD118	/* can be used as WAL version indicator */
+#define XLOG_PAGE_MAGIC 0xD11F	/* can be used as WAL version indicator */
 
 typedef struct XLogPageHeaderData
 {
@@ -74,12 +76,10 @@ typedef XLogLongPageHeaderData *XLogLongPageHeader;
 #define XLP_FIRST_IS_CONTRECORD		0x0001
 /* This flag indicates a "long" page header */
 #define XLP_LONG_HEADER				0x0002
-/* This flag indicates backup blocks starting in this page are optional */
-#define XLP_BKP_REMOVABLE			0x0004
 /* Replaces a missing contrecord; see CreateOverwriteContrecordRecord */
-#define XLP_FIRST_IS_OVERWRITE_CONTRECORD 0x0008
+#define XLP_FIRST_IS_OVERWRITE_CONTRECORD 0x0004
 /* All defined flag bits in xlp_info (used for validity checking of header) */
-#define XLP_ALL_FLAGS				0x000F
+#define XLP_ALL_FLAGS				0x0007
 
 #define XLogPageHeaderSize(hdr)		\
 	(((hdr)->xlp_info & XLP_LONG_HEADER) ? SizeOfXLogLongPHD : SizeOfXLogShortPHD)
@@ -289,6 +289,12 @@ typedef struct xl_restore_point
 	char		rp_name[MAXFNAMELEN];
 } xl_restore_point;
 
+/* Information logged when data checksum level is changed */
+typedef struct xl_checksum_state
+{
+	ChecksumStateType new_checksum_state;
+} xl_checksum_state;
+
 /* Overwrite of prior contrecord */
 typedef struct xl_overwrite_contrecord
 {
@@ -305,6 +311,13 @@ typedef struct xl_end_of_recovery
 	int			wal_level;
 } xl_end_of_recovery;
 
+/* checkpoint redo */
+typedef struct xl_checkpoint_redo
+{
+	int			wal_level;
+	uint32		data_checksum_version;
+} xl_checkpoint_redo;
+
 /*
  * The functions in xloginsert.c construct a chain of XLogRecData structs
  * to represent the final WAL record.
@@ -315,16 +328,6 @@ typedef struct XLogRecData
 	const void *data;			/* start of rmgr data to include */
 	uint32		len;			/* length of rmgr data to include */
 } XLogRecData;
-
-/*
- * Recovery target action.
- */
-typedef enum
-{
-	RECOVERY_TARGET_ACTION_PAUSE,
-	RECOVERY_TARGET_ACTION_PROMOTE,
-	RECOVERY_TARGET_ACTION_SHUTDOWN,
-}			RecoveryTargetAction;
 
 struct LogicalDecodingContext;
 struct XLogRecordBuffer;

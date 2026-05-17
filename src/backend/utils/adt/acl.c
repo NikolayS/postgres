@@ -3,7 +3,7 @@
  * acl.c
  *	  Basic access control list data structures manipulation routines.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -17,6 +17,7 @@
 #include <ctype.h>
 
 #include "access/htup_details.h"
+#include "bootstrap/bootstrap.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_auth_members.h"
@@ -31,7 +32,6 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
-#include "commands/dbcommands.h"
 #include "commands/proclang.h"
 #include "commands/tablespace.h"
 #include "common/hashfn.h"
@@ -40,6 +40,7 @@
 #include "lib/bloomfilter.h"
 #include "lib/qunique.h"
 #include "miscadmin.h"
+#include "port/pg_bitutils.h"
 #include "storage/large_object.h"
 #include "utils/acl.h"
 #include "utils/array.h"
@@ -131,8 +132,25 @@ static AclMode convert_largeobject_priv_string(text *priv_type_text);
 static AclMode convert_role_priv_string(text *priv_type_text);
 static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode);
 
-static void RoleMembershipCacheCallback(Datum arg, int cacheid, uint32 hashvalue);
+static void RoleMembershipCacheCallback(Datum arg, SysCacheIdentifier cacheid,
+										uint32 hashvalue);
 
+
+/*
+ * Test whether an identifier char can be left unquoted in ACLs.
+ *
+ * Formerly, we used isalnum() even on non-ASCII characters, resulting in
+ * unportable behavior.  To ensure dump compatibility with old versions,
+ * we now treat high-bit-set characters as always requiring quoting during
+ * putid(), but getid() will always accept them without quotes.
+ */
+static inline bool
+is_safe_acl_char(unsigned char c, bool is_getid)
+{
+	if (IS_HIGHBIT_SET(c))
+		return is_getid;
+	return isalnum(c) || c == '_';
+}
 
 /*
  * getid
@@ -159,21 +177,22 @@ getid(const char *s, char *n, Node *escontext)
 
 	while (isspace((unsigned char) *s))
 		s++;
-	/* This code had better match what putid() does, below */
 	for (;
 		 *s != '\0' &&
-		 (isalnum((unsigned char) *s) ||
-		  *s == '_' ||
-		  *s == '"' ||
-		  in_quotes);
+		 (in_quotes || *s == '"' || is_safe_acl_char(*s, true));
 		 s++)
 	{
 		if (*s == '"')
 		{
+			if (!in_quotes)
+			{
+				in_quotes = true;
+				continue;
+			}
 			/* safe to look at next char (could be '\0' though) */
 			if (*(s + 1) != '"')
 			{
-				in_quotes = !in_quotes;
+				in_quotes = false;
 				continue;
 			}
 			/* it's an escaped double quote; skip the escaping char */
@@ -207,10 +226,10 @@ putid(char *p, const char *s)
 	const char *src;
 	bool		safe = true;
 
+	/* Detect whether we need to use double quotes */
 	for (src = s; *src; src++)
 	{
-		/* This test had better match what getid() does, above */
-		if (!isalnum((unsigned char) *src) && *src != '_')
+		if (!is_safe_acl_char(*src, false))
 		{
 			safe = false;
 			break;
@@ -243,6 +262,9 @@ putid(char *p, const char *s)
  *
  *		This routine is called by the parser as well as aclitemin(), hence
  *		the added generality.
+ *
+ *		In bootstrap mode, we consult a hard-wired list of role names
+ *		(see bootstrap.c) rather than trying to access the catalogs.
  *
  * RETURNS:
  *		the string position in 's' immediately following the ACL
@@ -359,7 +381,10 @@ aclparse(const char *s, AclItem *aip, Node *escontext)
 		aip->ai_grantee = ACL_ID_PUBLIC;
 	else
 	{
-		aip->ai_grantee = get_role_oid(name, true);
+		if (IsBootstrapProcessingMode())
+			aip->ai_grantee = boot_get_role_oid(name);
+		else
+			aip->ai_grantee = get_role_oid(name, true);
 		if (!OidIsValid(aip->ai_grantee))
 			ereturn(escontext, NULL,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -368,7 +393,8 @@ aclparse(const char *s, AclItem *aip, Node *escontext)
 
 	/*
 	 * XXX Allow a degree of backward compatibility by defaulting the grantor
-	 * to the superuser.
+	 * to the superuser.  We condone that practice in the catalog .dat files
+	 * (i.e., in bootstrap mode) for brevity; otherwise, issue a warning.
 	 */
 	if (*s == '/')
 	{
@@ -379,7 +405,10 @@ aclparse(const char *s, AclItem *aip, Node *escontext)
 			ereturn(escontext, NULL,
 					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
 					 errmsg("a name must follow the \"/\" sign")));
-		aip->ai_grantor = get_role_oid(name2, true);
+		if (IsBootstrapProcessingMode())
+			aip->ai_grantor = boot_get_role_oid(name2);
+		else
+			aip->ai_grantor = get_role_oid(name2, true);
 		if (!OidIsValid(aip->ai_grantor))
 			ereturn(escontext, NULL,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -388,10 +417,11 @@ aclparse(const char *s, AclItem *aip, Node *escontext)
 	else
 	{
 		aip->ai_grantor = BOOTSTRAP_SUPERUSERID;
-		ereport(WARNING,
-				(errcode(ERRCODE_INVALID_GRANTOR),
-				 errmsg("defaulting grantor to user ID %u",
-						BOOTSTRAP_SUPERUSERID)));
+		if (!IsBootstrapProcessingMode())
+			ereport(WARNING,
+					(errcode(ERRCODE_INVALID_GRANTOR),
+					 errmsg("defaulting grantor to user ID %u",
+							BOOTSTRAP_SUPERUSERID)));
 	}
 
 	ACLITEM_SET_PRIVS_GOPTIONS(*aip, privs, goption);
@@ -602,7 +632,7 @@ aclitemin(PG_FUNCTION_ARGS)
 	Node	   *escontext = fcinfo->context;
 	AclItem    *aip;
 
-	aip = (AclItem *) palloc(sizeof(AclItem));
+	aip = palloc_object(AclItem);
 
 	s = aclparse(s, aip, escontext);
 	if (s == NULL)
@@ -622,6 +652,10 @@ aclitemin(PG_FUNCTION_ARGS)
  * aclitemout
  *		Allocates storage for, and fills in, a new null-delimited string
  *		containing a formatted ACL specification.  See aclparse for details.
+ *
+ *		In bootstrap mode, this is called for debug printouts (initdb -d).
+ *		We could ask bootstrap.c to provide an inverse of boot_get_role_oid(),
+ *		but it seems at least as useful to just print numeric role OIDs.
  *
  * RETURNS:
  *		the new string
@@ -645,7 +679,10 @@ aclitemout(PG_FUNCTION_ARGS)
 
 	if (aip->ai_grantee != ACL_ID_PUBLIC)
 	{
-		htup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(aip->ai_grantee));
+		if (!IsBootstrapProcessingMode())
+			htup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(aip->ai_grantee));
+		else
+			htup = NULL;
 		if (HeapTupleIsValid(htup))
 		{
 			putid(p, NameStr(((Form_pg_authid) GETSTRUCT(htup))->rolname));
@@ -653,7 +690,7 @@ aclitemout(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			/* Generate numeric OID if we don't find an entry */
+			/* No such entry, or bootstrap mode: print numeric OID */
 			sprintf(p, "%u", aip->ai_grantee);
 		}
 	}
@@ -673,7 +710,10 @@ aclitemout(PG_FUNCTION_ARGS)
 	*p++ = '/';
 	*p = '\0';
 
-	htup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(aip->ai_grantor));
+	if (!IsBootstrapProcessingMode())
+		htup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(aip->ai_grantor));
+	else
+		htup = NULL;
 	if (HeapTupleIsValid(htup))
 	{
 		putid(p, NameStr(((Form_pg_authid) GETSTRUCT(htup))->rolname));
@@ -681,7 +721,7 @@ aclitemout(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		/* Generate numeric OID if we don't find an entry */
+		/* No such entry, or bootstrap mode: print numeric OID */
 		sprintf(p, "%u", aip->ai_grantor);
 	}
 
@@ -850,6 +890,10 @@ acldefault(ObjectType objtype, Oid ownerId)
 		case OBJECT_PARAMETER_ACL:
 			world_default = ACL_NO_RIGHTS;
 			owner_default = ACL_ALL_RIGHTS_PARAMETER_ACL;
+			break;
+		case OBJECT_PROPGRAPH:
+			world_default = ACL_NO_RIGHTS;
+			owner_default = ACL_ALL_RIGHTS_PROPGRAPH;
 			break;
 		default:
 			elog(ERROR, "unrecognized object type: %d", (int) objtype);
@@ -1645,7 +1689,7 @@ makeaclitem(PG_FUNCTION_ARGS)
 
 	priv = convert_any_priv_string(privtext, any_priv_map);
 
-	result = (AclItem *) palloc(sizeof(AclItem));
+	result = palloc_object(AclItem);
 
 	result->ai_grantee = grantee;
 	result->ai_grantor = grantor;
@@ -1802,10 +1846,11 @@ aclexplode(PG_FUNCTION_ARGS)
 		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "is_grantable",
 						   BOOLOID, -1, 0);
 
+		TupleDescFinalize(tupdesc);
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
 		/* allocate memory for user context */
-		idx = (int *) palloc(sizeof(int[2]));
+		idx = palloc_array(int, 2);
 		idx[0] = 0;				/* ACL array item index */
 		idx[1] = -1;			/* privilege type counter */
 		funcctx->user_fctx = idx;
@@ -5051,7 +5096,8 @@ initialize_acl(void)
  *		Syscache inval callback function
  */
 static void
-RoleMembershipCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
+RoleMembershipCacheCallback(Datum arg, SysCacheIdentifier cacheid,
+							uint32 hashvalue)
 {
 	if (cacheid == DATABASEOID &&
 		hashvalue != cached_db_hash &&
@@ -5143,7 +5189,7 @@ roles_is_member_of(Oid roleid, enum RoleRecurseType type,
 	MemoryContext oldctx;
 	bloom_filter *bf = NULL;
 
-	Assert(OidIsValid(admin_of) == PointerIsValid(admin_role));
+	Assert(OidIsValid(admin_of) == (admin_role != NULL));
 	if (admin_role != NULL)
 		*admin_role = InvalidOid;
 
@@ -5435,6 +5481,10 @@ select_best_admin(Oid member, Oid role)
 /*
  * Select the effective grantor ID for a GRANT or REVOKE operation.
  *
+ * If the GRANT/REVOKE has an explicit GRANTED BY clause, we always use
+ * exactly that role (which may result in granting/revoking no privileges).
+ * Otherwise, we seek a "best" grantor, starting with the current user.
+ *
  * The grantor must always be either the object owner or some role that has
  * been explicitly granted grant options.  This ensures that all granted
  * privileges appear to flow from the object owner, and there are never
@@ -5447,24 +5497,43 @@ select_best_admin(Oid member, Oid role)
  * role has 'em all.  In this case we pick a role with the largest number
  * of desired options.  Ties are broken in favor of closer ancestors.
  *
- * roleId: the role attempting to do the GRANT/REVOKE
+ * grantedBy: the GRANTED BY clause of GRANT/REVOKE, or NULL if none
  * privileges: the privileges to be granted/revoked
  * acl: the ACL of the object in question
  * ownerId: the role owning the object in question
  * *grantorId: receives the OID of the role to do the grant as
- * *grantOptions: receives the grant options actually held by grantorId
- *
- * If no grant options exist, we set grantorId to roleId, grantOptions to 0.
+ * *grantOptions: receives grant options actually held by grantorId (maybe 0)
  */
 void
-select_best_grantor(Oid roleId, AclMode privileges,
+select_best_grantor(const RoleSpec *grantedBy, AclMode privileges,
 					const Acl *acl, Oid ownerId,
 					Oid *grantorId, AclMode *grantOptions)
 {
+	Oid			roleId = GetUserId();
 	AclMode		needed_goptions = ACL_GRANT_OPTION_FOR(privileges);
 	List	   *roles_list;
 	int			nrights;
 	ListCell   *l;
+
+	/*
+	 * If we have GRANTED BY, resolve it and verify current user is allowed to
+	 * specify that role.
+	 */
+	if (grantedBy)
+	{
+		Oid			grantor = get_rolespec_oid(grantedBy, false);
+
+		if (!has_privs_of_role(roleId, grantor))
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("must inherit privileges of role \"%s\"",
+							GetUserNameFromId(grantor, false))));
+		/* Use exactly that grantor, whether it has privileges or not */
+		*grantorId = grantor;
+		*grantOptions = aclmask_direct(acl, grantor, ownerId,
+									   needed_goptions, ACLMASK_ALL);
+		return;
+	}
 
 	/*
 	 * The object owner is always treated as having all grant options, so if

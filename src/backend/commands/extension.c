@@ -12,7 +12,7 @@
  * postgresql.conf.  An extension also has an installation script file,
  * containing SQL commands to create the extension's objects.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -45,6 +45,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/alter.h"
 #include "commands/comment.h"
@@ -62,11 +63,13 @@
 #include "utils/builtins.h"
 #include "utils/conffiles.h"
 #include "utils/fmgroids.h"
+#include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/tuplestore.h"
 #include "utils/varlena.h"
 
 
@@ -126,7 +129,42 @@ typedef struct
 	ParseLoc	stmt_len;		/* length in bytes; 0 means "rest of string" */
 } script_error_callback_arg;
 
+/*
+ * A location based on the extension_control_path GUC.
+ *
+ * The macro field stores the name of a macro (for example “$system”) that
+ * the extension_control_path processing supports, and which can be replaced
+ * by a system value stored in loc.
+ *
+ * For non-system paths the macro field is NULL.
+ */
+typedef struct
+{
+	char	   *macro;
+	char	   *loc;
+} ExtensionLocation;
+
+/*
+ * Cache structure for get_function_sibling_type (and maybe later,
+ * allied lookup functions).
+ */
+typedef struct ExtensionSiblingCache
+{
+	struct ExtensionSiblingCache *next; /* list link */
+	/* lookup key: requesting function's OID and type name */
+	Oid			reqfuncoid;
+	const char *typname;
+	bool		valid;			/* is entry currently valid? */
+	uint32		exthash;		/* cache hash of owning extension's OID */
+	Oid			typeoid;		/* OID associated with typname */
+} ExtensionSiblingCache;
+
+/* Head of linked list of ExtensionSiblingCache structs */
+static ExtensionSiblingCache *ext_sibling_list = NULL;
+
 /* Local functions */
+static void ext_sibling_callback(Datum arg, SysCacheIdentifier cacheid,
+								 uint32 hashvalue);
 static List *find_update_path(List *evi_list,
 							  ExtensionVersionInfo *evi_start,
 							  ExtensionVersionInfo *evi_target,
@@ -140,7 +178,8 @@ static Oid	get_required_extension(char *reqExtensionName,
 								   bool is_create);
 static void get_available_versions_for_extension(ExtensionControlFile *pcontrol,
 												 Tuplestorestate *tupstore,
-												 TupleDesc tupdesc);
+												 TupleDesc tupdesc,
+												 ExtensionLocation *location);
 static Datum convert_requires_to_datum(List *requires);
 static void ApplyExtensionUpdates(Oid extensionOid,
 								  ExtensionControlFile *pcontrol,
@@ -156,6 +195,29 @@ static char *read_whole_file(const char *filename, int *length);
 static ExtensionControlFile *new_ExtensionControlFile(const char *extname);
 
 char	   *find_in_paths(const char *basename, List *paths);
+
+/*
+ *  Return the extension location. If the current user doesn't have sufficient
+ *  privilege, don't show the location.
+ */
+static char *
+get_extension_location(ExtensionLocation *loc)
+{
+	/* We only want to show extension paths for superusers. */
+	if (superuser())
+	{
+		/* Return the macro value if present to avoid showing system paths. */
+		if (loc->macro != NULL)
+			return loc->macro;
+		else
+			return loc->loc;
+	}
+	else
+	{
+		/* Similar to pg_stat_activity for unprivileged users */
+		return "<insufficient privilege>";
+	}
+}
 
 /*
  * get_extension_oid - given an extension name, look up the OID
@@ -222,6 +284,114 @@ get_extension_schema(Oid ext_oid)
 	ReleaseSysCache(tuple);
 
 	return result;
+}
+
+/*
+ * get_function_sibling_type - find a type belonging to same extension as func
+ *
+ * Returns the type's OID, or InvalidOid if not found.
+ *
+ * This is useful in extensions, which won't have fixed object OIDs.
+ * We work from the calling function's own OID, which it can get from its
+ * FunctionCallInfo parameter, and look up the owning extension and thence
+ * a type belonging to the same extension.
+ *
+ * Notice that the type is specified by name only, without a schema.
+ * That's because this will typically be used by relocatable extensions
+ * which can't make a-priori assumptions about which schema their objects
+ * are in.  As long as the extension only defines one type of this name,
+ * the answer is unique anyway.
+ *
+ * We might later add the ability to look up functions, operators, etc.
+ *
+ * This code is simply a frontend for some pg_depend lookups.  Those lookups
+ * are fairly expensive, so we provide a simple cache facility.  We assume
+ * that the passed typname is actually a C constant, or at least permanently
+ * allocated, so that we need not copy that string.
+ */
+Oid
+get_function_sibling_type(Oid funcoid, const char *typname)
+{
+	ExtensionSiblingCache *cache_entry;
+	Oid			extoid;
+	Oid			typeoid;
+
+	/*
+	 * See if we have the answer cached.  Someday there may be enough callers
+	 * to justify a hash table, but for now, a simple linked list is fine.
+	 */
+	for (cache_entry = ext_sibling_list; cache_entry != NULL;
+		 cache_entry = cache_entry->next)
+	{
+		if (funcoid == cache_entry->reqfuncoid &&
+			strcmp(typname, cache_entry->typname) == 0)
+			break;
+	}
+	if (cache_entry && cache_entry->valid)
+		return cache_entry->typeoid;
+
+	/*
+	 * Nope, so do the expensive lookups.  We do not expect failures, so we do
+	 * not cache negative results.
+	 */
+	extoid = getExtensionOfObject(ProcedureRelationId, funcoid);
+	if (!OidIsValid(extoid))
+		return InvalidOid;
+	typeoid = getExtensionType(extoid, typname);
+	if (!OidIsValid(typeoid))
+		return InvalidOid;
+
+	/*
+	 * Build, or revalidate, cache entry.
+	 */
+	if (cache_entry == NULL)
+	{
+		/* Register invalidation hook if this is first entry */
+		if (ext_sibling_list == NULL)
+			CacheRegisterSyscacheCallback(EXTENSIONOID,
+										  ext_sibling_callback,
+										  (Datum) 0);
+
+		/* Momentarily zero the space to ensure valid flag is false */
+		cache_entry = (ExtensionSiblingCache *)
+			MemoryContextAllocZero(CacheMemoryContext,
+								   sizeof(ExtensionSiblingCache));
+		cache_entry->next = ext_sibling_list;
+		ext_sibling_list = cache_entry;
+	}
+
+	cache_entry->reqfuncoid = funcoid;
+	cache_entry->typname = typname;
+	cache_entry->exthash = GetSysCacheHashValue1(EXTENSIONOID,
+												 ObjectIdGetDatum(extoid));
+	cache_entry->typeoid = typeoid;
+	/* Mark it valid only once it's fully populated */
+	cache_entry->valid = true;
+
+	return typeoid;
+}
+
+/*
+ * ext_sibling_callback
+ *		Syscache inval callback function for EXTENSIONOID cache
+ *
+ * It seems sufficient to invalidate ExtensionSiblingCache entries when
+ * the owning extension's pg_extension entry is modified or deleted.
+ * Neither a requesting function's OID, nor the OID of the object it's
+ * looking for, could change without an extension update or drop/recreate.
+ */
+static void
+ext_sibling_callback(Datum arg, SysCacheIdentifier cacheid, uint32 hashvalue)
+{
+	ExtensionSiblingCache *cache_entry;
+
+	for (cache_entry = ext_sibling_list; cache_entry != NULL;
+		 cache_entry = cache_entry->next)
+	{
+		if (hashvalue == 0 ||
+			cache_entry->exthash == hashvalue)
+			cache_entry->valid = false;
+	}
 }
 
 /*
@@ -338,7 +508,7 @@ is_extension_script_filename(const char *filename)
 }
 
 /*
- * Return a list of directories declared on extension_control_path GUC.
+ * Return a list of directories declared in the extension_control_path GUC.
  */
 static List *
 get_extension_control_directories(void)
@@ -354,7 +524,11 @@ get_extension_control_directories(void)
 
 	if (strlen(Extension_control_path) == 0)
 	{
-		paths = lappend(paths, system_dir);
+		ExtensionLocation *location = palloc_object(ExtensionLocation);
+
+		location->macro = NULL;
+		location->loc = system_dir;
+		paths = lappend(paths, location);
 	}
 	else
 	{
@@ -366,6 +540,7 @@ get_extension_control_directories(void)
 			int			len;
 			char	   *mangled;
 			char	   *piece = first_path_var_separator(ecp);
+			ExtensionLocation *location = palloc_object(ExtensionLocation);
 
 			/* Get the length of the next path on ecp */
 			if (piece == NULL)
@@ -382,15 +557,21 @@ get_extension_control_directories(void)
 			 * suffix if it is a custom extension control path.
 			 */
 			if (strcmp(piece, "$system") == 0)
+			{
+				location->macro = pstrdup(piece);
 				mangled = substitute_path_macro(piece, "$system", system_dir);
+			}
 			else
+			{
+				location->macro = NULL;
 				mangled = psprintf("%s/extension", piece);
-
+			}
 			pfree(piece);
 
 			/* Canonicalize the path based on the OS and add to the list */
 			canonicalize_path(mangled);
-			paths = lappend(paths, mangled);
+			location->loc = mangled;
+			paths = lappend(paths, location);
 
 			/* Break if ecp is empty or move to the next path on ecp */
 			if (ecp[len] == '\0')
@@ -404,9 +585,9 @@ get_extension_control_directories(void)
 }
 
 /*
- * Find control file for extension with name in control->name, looking in the
- * path.  Return the full file name, or NULL if not found.  If found, the
- * directory is recorded in control->control_dir.
+ * Find control file for extension with name in control->name, looking in
+ * available paths.  Return the full file name, or NULL if not found.
+ * If found, the directory is recorded in control->control_dir.
  */
 static char *
 find_extension_control_filename(ExtensionControlFile *control)
@@ -440,7 +621,7 @@ get_extension_script_directory(ExtensionControlFile *control)
 	/*
 	 * The directory parameter can be omitted, absolute, or relative to the
 	 * installation's base directory, which can be the sharedir or a custom
-	 * path that it was set extension_control_path. It depends where the
+	 * path that was set via extension_control_path. It depends on where the
 	 * .control file was found.
 	 */
 	if (!control->directory)
@@ -499,10 +680,8 @@ get_extension_script_filename(ExtensionControlFile *control,
  * fields of *control.  We parse primary file if version == NULL,
  * else the optional auxiliary file for that version.
  *
- * The control file will be search on Extension_control_path paths if
- * control->control_dir is NULL, otherwise it will use the value of control_dir
- * to read and parse the .control file, so it assume that the control_dir is a
- * valid path for the control file being parsed.
+ * If control->control_dir is not NULL, use that to read and parse the
+ * control file, otherwise search for the file in extension_control_path.
  *
  * Control files are supposed to be very short, half a dozen lines,
  * so we don't worry about memory allocation risks here.  Also we don't
@@ -724,7 +903,7 @@ read_extension_aux_control_file(const ExtensionControlFile *pcontrol,
 	/*
 	 * Flat-copy the struct.  Pointer fields share values with original.
 	 */
-	acontrol = (ExtensionControlFile *) palloc(sizeof(ExtensionControlFile));
+	acontrol = palloc_object(ExtensionControlFile);
 	memcpy(acontrol, pcontrol, sizeof(ExtensionControlFile));
 
 	/*
@@ -931,7 +1110,7 @@ execute_sql_string(const char *sql, const char *filename)
 	callback_arg.stmt_len = -1;
 
 	scripterrcontext.callback = script_error_callback;
-	scripterrcontext.arg = (void *) &callback_arg;
+	scripterrcontext.arg = &callback_arg;
 	scripterrcontext.previous = error_context_stack;
 	error_context_stack = &scripterrcontext;
 
@@ -1143,7 +1322,7 @@ execute_extension_script(Oid extensionOid, ExtensionControlFile *control,
 		(void) set_config_option("client_min_messages", "warning",
 								 PGC_USERSET, PGC_S_SESSION,
 								 GUC_ACTION_SAVE, true, 0, false);
-	if (log_min_messages < WARNING)
+	if (log_min_messages[MyBackendType] < WARNING)
 		(void) set_config_option_ext("log_min_messages", "warning",
 									 PGC_SUSET, PGC_S_SESSION,
 									 BOOTSTRAP_SUPERUSERID,
@@ -1349,7 +1528,7 @@ get_ext_ver_info(const char *versionname, List **evi_list)
 			return evi;
 	}
 
-	evi = (ExtensionVersionInfo *) palloc(sizeof(ExtensionVersionInfo));
+	evi = palloc_object(ExtensionVersionInfo);
 	evi->name = pstrdup(versionname);
 	evi->reachable = NIL;
 	evi->installable = false;
@@ -1773,14 +1952,17 @@ CreateExtensionInternal(char *extensionName,
 
 		if (!OidIsValid(schemaOid))
 		{
+			ParseState *pstate = make_parsestate(NULL);
 			CreateSchemaStmt *csstmt = makeNode(CreateSchemaStmt);
+
+			pstate->p_sourcetext = "(generated CREATE SCHEMA command)";
 
 			csstmt->schemaname = schemaName;
 			csstmt->authrole = NULL;	/* will be created by current user */
 			csstmt->schemaElts = NIL;
 			csstmt->if_not_exists = false;
-			CreateSchemaCommand(csstmt, "(generated CREATE SCHEMA command)",
-								-1, -1);
+
+			CreateSchemaCommand(pstate, csstmt, -1, -1);
 
 			/*
 			 * CreateSchemaCommand includes CommandCounterIncrement, so new
@@ -2208,15 +2390,16 @@ pg_available_extensions(PG_FUNCTION_ARGS)
 	List	   *locations;
 	DIR		   *dir;
 	struct dirent *de;
+	List	   *found_ext = NIL;
 
 	/* Build tuplestore to hold the result rows */
 	InitMaterializedSRF(fcinfo, 0);
 
 	locations = get_extension_control_directories();
 
-	foreach_ptr(char, location, locations)
+	foreach_ptr(ExtensionLocation, location, locations)
 	{
-		dir = AllocateDir(location);
+		dir = AllocateDir(location->loc);
 
 		/*
 		 * If the control directory doesn't exist, we want to silently return
@@ -2228,12 +2411,13 @@ pg_available_extensions(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			while ((de = ReadDir(dir, location)) != NULL)
+			while ((de = ReadDir(dir, location->loc)) != NULL)
 			{
 				ExtensionControlFile *control;
 				char	   *extname;
-				Datum		values[3];
-				bool		nulls[3];
+				String	   *extname_str;
+				Datum		values[4];
+				bool		nulls[4];
 
 				if (!is_extension_control_filename(de->d_name))
 					continue;
@@ -2246,8 +2430,18 @@ pg_available_extensions(PG_FUNCTION_ARGS)
 				if (strstr(extname, "--"))
 					continue;
 
+				/*
+				 * Ignore already-found names.  They are not reachable by the
+				 * path search, so don't show them.
+				 */
+				extname_str = makeString(extname);
+				if (list_member(found_ext, extname_str))
+					continue;
+				else
+					found_ext = lappend(found_ext, extname_str);
+
 				control = new_ExtensionControlFile(extname);
-				control->control_dir = pstrdup(location);
+				control->control_dir = pstrdup(location->loc);
 				parse_extension_control_file(control, NULL);
 
 				memset(values, 0, sizeof(values));
@@ -2261,11 +2455,15 @@ pg_available_extensions(PG_FUNCTION_ARGS)
 					nulls[1] = true;
 				else
 					values[1] = CStringGetTextDatum(control->default_version);
+
+				/* location */
+				values[2] = CStringGetTextDatum(get_extension_location(location));
+
 				/* comment */
 				if (control->comment == NULL)
-					nulls[2] = true;
+					nulls[3] = true;
 				else
-					values[2] = CStringGetTextDatum(control->comment);
+					values[3] = CStringGetTextDatum(control->comment);
 
 				tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc,
 									 values, nulls);
@@ -2294,15 +2492,16 @@ pg_available_extension_versions(PG_FUNCTION_ARGS)
 	List	   *locations;
 	DIR		   *dir;
 	struct dirent *de;
+	List	   *found_ext = NIL;
 
 	/* Build tuplestore to hold the result rows */
 	InitMaterializedSRF(fcinfo, 0);
 
 	locations = get_extension_control_directories();
 
-	foreach_ptr(char, location, locations)
+	foreach_ptr(ExtensionLocation, location, locations)
 	{
-		dir = AllocateDir(location);
+		dir = AllocateDir(location->loc);
 
 		/*
 		 * If the control directory doesn't exist, we want to silently return
@@ -2314,10 +2513,11 @@ pg_available_extension_versions(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			while ((de = ReadDir(dir, location)) != NULL)
+			while ((de = ReadDir(dir, location->loc)) != NULL)
 			{
 				ExtensionControlFile *control;
 				char	   *extname;
+				String	   *extname_str;
 
 				if (!is_extension_control_filename(de->d_name))
 					continue;
@@ -2330,14 +2530,25 @@ pg_available_extension_versions(PG_FUNCTION_ARGS)
 				if (strstr(extname, "--"))
 					continue;
 
+				/*
+				 * Ignore already-found names.  They are not reachable by the
+				 * path search, so don't show them.
+				 */
+				extname_str = makeString(extname);
+				if (list_member(found_ext, extname_str))
+					continue;
+				else
+					found_ext = lappend(found_ext, extname_str);
+
 				/* read the control file */
 				control = new_ExtensionControlFile(extname);
-				control->control_dir = pstrdup(location);
+				control->control_dir = pstrdup(location->loc);
 				parse_extension_control_file(control, NULL);
 
 				/* scan extension's script directory for install scripts */
 				get_available_versions_for_extension(control, rsinfo->setResult,
-													 rsinfo->setDesc);
+													 rsinfo->setDesc,
+													 location);
 			}
 
 			FreeDir(dir);
@@ -2354,7 +2565,8 @@ pg_available_extension_versions(PG_FUNCTION_ARGS)
 static void
 get_available_versions_for_extension(ExtensionControlFile *pcontrol,
 									 Tuplestorestate *tupstore,
-									 TupleDesc tupdesc)
+									 TupleDesc tupdesc,
+									 ExtensionLocation *location)
 {
 	List	   *evi_list;
 	ListCell   *lc;
@@ -2367,8 +2579,8 @@ get_available_versions_for_extension(ExtensionControlFile *pcontrol,
 	{
 		ExtensionVersionInfo *evi = (ExtensionVersionInfo *) lfirst(lc);
 		ExtensionControlFile *control;
-		Datum		values[8];
-		bool		nulls[8];
+		Datum		values[9];
+		bool		nulls[9];
 		ListCell   *lc2;
 
 		if (!evi->installable)
@@ -2404,11 +2616,15 @@ get_available_versions_for_extension(ExtensionControlFile *pcontrol,
 			nulls[6] = true;
 		else
 			values[6] = convert_requires_to_datum(control->requires);
+
+		/* location */
+		values[7] = CStringGetTextDatum(get_extension_location(location));
+
 		/* comment */
 		if (control->comment == NULL)
-			nulls[7] = true;
+			nulls[8] = true;
 		else
-			values[7] = CStringGetTextDatum(control->comment);
+			values[8] = CStringGetTextDatum(control->comment);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
@@ -2449,7 +2665,7 @@ get_available_versions_for_extension(ExtensionControlFile *pcontrol,
 					values[6] = convert_requires_to_datum(control->requires);
 					nulls[6] = false;
 				}
-				/* comment stays the same */
+				/* comment and location stay the same */
 
 				tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 			}
@@ -2475,9 +2691,9 @@ extension_file_exists(const char *extensionName)
 
 	locations = get_extension_control_directories();
 
-	foreach_ptr(char, location, locations)
+	foreach_ptr(ExtensionLocation, location, locations)
 	{
-		dir = AllocateDir(location);
+		dir = AllocateDir(location->loc);
 
 		/*
 		 * If the control directory doesn't exist, we want to silently return
@@ -2489,7 +2705,7 @@ extension_file_exists(const char *extensionName)
 		}
 		else
 		{
-			while ((de = ReadDir(dir, location)) != NULL)
+			while ((de = ReadDir(dir, location->loc)) != NULL)
 			{
 				char	   *extname;
 
@@ -3865,12 +4081,10 @@ new_ExtensionControlFile(const char *extname)
 }
 
 /*
- * Work in a very similar way with find_in_path but it receives an already
- * parsed List of paths to search the basename and it do not support macro
- * replacement or custom error messages (for simplicity).
+ * Search for the basename in the list of paths.
  *
- * By "already parsed List of paths" this function expected that paths already
- * have all macros replaced.
+ * Similar to find_in_path but for simplicity does not support custom error
+ * messages and expects that paths already have all macros replaced.
  */
 char *
 find_in_paths(const char *basename, List *paths)
@@ -3879,7 +4093,8 @@ find_in_paths(const char *basename, List *paths)
 
 	foreach(cell, paths)
 	{
-		char	   *path = lfirst(cell);
+		ExtensionLocation *location = lfirst(cell);
+		char	   *path = location->loc;
 		char	   *full;
 
 		Assert(path != NULL);

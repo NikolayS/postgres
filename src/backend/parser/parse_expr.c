@@ -3,7 +3,7 @@
  * parse_expr.c
  *	  handle expressions in parser
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -15,9 +15,9 @@
 
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_type.h"
-#include "commands/dbcommands.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -29,6 +29,7 @@
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_func.h"
+#include "parser/parse_graphtable.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
@@ -38,6 +39,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/timestamp.h"
+#include "utils/typcache.h"
 #include "utils/xml.h"
 
 /* GUC parameters */
@@ -94,7 +96,8 @@ static Node *transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func);
 static void transformJsonPassingArgs(ParseState *pstate, const char *constructName,
 									 JsonFormatType format, List *args,
 									 List **passing_values, List **passing_names);
-static JsonBehavior *transformJsonBehavior(ParseState *pstate, JsonBehavior *behavior,
+static JsonBehavior *transformJsonBehavior(ParseState *pstate, JsonExpr *jsexpr,
+										   JsonBehavior *behavior,
 										   JsonBehaviorType default_behavior,
 										   JsonReturning *returning);
 static Node *GetJsonBehaviorConst(JsonBehaviorType btype, int location);
@@ -326,7 +329,7 @@ transformExprRecurse(ParseState *pstate, Node *expr)
 		case T_CaseTestExpr:
 		case T_Var:
 			{
-				result = (Node *) expr;
+				result = expr;
 				break;
 			}
 
@@ -575,6 +578,7 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		case EXPR_KIND_COPY_WHERE:
 		case EXPR_KIND_GENERATED_COLUMN:
 		case EXPR_KIND_CYCLE_MARK:
+		case EXPR_KIND_PROPGRAPH_PROPERTY:
 			/* okay */
 			break;
 
@@ -583,6 +587,9 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 			break;
 		case EXPR_KIND_PARTITION_BOUND:
 			err = _("cannot use column reference in partition bound expression");
+			break;
+		case EXPR_KIND_FOR_PORTION:
+			err = _("cannot use column reference in FOR PORTION OF expression");
 			break;
 
 			/*
@@ -609,6 +616,16 @@ transformColumnRef(ParseState *pstate, ColumnRef *cref)
 		if (node != NULL)
 			return node;
 	}
+
+	/*
+	 * Element pattern variables in a GRAPH_TABLE clause form the innermost
+	 * namespace since we do not allow subqueries in GRAPH_TABLE patterns. Try
+	 * to resolve the column reference as a graph table property reference
+	 * before trying to resolve it as a regular column reference.
+	 */
+	node = transformGraphTablePropertyRef(pstate, cref);
+	if (node != NULL)
+		return node;
 
 	/*----------
 	 * The allowed syntaxes are:
@@ -1130,6 +1147,7 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 	List	   *rnonvars;
 	bool		useOr;
 	ListCell   *l;
+	bool		has_rvars = false;
 
 	/*
 	 * If the operator is <>, combine with AND not OR.
@@ -1158,7 +1176,10 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 
 		rexprs = lappend(rexprs, rexpr);
 		if (contain_vars_of_level(rexpr, 0))
+		{
 			rvars = lappend(rvars, rexpr);
+			has_rvars = true;
+		}
 		else
 			rnonvars = lappend(rnonvars, rexpr);
 	}
@@ -1224,6 +1245,13 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			newa->elements = aexprs;
 			newa->multidims = false;
 			newa->location = -1;
+
+			/*
+			 * If the IN expression contains Vars, disable query jumbling
+			 * squashing.  Vars cannot be safely jumbled.
+			 */
+			newa->list_start = has_rvars ? -1 : a->rexpr_list_start;
+			newa->list_end = has_rvars ? -1 : a->rexpr_list_end;
 
 			result = (Node *) make_scalar_array_op(pstate,
 												   a->name,
@@ -1858,6 +1886,12 @@ transformSubLink(ParseState *pstate, SubLink *sublink)
 		case EXPR_KIND_GENERATED_COLUMN:
 			err = _("cannot use subquery in column generation expression");
 			break;
+		case EXPR_KIND_PROPGRAPH_PROPERTY:
+			err = _("cannot use subquery in property definition expression");
+			break;
+		case EXPR_KIND_FOR_PORTION:
+			err = _("cannot use subquery in FOR PORTION OF expression");
+			break;
 
 			/*
 			 * There is intentionally no default: case here, so that the
@@ -2165,6 +2199,8 @@ transformArrayExpr(ParseState *pstate, A_ArrayExpr *a,
 	/* array_collid will be set by parse_collate.c */
 	newa->element_typeid = element_type;
 	newa->elements = newcoercedelems;
+	newa->list_start = a->list_start;
+	newa->list_end = a->list_end;
 	newa->location = a->location;
 
 	return (Node *) newa;
@@ -2901,7 +2937,7 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 	 * operators, and see which interpretations (cmptypes) exist for each
 	 * operator.
 	 */
-	opinfo_lists = (List **) palloc(nopers * sizeof(List *));
+	opinfo_lists = palloc_array(List *, nopers);
 	cmptypes = NULL;
 	i = 0;
 	foreach(l, opexprs)
@@ -3215,6 +3251,10 @@ ParseExprKindName(ParseExprKind exprKind)
 			return "GENERATED AS";
 		case EXPR_KIND_CYCLE_MARK:
 			return "CYCLE";
+		case EXPR_KIND_PROPGRAPH_PROPERTY:
+			return "property definition expression";
+		case EXPR_KIND_FOR_PORTION:
+			return "FOR PORTION OF";
 
 			/*
 			 * There is intentionally no default: case here, so that the
@@ -3236,7 +3276,7 @@ getJsonEncodingConst(JsonFormat *format)
 {
 	JsonEncoding encoding;
 	const char *enc;
-	Name		encname = palloc(sizeof(NameData));
+	Name		encname = palloc_object(NameData);
 
 	if (!format ||
 		format->format_type == JS_FORMAT_DEFAULT ||
@@ -3752,24 +3792,53 @@ transformJsonObjectConstructor(ParseState *pstate, JsonObjectConstructor *ctor)
 }
 
 /*
- * Transform JSON_ARRAY(query [FORMAT] [RETURNING] [ON NULL]) into
- *  (SELECT  JSON_ARRAYAGG(a  [FORMAT] [RETURNING] [ON NULL]) FROM (query) q(a))
+ * Transform JSON_ARRAY(subquery) constructor.
+ *
+ * JSON_ARRAY(subquery) is transformed into a JsonConstructorExpr node of type
+ * JSCTOR_JSON_ARRAY_QUERY.  The node carries:
+ *
+ *  - func: the executable form, which is a COALESCE expression wrapping a
+ *    JSON_ARRAYAGG subquery:
+ *
+ *        COALESCE((SELECT JSON_ARRAYAGG(a) FROM (subquery) q(a)), '[]')
+ *
+ *    The COALESCE ensures that an empty result set produces '[]' rather than
+ *    NULL, per the SQL/JSON standard.
+ *
+ *  - orig_query: the transformed Query of the user's original subquery, so
+ *    that ruleutils.c can deparse the original JSON_ARRAY(SELECT ...) syntax
+ *    for view definitions.
  */
 static Node *
 transformJsonArrayQueryConstructor(ParseState *pstate,
 								   JsonArrayQueryConstructor *ctor)
 {
-	SubLink    *sublink = makeNode(SubLink);
-	SelectStmt *select = makeNode(SelectStmt);
-	RangeSubselect *range = makeNode(RangeSubselect);
-	Alias	   *alias = makeNode(Alias);
-	ResTarget  *target = makeNode(ResTarget);
-	JsonArrayAgg *agg = makeNode(JsonArrayAgg);
-	ColumnRef  *colref = makeNode(ColumnRef);
 	Query	   *query;
 	ParseState *qpstate;
+	SubLink    *sublink;
+	SelectStmt *select;
+	RangeSubselect *range;
+	Alias	   *alias;
+	ResTarget  *target;
+	JsonArrayAgg *agg;
+	ColumnRef  *colref;
+	Node	   *exec_expr;
+	CoalesceExpr *coalesce;
+	Const	   *empty_const;
+	Oid			result_type;
+	Oid			typinput;
+	Oid			typioparam;
+	int16		typlen;
+	bool		typbyval;
+	JsonReturning *returning;
+	List	   *args;
+	Node	   *result;
 
-	/* Transform query only for counting target list entries. */
+	/*
+	 * Transform a copy of the subquery to validate the single-column
+	 * constraint and to obtain the transformed Query for deparsing.  This
+	 * uses a private ParseState so it doesn't affect the main parse context.
+	 */
 	qpstate = make_parsestate(pstate);
 
 	query = transformStmt(qpstate, copyObject(ctor->query));
@@ -3782,14 +3851,20 @@ transformJsonArrayQueryConstructor(ParseState *pstate,
 
 	free_parsestate(qpstate);
 
+	/*
+	 * Build the executable form by constructing query:
+	 *
+	 * (SELECT JSON_ARRAYAGG(a [FORMAT] [RETURNING]) FROM (subquery) q(a))
+	 *
+	 * ... using raw parse tree nodes, then transforming via
+	 * transformExprRecurse.
+	 */
+	colref = makeNode(ColumnRef);
 	colref->fields = list_make2(makeString(pstrdup("q")),
 								makeString(pstrdup("a")));
 	colref->location = ctor->location;
 
-	/*
-	 * No formatting necessary, so set formatted_expr to be the same as
-	 * raw_expr.
-	 */
+	agg = makeNode(JsonArrayAgg);
 	agg->arg = makeJsonValueExpr((Expr *) colref, (Expr *) colref,
 								 ctor->format);
 	agg->absent_on_null = ctor->absent_on_null;
@@ -3798,21 +3873,26 @@ transformJsonArrayQueryConstructor(ParseState *pstate,
 	agg->constructor->output = ctor->output;
 	agg->constructor->location = ctor->location;
 
+	target = makeNode(ResTarget);
 	target->name = NULL;
 	target->indirection = NIL;
 	target->val = (Node *) agg;
 	target->location = ctor->location;
 
+	alias = makeNode(Alias);
 	alias->aliasname = pstrdup("q");
 	alias->colnames = list_make1(makeString(pstrdup("a")));
 
+	range = makeNode(RangeSubselect);
 	range->lateral = false;
 	range->subquery = ctor->query;
 	range->alias = alias;
 
+	select = makeNode(SelectStmt);
 	select->targetList = list_make1(target);
 	select->fromClause = list_make1(range);
 
+	sublink = makeNode(SubLink);
 	sublink->subLinkType = EXPR_SUBLINK;
 	sublink->subLinkId = 0;
 	sublink->testexpr = NULL;
@@ -3820,7 +3900,48 @@ transformJsonArrayQueryConstructor(ParseState *pstate,
 	sublink->subselect = (Node *) select;
 	sublink->location = ctor->location;
 
-	return transformExprRecurse(pstate, (Node *) sublink);
+	exec_expr = transformExprRecurse(pstate, (Node *) sublink);
+
+	/*
+	 * Wrap in COALESCE so that an empty result set produces '[]' rather than
+	 * NULL.  The empty-array constant is created in the output type so that
+	 * the COALESCE arguments have consistent types.
+	 */
+	result_type = exprType(exec_expr);
+	getTypeInputInfo(result_type, &typinput, &typioparam);
+	get_typlenbyval(result_type, &typlen, &typbyval);
+
+	empty_const = makeConst(result_type,
+							-1,
+							exprCollation(exec_expr),
+							(int) typlen,
+							OidInputFunctionCall(typinput, "[]",
+												 typioparam, -1),
+							false,
+							typbyval);
+
+	coalesce = makeNode(CoalesceExpr);
+	coalesce->coalescetype = result_type;
+	coalesce->coalescecollid = exprCollation(exec_expr);
+	coalesce->args = list_make2(exec_expr, empty_const);
+	coalesce->location = ctor->location;
+
+	/*
+	 * Build the JSCTOR_JSON_ARRAY_QUERY node.  The COALESCE goes in func as
+	 * the executable form; during planning, eval_const_expressions replaces
+	 * the entire node with func.  The transformed Query is stored in
+	 * orig_query so that ruleutils.c can deparse the original syntax.
+	 */
+	args = list_make1(linitial_node(TargetEntry, query->targetList)->expr);
+	returning = transformJsonConstructorOutput(pstate, ctor->output, args);
+
+	result = makeJsonConstructorExpr(pstate, JSCTOR_JSON_ARRAY_QUERY,
+									 NIL, (Expr *) coalesce, returning,
+									 false, ctor->absent_on_null,
+									 ctor->location);
+	((JsonConstructorExpr *) result)->orig_query = (Node *) query;
+
+	return result;
 }
 
 /*
@@ -4051,7 +4172,7 @@ transformJsonParseArg(ParseState *pstate, Node *jsexpr, JsonFormat *format,
 	Node	   *raw_expr = transformExprRecurse(pstate, jsexpr);
 	Node	   *expr = raw_expr;
 
-	*exprtype = exprType(expr);
+	*exprtype = getBaseType(exprType(expr));
 
 	/* prepare input document */
 	if (*exprtype == BYTEAOID)
@@ -4074,7 +4195,7 @@ transformJsonParseArg(ParseState *pstate, Node *jsexpr, JsonFormat *format,
 
 		if (*exprtype == UNKNOWNOID || typcategory == TYPCATEGORY_STRING)
 		{
-			expr = coerce_to_target_type(pstate, (Node *) expr, *exprtype,
+			expr = coerce_to_target_type(pstate, expr, *exprtype,
 										 TEXTOID, -1,
 										 COERCION_IMPLICIT,
 										 COERCE_IMPLICIT_CAST, -1);
@@ -4104,13 +4225,14 @@ transformJsonIsPredicate(ParseState *pstate, JsonIsPredicate *pred)
 	/* make resulting expression */
 	if (exprtype != TEXTOID && exprtype != JSONOID && exprtype != JSONBOID)
 		ereport(ERROR,
-				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("cannot use type %s in IS JSON predicate",
-						format_type_be(exprtype))));
+				errcode(ERRCODE_DATATYPE_MISMATCH),
+				errmsg("cannot use type %s in IS JSON predicate",
+					   format_type_be(exprType(expr))),
+				parser_errposition(pstate, exprLocation(expr)));
 
 	/* This intentionally(?) drops the format clause. */
 	return makeJsonIsPredicate(expr, NULL, pred->item_type,
-							   pred->unique_keys, pred->location);
+							   pred->unique_keys, exprtype, pred->location);
 }
 
 /*
@@ -4280,6 +4402,9 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 {
 	JsonExpr   *jsexpr;
 	Node	   *path_spec;
+	Oid			pathspec_type;
+	int			pathspec_loc;
+	Node	   *coerced_path_spec;
 	const char *func_name = NULL;
 	JsonFormatType default_format;
 
@@ -4495,17 +4620,21 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 	jsexpr->format = func->context_item->format;
 
 	path_spec = transformExprRecurse(pstate, func->pathspec);
-	path_spec = coerce_to_target_type(pstate, path_spec, exprType(path_spec),
-									  JSONPATHOID, -1,
-									  COERCION_EXPLICIT, COERCE_IMPLICIT_CAST,
-									  exprLocation(path_spec));
-	if (path_spec == NULL)
+	pathspec_type = exprType(path_spec);
+	pathspec_loc = exprLocation(path_spec);
+	coerced_path_spec = coerce_to_target_type(pstate, path_spec,
+											  pathspec_type,
+											  JSONPATHOID, -1,
+											  COERCION_EXPLICIT,
+											  COERCE_IMPLICIT_CAST,
+											  pathspec_loc);
+	if (coerced_path_spec == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("JSON path expression must be of type %s, not of type %s",
-						"jsonpath", format_type_be(exprType(path_spec))),
-				 parser_errposition(pstate, exprLocation(path_spec))));
-	jsexpr->path_spec = path_spec;
+						"jsonpath", format_type_be(pathspec_type)),
+				 parser_errposition(pstate, pathspec_loc)));
+	jsexpr->path_spec = coerced_path_spec;
 
 	/* Transform and coerce the PASSING arguments to jsonb. */
 	transformJsonPassingArgs(pstate, func_name,
@@ -4525,13 +4654,16 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 			{
 				jsexpr->returning->typid = BOOLOID;
 				jsexpr->returning->typmod = -1;
+				jsexpr->collation = InvalidOid;
 			}
 
 			/* JSON_TABLE() COLUMNS can specify a non-boolean type. */
 			if (jsexpr->returning->typid != BOOLOID)
 				jsexpr->use_json_coercion = true;
 
-			jsexpr->on_error = transformJsonBehavior(pstate, func->on_error,
+			jsexpr->on_error = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_error,
 													 JSON_BEHAVIOR_FALSE,
 													 jsexpr->returning);
 			break;
@@ -4545,6 +4677,8 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 				ret->typid = JSONBOID;
 				ret->typmod = -1;
 			}
+
+			jsexpr->collation = get_typcollation(jsexpr->returning->typid);
 
 			/*
 			 * Keep quotes on scalar strings by default, omitting them only if
@@ -4562,11 +4696,15 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 				jsexpr->use_json_coercion = true;
 
 			/* Assume NULL ON EMPTY when ON EMPTY is not specified. */
-			jsexpr->on_empty = transformJsonBehavior(pstate, func->on_empty,
+			jsexpr->on_empty = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_empty,
 													 JSON_BEHAVIOR_NULL,
 													 jsexpr->returning);
 			/* Assume NULL ON ERROR when ON ERROR is not specified. */
-			jsexpr->on_error = transformJsonBehavior(pstate, func->on_error,
+			jsexpr->on_error = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_error,
 													 JSON_BEHAVIOR_NULL,
 													 jsexpr->returning);
 			break;
@@ -4578,6 +4716,7 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 				jsexpr->returning->typid = TEXTOID;
 				jsexpr->returning->typmod = -1;
 			}
+			jsexpr->collation = get_typcollation(jsexpr->returning->typid);
 
 			/*
 			 * Override whatever transformJsonOutput() set these to, which
@@ -4596,18 +4735,22 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 			if (jsexpr->returning->typid != TEXTOID)
 			{
 				if (get_typtype(jsexpr->returning->typid) == TYPTYPE_DOMAIN &&
-					DomainHasConstraints(jsexpr->returning->typid))
+					DomainHasConstraints(jsexpr->returning->typid, NULL))
 					jsexpr->use_json_coercion = true;
 				else
 					jsexpr->use_io_coercion = true;
 			}
 
 			/* Assume NULL ON EMPTY when ON EMPTY is not specified. */
-			jsexpr->on_empty = transformJsonBehavior(pstate, func->on_empty,
+			jsexpr->on_empty = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_empty,
 													 JSON_BEHAVIOR_NULL,
 													 jsexpr->returning);
 			/* Assume NULL ON ERROR when ON ERROR is not specified. */
-			jsexpr->on_error = transformJsonBehavior(pstate, func->on_error,
+			jsexpr->on_error = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_error,
 													 JSON_BEHAVIOR_NULL,
 													 jsexpr->returning);
 			break;
@@ -4618,6 +4761,7 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 				jsexpr->returning->typid = exprType(jsexpr->formatted_expr);
 				jsexpr->returning->typmod = -1;
 			}
+			jsexpr->collation = get_typcollation(jsexpr->returning->typid);
 
 			/*
 			 * Assume EMPTY ARRAY ON ERROR when ON ERROR is not specified.
@@ -4625,7 +4769,9 @@ transformJsonFuncExpr(ParseState *pstate, JsonFuncExpr *func)
 			 * ON EMPTY cannot be specified at the top level but it can be for
 			 * the individual columns.
 			 */
-			jsexpr->on_error = transformJsonBehavior(pstate, func->on_error,
+			jsexpr->on_error = transformJsonBehavior(pstate,
+													 jsexpr,
+													 func->on_error,
 													 JSON_BEHAVIOR_EMPTY_ARRAY,
 													 jsexpr->returning);
 			break;
@@ -4701,7 +4847,8 @@ ValidJsonBehaviorDefaultExpr(Node *expr, void *context)
  * Transform a JSON BEHAVIOR clause.
  */
 static JsonBehavior *
-transformJsonBehavior(ParseState *pstate, JsonBehavior *behavior,
+transformJsonBehavior(ParseState *pstate, JsonExpr *jsexpr,
+					  JsonBehavior *behavior,
 					  JsonBehaviorType default_behavior,
 					  JsonReturning *returning)
 {
@@ -4716,7 +4863,11 @@ transformJsonBehavior(ParseState *pstate, JsonBehavior *behavior,
 		location = behavior->location;
 		if (btype == JSON_BEHAVIOR_DEFAULT)
 		{
+			Oid			targetcoll = jsexpr->collation;
+			Oid			exprcoll;
+
 			expr = transformExprRecurse(pstate, behavior->expr);
+
 			if (!ValidJsonBehaviorDefaultExpr(expr, NULL))
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -4732,6 +4883,24 @@ transformJsonBehavior(ParseState *pstate, JsonBehavior *behavior,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
 						 errmsg("DEFAULT expression must not return a set"),
 						 parser_errposition(pstate, exprLocation(expr))));
+
+			/*
+			 * Reject a DEFAULT expression whose collation differs from the
+			 * enclosing JSON expression's result collation
+			 * (jsexpr->collation), as chosen by the RETURNING clause.
+			 */
+			exprcoll = exprCollation(expr);
+			if (!OidIsValid(exprcoll))
+				exprcoll = get_typcollation(exprType(expr));
+			if (OidIsValid(targetcoll) && OidIsValid(exprcoll) &&
+				targetcoll != exprcoll)
+				ereport(ERROR,
+						errcode(ERRCODE_COLLATION_MISMATCH),
+						errmsg("collation of DEFAULT expression conflicts with RETURNING clause"),
+						errdetail("\"%s\" versus \"%s\"",
+								  get_collation_name(exprcoll),
+								  get_collation_name(targetcoll)),
+						parser_errposition(pstate, exprLocation(expr)));
 		}
 	}
 

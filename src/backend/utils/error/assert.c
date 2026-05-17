@@ -3,7 +3,7 @@
  * assert.c
  *	  Assert support code.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -32,8 +32,7 @@ ExceptionalCondition(const char *conditionName,
 					 int lineNumber)
 {
 	/* Report the failure on stderr (or local equivalent) */
-	if (!PointerIsValid(conditionName)
-		|| !PointerIsValid(fileName))
+	if (!conditionName || !fileName)
 		write_stderr("TRAP: ExceptionalCondition: bad arguments in PID %d\n",
 					 (int) getpid());
 	else

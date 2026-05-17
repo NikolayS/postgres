@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 =pod
 
@@ -155,11 +155,11 @@ sub wait_connect
 	#
 	# See query() for details about why/how the banner is used.
 	my $banner = "background_psql: ready";
-	my $banner_match = qr/(^|\n)$banner\r?\n/;
-	$self->{stdin} .= "\\echo $banner\n\\warn $banner\n";
+	my $banner_match = qr/$banner\r?\n/;
+	$self->{stdin} .= "\\echo '$banner'\n\\warn '$banner'\n";
 	$self->{run}->pump()
 	  until ($self->{stdout} =~ /$banner_match/
-		  && $self->{stderr} =~ /$banner\r?\n/)
+		  && $self->{stderr} =~ /$banner_match/)
 	  || $self->{timeout}->is_expired;
 
 	note "connect output:\n",
@@ -230,18 +230,23 @@ Executes a query in the current session and returns the output in scalar
 context and (output, error) in list context where error is 1 in case there
 was output generated on stderr when executing the query.
 
+By default, the query and its results are printed to the test output. This
+can be disabled by passing the keyword parameter verbose => false.
+
 =cut
 
 sub query
 {
-	my ($self, $query) = @_;
+	my ($self, $query, %params) = @_;
 	my $ret;
 	my $output;
 	my $query_cnt = $self->{query_cnt}++;
 
+	$params{verbose} = 1 unless defined $params{verbose};
+
 	local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-	note "issuing query $query_cnt via background psql: $query";
+	note "issuing query $query_cnt via background psql: $query" unless !$params{verbose};
 
 	$self->{timeout}->start() if (defined($self->{query_timer_restart}));
 
@@ -259,32 +264,30 @@ sub query
 	# stderr (or vice versa), even if psql printed them in the opposite
 	# order. We therefore wait on both.
 	#
-	# We need to match for the newline, because we try to remove it below, and
-	# it's possible to consume just the input *without* the newline. In
-	# interactive psql we emit \r\n, so we need to allow for that. Also need
-	# to be careful that we don't e.g. match the echoed \echo command, rather
-	# than its output.
+	# In interactive psql we emit \r\n, so we need to allow for that.
+	# Also, include quotes around the banner string in the \echo and \warn
+	# commands, not because the string needs quoting but so that $banner_match
+	# can't match readline's echoing of these commands.
 	my $banner = "background_psql: QUERY_SEPARATOR $query_cnt:";
-	my $banner_match = qr/(^|\n)$banner\r?\n/;
-	$self->{stdin} .= "$query\n;\n\\echo $banner\n\\warn $banner\n";
-	pump_until(
-		$self->{run}, $self->{timeout},
-		\$self->{stdout}, qr/$banner_match/);
-	pump_until(
-		$self->{run}, $self->{timeout},
-		\$self->{stderr}, qr/$banner_match/);
-
-	die "psql query timed out" if $self->{timeout}->is_expired;
+	my $banner_match = qr/$banner\r?\n/;
+	$self->{stdin} .= "$query\n;\n\\echo '$banner'\n\\warn '$banner'\n";
+	$self->{run}->pump()
+	  until ($self->{stdout} =~ /$banner_match/
+		  && $self->{stderr} =~ /$banner_match/)
+	  || $self->{timeout}->is_expired;
 
 	note "results query $query_cnt:\n",
 	  explain {
 		stdout => $self->{stdout},
 		stderr => $self->{stderr},
-	  };
+	  } unless !$params{verbose};
 
-	# Remove banner from stdout and stderr, our caller doesn't care.  The
-	# first newline is optional, as there would not be one if consuming an
-	# empty query result.
+	die "psql query timed out" if $self->{timeout}->is_expired;
+
+	# Remove banner from stdout and stderr, our caller doesn't want it.
+	# Also remove the query output's trailing newline, if present (there
+	# would not be one if consuming an empty query result).
+	$banner_match = qr/\r?\n?$banner\r?\n/;
 	$output = $self->{stdout};
 	$output =~ s/$banner_match//;
 	$self->{stderr} =~ s/$banner_match//;
@@ -308,9 +311,9 @@ Query failure is determined by it producing output on stderr.
 
 sub query_safe
 {
-	my ($self, $query) = @_;
+	my ($self, $query, %params) = @_;
 
-	my $ret = $self->query($query);
+	my $ret = $self->query($query, %params);
 
 	if ($self->{stderr} ne "")
 	{

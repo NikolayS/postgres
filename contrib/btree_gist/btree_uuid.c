@@ -6,6 +6,7 @@
 #include "btree_gist.h"
 #include "btree_utils_num.h"
 #include "port/pg_bswap.h"
+#include "utils/rel.h"
 #include "utils/sortsupport.h"
 #include "utils/uuid.h"
 
@@ -107,7 +108,7 @@ gbt_uuid_compress(PG_FUNCTION_ARGS)
 		char	   *r = (char *) palloc(2 * UUID_LEN);
 		pg_uuid_t  *key = DatumGetUUIDP(entry->key);
 
-		retval = palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 
 		memcpy(r, key, UUID_LEN);
 		memcpy(r + UUID_LEN, key, UUID_LEN);
@@ -135,8 +136,9 @@ gbt_uuid_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	pg_uuid_t  *query = PG_GETARG_UUID_P(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	uuidKEY    *kkk = (uuidKEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;

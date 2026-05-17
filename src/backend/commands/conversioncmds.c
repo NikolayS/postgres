@@ -3,7 +3,7 @@
  * conversioncmds.c
  *	  conversion creation command support code
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -19,6 +19,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/conversioncmds.h"
+#include "fmgr.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "parser/parse_func.h"
