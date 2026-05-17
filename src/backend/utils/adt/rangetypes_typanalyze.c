@@ -13,7 +13,7 @@
  * come from different tuples. In theory, the standard scalar selectivity
  * functions could be used with the combined histogram.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -111,9 +111,9 @@ float8_qsort_cmp(const void *a1, const void *a2, void *arg)
 static int
 range_bound_qsort_cmp(const void *a1, const void *a2, void *arg)
 {
-	RangeBound *b1 = (RangeBound *) a1;
-	RangeBound *b2 = (RangeBound *) a2;
-	TypeCacheEntry *typcache = (TypeCacheEntry *) arg;
+	const RangeBound *b1 = a1;
+	const RangeBound *b2 = a2;
+	TypeCacheEntry *typcache = arg;
 
 	return range_cmp_bounds(typcache, b1, b2);
 }
@@ -151,9 +151,9 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 	has_subdiff = OidIsValid(typcache->rng_subdiff_finfo.fn_oid);
 
 	/* Allocate memory to hold range bounds and lengths of the sample ranges. */
-	lowers = (RangeBound *) palloc(sizeof(RangeBound) * samplerows);
-	uppers = (RangeBound *) palloc(sizeof(RangeBound) * samplerows);
-	lengths = (float8 *) palloc(sizeof(float8) * samplerows);
+	lowers = palloc_array(RangeBound, samplerows);
+	uppers = palloc_array(RangeBound, samplerows);
+	lengths = palloc_array(float8, samplerows);
 
 	/* Loop over the sample ranges. */
 	for (range_no = 0; range_no < samplerows; range_no++)
@@ -397,11 +397,11 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 		stats->numvalues[slot_idx] = num_hist;
 		stats->statypid[slot_idx] = FLOAT8OID;
 		stats->statyplen[slot_idx] = sizeof(float8);
-		stats->statypbyval[slot_idx] = FLOAT8PASSBYVAL;
-		stats->statypalign[slot_idx] = 'd';
+		stats->statypbyval[slot_idx] = true;
+		stats->statypalign[slot_idx] = TYPALIGN_DOUBLE;
 
 		/* Store the fraction of empty ranges */
-		emptyfrac = (float4 *) palloc(sizeof(float4));
+		emptyfrac = palloc_object(float4);
 		*emptyfrac = ((double) empty_cnt) / ((double) non_null_cnt);
 		stats->stanumbers[slot_idx] = emptyfrac;
 		stats->numnumbers[slot_idx] = 1;

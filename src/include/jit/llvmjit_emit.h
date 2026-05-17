@@ -2,7 +2,7 @@
  * llvmjit_emit.h
  *	  Helpers to make emitting LLVM IR a bit more concise and pgindent proof.
  *
- * Copyright (c) 2018-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2018-2026, PostgreSQL Global Development Group
  *
  * src/include/jit/llvmjit_emit.h
  */
@@ -84,6 +84,15 @@ static inline LLVMValueRef
 l_sizet_const(size_t i)
 {
 	return LLVMConstInt(TypeSizeT, i, false);
+}
+
+/*
+ * Emit constant integer.
+ */
+static inline LLVMValueRef
+l_datum_const(Datum i)
+{
+	return LLVMConstInt(TypeDatum, i, false);
 }
 
 /*
@@ -313,7 +322,7 @@ l_funcnull(LLVMBuilderRef b, LLVMValueRef v_fcinfo, size_t argno)
 static inline LLVMValueRef
 l_funcvalue(LLVMBuilderRef b, LLVMValueRef v_fcinfo, size_t argno)
 {
-	return l_load(b, TypeSizeT, l_funcvaluep(b, v_fcinfo, argno), "");
+	return l_load(b, TypeDatum, l_funcvaluep(b, v_fcinfo, argno), "");
 }
 
 #endif							/* USE_LLVM */

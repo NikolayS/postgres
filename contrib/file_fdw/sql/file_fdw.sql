@@ -55,6 +55,8 @@ CREATE USER MAPPING FOR regress_file_fdw_superuser SERVER file_server;
 CREATE USER MAPPING FOR regress_no_priv_user SERVER file_server;
 
 -- validator tests
+CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (foo 'bar');  -- ERROR
+CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS ("a=b" 'true');  -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (format 'xml');  -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (format 'text', quote ':');          -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (format 'text', escape ':');         -- ERROR
@@ -82,6 +84,9 @@ CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (format 'binary', on_erro
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (log_verbosity 'unsupported');       -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (reject_limit '1');       -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (on_error 'ignore', reject_limit '0');       -- ERROR
+CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (header '-1');           -- ERROR
+CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (header '2.5');          -- ERROR
+CREATE FOREIGN TABLE tbl () SERVER file_server OPTIONS (header 'unsupported');  -- ERROR
 CREATE FOREIGN TABLE tbl () SERVER file_server;  -- ERROR
 
 \set filename :abs_srcdir '/data/agg.data'
@@ -116,6 +121,16 @@ SELECT * FROM header_match;
 CREATE FOREIGN TABLE header_doesnt_match (a int, foo text) SERVER file_server
 OPTIONS (format 'csv', filename :'filename', delimiter ',', header 'match');
 SELECT * FROM header_doesnt_match; -- ERROR
+
+-- test multi-line header
+\set filename :abs_srcdir '/data/multiline_header.csv'
+CREATE FOREIGN TABLE multi_header (a int, b text) SERVER file_server
+OPTIONS (format 'csv', filename :'filename', header '2');
+SELECT * FROM multi_header ORDER BY a;
+
+CREATE FOREIGN TABLE multi_header_skip (a int, b text) SERVER file_server
+OPTIONS (format 'csv', filename :'filename', header '5');
+SELECT count(*) FROM multi_header_skip;
 
 -- per-column options tests
 \set filename :abs_srcdir '/data/text.csv'
@@ -156,7 +171,9 @@ SELECT * FROM agg_csv c JOIN agg_text t ON (t.a = c.a) ORDER BY c.a;
 SELECT * FROM agg_bad;               -- ERROR
 
 -- on_error, log_verbosity and reject_limit tests
-ALTER FOREIGN TABLE agg_bad OPTIONS (ADD on_error 'ignore');
+ALTER FOREIGN TABLE agg_bad OPTIONS (ADD on_error 'set_null');
+SELECT * FROM agg_bad;
+ALTER FOREIGN TABLE agg_bad OPTIONS (SET on_error 'ignore');
 SELECT * FROM agg_bad;
 ALTER FOREIGN TABLE agg_bad OPTIONS (ADD log_verbosity 'silent');
 SELECT * FROM agg_bad;
@@ -240,6 +257,24 @@ UPDATE pt set a = 1 where a = 2; -- ERROR
 SELECT tableoid::regclass, * FROM pt;
 SELECT tableoid::regclass, * FROM p1;
 SELECT tableoid::regclass, * FROM p2;
+
+-- Test DELETE/UPDATE/MERGE on a partitioned table when all partitions
+-- are excluded and only the dummy root result relation remains. The
+-- operation is a no-op but should not fail regardless of whether the
+-- foreign child was processed (pruning off) or not (pruning on).
+DROP TABLE p2;
+SET enable_partition_pruning TO off;
+DELETE FROM pt WHERE false;
+UPDATE pt SET b = 'x' WHERE false;
+MERGE INTO pt t USING (VALUES (1, 'x'::text)) AS s(a, b)
+  ON false WHEN MATCHED THEN UPDATE SET b = s.b;
+
+SET enable_partition_pruning TO on;
+DELETE FROM pt WHERE false;
+UPDATE pt SET b = 'x' WHERE false;
+MERGE INTO pt t USING (VALUES (1, 'x'::text)) AS s(a, b)
+  ON false WHEN MATCHED THEN UPDATE SET b = s.b;
+
 DROP TABLE pt;
 
 -- generated column tests

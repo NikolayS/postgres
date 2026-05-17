@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 wait_event_output = ['wait_event_types.h', 'pgstat_wait_event.c', 'wait_event_funcs_data.c']
 wait_event_target = custom_target('wait_event_names',
@@ -29,6 +29,13 @@ errcodes = custom_target('errcodes',
   install_dir: dir_include_server / 'utils',
 )
 generated_headers += errcodes
+
+guc_tables = custom_target('guc_tables',
+  input: files('../../backend/utils/misc/guc_parameters.dat'),
+  output: ['guc_tables.inc.c'],
+  depend_files: catalog_pm,
+  command: [perl, files('../../backend/utils/misc/gen_guc_tables.pl'), '@INPUT@', '@OUTPUT@'])
+generated_headers += guc_tables
 
 if dtrace.found()
   probes_tmp = custom_target('probes.h.tmp',
@@ -72,8 +79,6 @@ generated_backend_headers += fmgrtab_target[1]
 
 # autoconf generates the file there, ensure we get a conflict
 generated_sources_ac += {
-  'src/backend/utils': fmgrtab_output + ['errcodes.h', 'probes.h', 'fmgr-stamp'],
+  'src/backend/utils': fmgrtab_output + ['errcodes.h', 'wait_event_types.h', 'probes.h', 'fmgr-stamp'],
   'src/include/utils': ['header-stamp'],
 }
-
-generated_sources_ac += {'src/backend/utils/activity': ['wait_event_types.h']}

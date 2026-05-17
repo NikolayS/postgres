@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 test_slru_sources = files(
   'test_slru.c',
@@ -38,7 +38,8 @@ tests += {
        'enable_injection_points': get_option('injection_points') ? 'yes' : 'no',
     },
     'tests': [
-      't/001_multixact.pl'
+      't/001_multixact.pl',
+      't/002_multixact_wraparound.pl'
     ],
   },
 }

@@ -2,7 +2,7 @@
  *
  * reindexdb
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * src/bin/scripts/reindexdb.c
  *
@@ -322,7 +322,7 @@ reindex_one_database(ConnParams *cparams, ReindexType type,
 				 * database itself, so build a list with a single entry.
 				 */
 				Assert(user_list == NULL);
-				process_list = pg_malloc0(sizeof(SimpleStringList));
+				process_list = pg_malloc0_object(SimpleStringList);
 				simple_string_list_append(process_list, PQdb(conn));
 				break;
 
@@ -340,7 +340,7 @@ reindex_one_database(ConnParams *cparams, ReindexType type,
 		{
 			case REINDEX_SCHEMA:
 				Assert(user_list != NULL);
-				/* fall through */
+				pg_fallthrough;
 
 			case REINDEX_DATABASE:
 
@@ -713,7 +713,7 @@ get_parallel_tables_list(PGconn *conn, ReindexType type,
 		return NULL;
 	}
 
-	tables = pg_malloc0(sizeof(SimpleStringList));
+	tables = pg_malloc0_object(SimpleStringList);
 
 	/* Build qualified identifiers for each table */
 	for (int i = 0; i < ntups; i++)
@@ -809,7 +809,7 @@ get_parallel_tabidx_list(PGconn *conn,
 		return;
 	}
 
-	*table_list = pg_malloc0(sizeof(SimpleOidList));
+	*table_list = pg_malloc0_object(SimpleOidList);
 
 	/*
 	 * Build two lists, one with table OIDs and the other with fully-qualified

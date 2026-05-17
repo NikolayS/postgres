@@ -11,7 +11,7 @@
  * so for all external functions, all the referenced functions (and
  * prerequisites) will be imported.
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/lib/llvmjit/llvmjit_inline.cpp
@@ -238,7 +238,11 @@ llvm_build_inline_plan(LLVMContextRef lc, llvm::Module *mod)
 
 		llvm_split_symbol_name(symbolName.data(), &cmodname, &cfuncname);
 
+#if LLVM_VERSION_MAJOR >= 21
+		funcGUID = llvm::GlobalValue::getGUIDAssumingExternalLinkage(cfuncname);
+#else
 		funcGUID = llvm::GlobalValue::getGUID(cfuncname);
+#endif
 
 		/* already processed */
 		if (inlineState.processed)

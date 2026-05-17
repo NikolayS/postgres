@@ -3,7 +3,7 @@
  * xlogprefetcher.h
  *		Declarations for the recovery prefetching module.
  *
- * Portions Copyright (c) 2022-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2022-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -33,9 +33,6 @@ typedef struct XLogPrefetcher XLogPrefetcher;
 
 
 extern void XLogPrefetchReconfigure(void);
-
-extern size_t XLogPrefetchShmemSize(void);
-extern void XLogPrefetchShmemInit(void);
 
 extern void XLogPrefetchResetStats(void);
 

@@ -17,7 +17,7 @@
  * the same APIs that astreamer_gzip_writer now uses, and it didn't seem
  * necessary to change anything at the time.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/fe_utils/astreamer_gzip.c
@@ -102,7 +102,7 @@ astreamer_gzip_writer_new(char *pathname, FILE *file,
 #ifdef HAVE_LIBZ
 	astreamer_gzip_writer *streamer;
 
-	streamer = palloc0(sizeof(astreamer_gzip_writer));
+	streamer = palloc0_object(astreamer_gzip_writer);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_gzip_writer_ops;
 
@@ -241,12 +241,14 @@ astreamer_gzip_decompressor_new(astreamer *next)
 
 	Assert(next != NULL);
 
-	streamer = palloc0(sizeof(astreamer_gzip_decompressor));
+	streamer = palloc0_object(astreamer_gzip_decompressor);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_gzip_decompressor_ops;
 
 	streamer->base.bbs_next = next;
 	initStringInfo(&streamer->base.bbs_buffer);
+	/* Use a buffer size comparable to the other decompressors */
+	enlargeStringInfo(&streamer->base.bbs_buffer, 256 * 1024 - 1);
 
 	/* Initialize internal stream state for decompression */
 	zs = &streamer->zstream;
@@ -316,8 +318,9 @@ astreamer_gzip_decompressor_content(astreamer *streamer,
 		 */
 		res = inflate(zs, Z_NO_FLUSH);
 
-		if (res == Z_STREAM_ERROR)
-			pg_log_error("could not decompress data: %s", zs->msg);
+		if (res != Z_OK && res != Z_STREAM_END && res != Z_BUF_ERROR)
+			pg_fatal("could not decompress data: %s",
+					 zs->msg ? zs->msg : "unknown error");
 
 		mystreamer->bytes_written =
 			mystreamer->base.bbs_buffer.maxlen - zs->avail_out;
@@ -347,10 +350,11 @@ astreamer_gzip_decompressor_finalize(astreamer *streamer)
 	 * End of the stream, if there is some pending data in output buffers then
 	 * we must forward it to next streamer.
 	 */
-	astreamer_content(mystreamer->base.bbs_next, NULL,
-					  mystreamer->base.bbs_buffer.data,
-					  mystreamer->base.bbs_buffer.maxlen,
-					  ASTREAMER_UNKNOWN);
+	if (mystreamer->bytes_written > 0)
+		astreamer_content(mystreamer->base.bbs_next, NULL,
+						  mystreamer->base.bbs_buffer.data,
+						  mystreamer->bytes_written,
+						  ASTREAMER_UNKNOWN);
 
 	astreamer_finalize(mystreamer->base.bbs_next);
 }
@@ -361,7 +365,12 @@ astreamer_gzip_decompressor_finalize(astreamer *streamer)
 static void
 astreamer_gzip_decompressor_free(astreamer *streamer)
 {
+	astreamer_gzip_decompressor *mystreamer;
+
+	mystreamer = (astreamer_gzip_decompressor *) streamer;
+
 	astreamer_free(streamer->bbs_next);
+	inflateEnd(&mystreamer->zstream);
 	pfree(streamer->bbs_buffer.data);
 	pfree(streamer);
 }

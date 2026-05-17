@@ -3,7 +3,7 @@
  * basebackup_to_shell.c
  *	  target base backup files to a shell command
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  *	  contrib/basebackup_to_shell/basebackup_to_shell.c
  *-------------------------------------------------------------------------
@@ -136,7 +136,7 @@ shell_get_sink(bbsink *next_sink, void *detail_arg)
 	 * We remember the current value of basebackup_to_shell.shell_command to
 	 * be certain that it can't change under us during the backup.
 	 */
-	sink = palloc0(sizeof(bbsink_shell));
+	sink = palloc0_object(bbsink_shell);
 	*((const bbsink_ops **) &sink->base.bbs_ops) = &bbsink_shell_ops;
 	sink->base.bbs_next = next_sink;
 	sink->target_detail = detail_arg;

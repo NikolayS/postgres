@@ -2,7 +2,7 @@
  *
  * walmethods.c - implementations of different ways to write received wal
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_basebackup/walmethods.c
@@ -102,7 +102,7 @@ static char *
 dir_get_file_name(WalWriteMethod *wwmethod,
 				  const char *pathname, const char *temp_suffix)
 {
-	char	   *filename = pg_malloc0(MAXPGPATH * sizeof(char));
+	char	   *filename = pg_malloc0_array(char, MAXPGPATH);
 
 	snprintf(filename, MAXPGPATH, "%s%s%s",
 			 pathname,
@@ -275,7 +275,7 @@ dir_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		}
 	}
 
-	f = pg_malloc0(sizeof(DirectoryMethodFile));
+	f = pg_malloc0_object(DirectoryMethodFile);
 #ifdef HAVE_LIBZ
 	if (wwmethod->compression_algorithm == PG_COMPRESSION_GZIP)
 		f->gzfp = gzfp;
@@ -359,7 +359,7 @@ dir_write(Walfile *f, const void *buf, size_t count)
 				return -1;
 			}
 
-			inbuf = ((char *) inbuf) + chunk;
+			inbuf = ((const char *) inbuf) + chunk;
 		}
 
 		/* Our caller keeps track of the uncompressed size. */
@@ -643,7 +643,7 @@ CreateWalDirectoryMethod(const char *basedir,
 {
 	DirectoryMethodData *wwmethod;
 
-	wwmethod = pg_malloc0(sizeof(DirectoryMethodData));
+	wwmethod = pg_malloc0_object(DirectoryMethodData);
 	*((const WalWriteMethodOps **) &wwmethod->base.ops) =
 		&WalDirectoryMethodOps;
 	wwmethod->base.compression_algorithm = compression_algorithm;
@@ -825,7 +825,7 @@ static char *
 tar_get_file_name(WalWriteMethod *wwmethod, const char *pathname,
 				  const char *temp_suffix)
 {
-	char	   *filename = pg_malloc0(MAXPGPATH * sizeof(char));
+	char	   *filename = pg_malloc0_array(char, MAXPGPATH);
 
 	snprintf(filename, MAXPGPATH, "%s%s",
 			 pathname, temp_suffix ? temp_suffix : "");
@@ -859,7 +859,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 #ifdef HAVE_LIBZ
 		if (wwmethod->compression_algorithm == PG_COMPRESSION_GZIP)
 		{
-			tar_data->zp = (z_streamp) pg_malloc(sizeof(z_stream));
+			tar_data->zp = pg_malloc_object(z_stream);
 			tar_data->zp->zalloc = Z_NULL;
 			tar_data->zp->zfree = Z_NULL;
 			tar_data->zp->opaque = Z_NULL;
@@ -893,7 +893,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		return NULL;
 	}
 
-	tar_data->currentfile = pg_malloc0(sizeof(TarMethodFile));
+	tar_data->currentfile = pg_malloc0_object(TarMethodFile);
 	tar_data->currentfile->base.wwmethod = wwmethod;
 
 	tmppath = tar_get_file_name(wwmethod, pathname, temp_suffix);
@@ -1360,7 +1360,7 @@ CreateWalTarMethod(const char *tarbase,
 	const char *suffix = (compression_algorithm == PG_COMPRESSION_GZIP) ?
 		".tar.gz" : ".tar";
 
-	wwmethod = pg_malloc0(sizeof(TarMethodData));
+	wwmethod = pg_malloc0_object(TarMethodData);
 	*((const WalWriteMethodOps **) &wwmethod->base.ops) =
 		&WalTarMethodOps;
 	wwmethod->base.compression_algorithm = compression_algorithm;

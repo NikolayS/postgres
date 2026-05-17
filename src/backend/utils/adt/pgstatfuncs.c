@@ -3,7 +3,7 @@
  * pgstatfuncs.c
  *	  Functions for accessing various forms of statistics data
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -31,6 +31,8 @@
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
+#include "utils/tuplestore.h"
+#include "utils/wait_event.h"
 
 #define UINT32_ACCESS_ONCE(var)		 ((uint32)(*((volatile uint32 *)&(var))))
 
@@ -168,6 +170,9 @@ PG_STAT_GET_RELENTRY_TIMESTAMPTZ(last_vacuum_time)
 /* pg_stat_get_lastscan */
 PG_STAT_GET_RELENTRY_TIMESTAMPTZ(lastscan)
 
+/* pg_stat_get_stat_reset_time */
+PG_STAT_GET_RELENTRY_TIMESTAMPTZ(stat_reset_time)
+
 Datum
 pg_stat_get_function_calls(PG_FUNCTION_ARGS)
 {
@@ -199,6 +204,24 @@ PG_STAT_GET_FUNCENTRY_FLOAT8_MS(total_time)
 
 /* pg_stat_get_function_self_time */
 PG_STAT_GET_FUNCENTRY_FLOAT8_MS(self_time)
+
+Datum
+pg_stat_get_function_stat_reset_time(PG_FUNCTION_ARGS)
+{
+	Oid			funcid = PG_GETARG_OID(0);
+	TimestampTz result;
+	PgStat_StatFuncEntry *funcentry;
+
+	if ((funcentry = pgstat_fetch_stat_funcentry(funcid)) == NULL)
+		result = 0;
+	else
+		result = funcentry->stat_reset_timestamp;
+
+	if (result == 0)
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_TIMESTAMPTZ(result);
+}
 
 Datum
 pg_stat_get_backend_idset(PG_FUNCTION_ARGS)
@@ -266,14 +289,16 @@ pg_stat_get_progress_info(PG_FUNCTION_ARGS)
 		cmdtype = PROGRESS_COMMAND_VACUUM;
 	else if (pg_strcasecmp(cmd, "ANALYZE") == 0)
 		cmdtype = PROGRESS_COMMAND_ANALYZE;
-	else if (pg_strcasecmp(cmd, "CLUSTER") == 0)
-		cmdtype = PROGRESS_COMMAND_CLUSTER;
+	else if (pg_strcasecmp(cmd, "REPACK") == 0)
+		cmdtype = PROGRESS_COMMAND_REPACK;
 	else if (pg_strcasecmp(cmd, "CREATE INDEX") == 0)
 		cmdtype = PROGRESS_COMMAND_CREATE_INDEX;
 	else if (pg_strcasecmp(cmd, "BASEBACKUP") == 0)
 		cmdtype = PROGRESS_COMMAND_BASEBACKUP;
 	else if (pg_strcasecmp(cmd, "COPY") == 0)
 		cmdtype = PROGRESS_COMMAND_COPY;
+	else if (pg_strcasecmp(cmd, "DATACHECKSUMS") == 0)
+		cmdtype = PROGRESS_COMMAND_DATACHECKSUMS;
 	else
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -640,10 +665,10 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 				values[28] = BoolGetDatum(false);	/* GSS credentials not
 													 * delegated */
 			}
-			if (beentry->st_query_id == 0)
+			if (beentry->st_query_id == INT64CONST(0))
 				nulls[30] = true;
 			else
-				values[30] = UInt64GetDatum(beentry->st_query_id);
+				values[30] = Int64GetDatum(beentry->st_query_id);
 		}
 		else
 		{
@@ -748,6 +773,7 @@ pg_stat_get_backend_subxact(PG_FUNCTION_ARGS)
 	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "subxact_overflow",
 					   BOOLOID, -1, 0);
 
+	TupleDescFinalize(tupdesc);
 	BlessTupleDesc(tupdesc);
 
 	if ((local_beentry = pgstat_get_local_beentry_by_proc_number(procNumber)) != NULL)
@@ -785,7 +811,7 @@ pg_stat_get_backend_activity(PG_FUNCTION_ARGS)
 		activity = beentry->st_activity_raw;
 
 	clipped_activity = pgstat_clip_activity(activity);
-	ret = cstring_to_text(activity);
+	ret = cstring_to_text(clipped_activity);
 	pfree(clipped_activity);
 
 	PG_RETURN_TEXT_P(ret);
@@ -803,8 +829,14 @@ pg_stat_get_backend_wait_event_type(PG_FUNCTION_ARGS)
 		wait_event_type = "<backend information not available>";
 	else if (!HAS_PGSTAT_PERMISSIONS(beentry->st_userid))
 		wait_event_type = "<insufficient privilege>";
-	else if ((proc = BackendPidGetProc(beentry->st_procpid)) != NULL)
-		wait_event_type = pgstat_get_wait_event_type(proc->wait_event_info);
+	else
+	{
+		proc = BackendPidGetProc(beentry->st_procpid);
+		if (!proc)
+			proc = AuxiliaryPidGetProc(beentry->st_procpid);
+		if (proc)
+			wait_event_type = pgstat_get_wait_event_type(proc->wait_event_info);
+	}
 
 	if (!wait_event_type)
 		PG_RETURN_NULL();
@@ -824,8 +856,14 @@ pg_stat_get_backend_wait_event(PG_FUNCTION_ARGS)
 		wait_event = "<backend information not available>";
 	else if (!HAS_PGSTAT_PERMISSIONS(beentry->st_userid))
 		wait_event = "<insufficient privilege>";
-	else if ((proc = BackendPidGetProc(beentry->st_procpid)) != NULL)
-		wait_event = pgstat_get_wait_event(proc->wait_event_info);
+	else
+	{
+		proc = BackendPidGetProc(beentry->st_procpid);
+		if (!proc)
+			proc = AuxiliaryPidGetProc(beentry->st_procpid);
+		if (proc)
+			wait_event = pgstat_get_wait_event(proc->wait_event_info);
+	}
 
 	if (!wait_event)
 		PG_RETURN_NULL();
@@ -1146,9 +1184,6 @@ pg_stat_get_db_checksum_failures(PG_FUNCTION_ARGS)
 	int64		result;
 	PgStat_StatDBEntry *dbentry;
 
-	if (!DataChecksumsEnabled())
-		PG_RETURN_NULL();
-
 	if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
 		result = 0;
 	else
@@ -1163,9 +1198,6 @@ pg_stat_get_db_checksum_last_failure(PG_FUNCTION_ARGS)
 	Oid			dbid = PG_GETARG_OID(0);
 	TimestampTz result;
 	PgStat_StatDBEntry *dbentry;
-
-	if (!DataChecksumsEnabled())
-		PG_RETURN_NULL();
 
 	if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
 		result = 0;
@@ -1510,7 +1542,7 @@ pg_stat_io_build_tuples(ReturnSetInfo *rsinfo,
 							bktype_stats->bytes[io_obj][io_context][io_op];
 
 						/* Convert to numeric */
-						snprintf(buf, sizeof buf, UINT64_FORMAT, byte);
+						snprintf(buf, sizeof buf, INT64_FORMAT, byte);
 						values[byte_idx] = DirectFunctionCall3(numeric_in,
 															   CStringGetDatum(buf),
 															   ObjectIdGetDatum(0),
@@ -1616,7 +1648,7 @@ static Datum
 pg_stat_wal_build_tuple(PgStat_WalCounters wal_counters,
 						TimestampTz stat_reset_timestamp)
 {
-#define PG_STAT_WAL_COLS	5
+#define PG_STAT_WAL_COLS	6
 	TupleDesc	tupdesc;
 	Datum		values[PG_STAT_WAL_COLS] = {0};
 	bool		nulls[PG_STAT_WAL_COLS] = {0};
@@ -1630,11 +1662,14 @@ pg_stat_wal_build_tuple(PgStat_WalCounters wal_counters,
 					   INT8OID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "wal_bytes",
 					   NUMERICOID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "wal_buffers_full",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "wal_fpi_bytes",
+					   NUMERICOID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "wal_buffers_full",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "stats_reset",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "stats_reset",
 					   TIMESTAMPTZOID, -1, 0);
 
+	TupleDescFinalize(tupdesc);
 	BlessTupleDesc(tupdesc);
 
 	/* Fill values and NULLs */
@@ -1648,12 +1683,18 @@ pg_stat_wal_build_tuple(PgStat_WalCounters wal_counters,
 									ObjectIdGetDatum(0),
 									Int32GetDatum(-1));
 
-	values[3] = Int64GetDatum(wal_counters.wal_buffers_full);
+	snprintf(buf, sizeof buf, UINT64_FORMAT, wal_counters.wal_fpi_bytes);
+	values[3] = DirectFunctionCall3(numeric_in,
+									CStringGetDatum(buf),
+									ObjectIdGetDatum(0),
+									Int32GetDatum(-1));
+
+	values[4] = Int64GetDatum(wal_counters.wal_buffers_full);
 
 	if (stat_reset_timestamp != 0)
-		values[4] = TimestampTzGetDatum(stat_reset_timestamp);
+		values[5] = TimestampTzGetDatum(stat_reset_timestamp);
 	else
-		nulls[4] = true;
+		nulls[5] = true;
 
 	/* Returns the record as Datum */
 	PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls)));
@@ -1694,6 +1735,42 @@ pg_stat_get_wal(PG_FUNCTION_ARGS)
 
 	return (pg_stat_wal_build_tuple(wal_stats->wal_counters,
 									wal_stats->stat_reset_timestamp));
+}
+
+Datum
+pg_stat_get_lock(PG_FUNCTION_ARGS)
+{
+#define PG_STAT_LOCK_COLS	5
+	ReturnSetInfo *rsinfo;
+	PgStat_Lock *lock_stats;
+
+	InitMaterializedSRF(fcinfo, 0);
+	rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+
+	lock_stats = pgstat_fetch_stat_lock();
+
+	for (int lcktype = 0; lcktype <= LOCKTAG_LAST_TYPE; lcktype++)
+	{
+		const char *locktypename;
+		Datum		values[PG_STAT_LOCK_COLS] = {0};
+		bool		nulls[PG_STAT_LOCK_COLS] = {0};
+		PgStat_LockEntry *lck_stats = &lock_stats->stats[lcktype];
+		int			i = 0;
+
+		locktypename = LockTagTypeNames[lcktype];
+
+		values[i++] = CStringGetTextDatum(locktypename);
+		values[i++] = Int64GetDatum(lck_stats->waits);
+		values[i++] = Int64GetDatum(lck_stats->wait_time);
+		values[i++] = Int64GetDatum(lck_stats->fastpath_exceeded);
+		values[i] = TimestampTzGetDatum(lock_stats->stat_reset_timestamp);
+
+		Assert(i + 1 == PG_STAT_LOCK_COLS);
+
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+	}
+
+	return (Datum) 0;
 }
 
 /*
@@ -1880,6 +1957,7 @@ pg_stat_reset_shared(PG_FUNCTION_ARGS)
 		pgstat_reset_of_kind(PGSTAT_KIND_BGWRITER);
 		pgstat_reset_of_kind(PGSTAT_KIND_CHECKPOINTER);
 		pgstat_reset_of_kind(PGSTAT_KIND_IO);
+		pgstat_reset_of_kind(PGSTAT_KIND_LOCK);
 		XLogPrefetchResetStats();
 		pgstat_reset_of_kind(PGSTAT_KIND_SLRU);
 		pgstat_reset_of_kind(PGSTAT_KIND_WAL);
@@ -1897,6 +1975,8 @@ pg_stat_reset_shared(PG_FUNCTION_ARGS)
 		pgstat_reset_of_kind(PGSTAT_KIND_CHECKPOINTER);
 	else if (strcmp(target, "io") == 0)
 		pgstat_reset_of_kind(PGSTAT_KIND_IO);
+	else if (strcmp(target, "lock") == 0)
+		pgstat_reset_of_kind(PGSTAT_KIND_LOCK);
 	else if (strcmp(target, "recovery_prefetch") == 0)
 		XLogPrefetchResetStats();
 	else if (strcmp(target, "slru") == 0)
@@ -1913,7 +1993,7 @@ pg_stat_reset_shared(PG_FUNCTION_ARGS)
 }
 
 /*
- * Reset a statistics for a single object, which may be of current
+ * Reset statistics for a single object, which may be of current
  * database or shared across all databases in the cluster.
  */
 Datum
@@ -2056,6 +2136,7 @@ pg_stat_get_archiver(PG_FUNCTION_ARGS)
 	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "stats_reset",
 					   TIMESTAMPTZOID, -1, 0);
 
+	TupleDescFinalize(tupdesc);
 	BlessTupleDesc(tupdesc);
 
 	/* Get statistics about the archiver process */
@@ -2100,7 +2181,7 @@ pg_stat_get_archiver(PG_FUNCTION_ARGS)
 Datum
 pg_stat_get_replication_slot(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_REPLICATION_SLOT_COLS 10
+#define PG_STAT_GET_REPLICATION_SLOT_COLS 13
 	text	   *slotname_text = PG_GETARG_TEXT_P(0);
 	NameData	slotname;
 	TupleDesc	tupdesc;
@@ -2125,12 +2206,19 @@ pg_stat_get_replication_slot(PG_FUNCTION_ARGS)
 					   INT8OID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "stream_bytes",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 8, "total_txns",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 8, "mem_exceeded_count",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "total_bytes",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "total_txns",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "stats_reset",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "total_bytes",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 11, "slotsync_skip_count",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 12, "slotsync_last_skip",
 					   TIMESTAMPTZOID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 13, "stats_reset",
+					   TIMESTAMPTZOID, -1, 0);
+	TupleDescFinalize(tupdesc);
 	BlessTupleDesc(tupdesc);
 
 	namestrcpy(&slotname, text_to_cstring(slotname_text));
@@ -2152,13 +2240,20 @@ pg_stat_get_replication_slot(PG_FUNCTION_ARGS)
 	values[4] = Int64GetDatum(slotent->stream_txns);
 	values[5] = Int64GetDatum(slotent->stream_count);
 	values[6] = Int64GetDatum(slotent->stream_bytes);
-	values[7] = Int64GetDatum(slotent->total_txns);
-	values[8] = Int64GetDatum(slotent->total_bytes);
+	values[7] = Int64GetDatum(slotent->mem_exceeded_count);
+	values[8] = Int64GetDatum(slotent->total_txns);
+	values[9] = Int64GetDatum(slotent->total_bytes);
+	values[10] = Int64GetDatum(slotent->slotsync_skip_count);
+
+	if (slotent->slotsync_last_skip == 0)
+		nulls[11] = true;
+	else
+		values[11] = TimestampTzGetDatum(slotent->slotsync_last_skip);
 
 	if (slotent->stat_reset_timestamp == 0)
-		nulls[9] = true;
+		nulls[12] = true;
 	else
-		values[9] = TimestampTzGetDatum(slotent->stat_reset_timestamp);
+		values[12] = TimestampTzGetDatum(slotent->stat_reset_timestamp);
 
 	/* Returns the record as Datum */
 	PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls)));
@@ -2171,7 +2266,7 @@ pg_stat_get_replication_slot(PG_FUNCTION_ARGS)
 Datum
 pg_stat_get_subscription_stats(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_SUBSCRIPTION_STATS_COLS	11
+#define PG_STAT_GET_SUBSCRIPTION_STATS_COLS	13
 	Oid			subid = PG_GETARG_OID(0);
 	TupleDesc	tupdesc;
 	Datum		values[PG_STAT_GET_SUBSCRIPTION_STATS_COLS] = {0};
@@ -2189,24 +2284,29 @@ pg_stat_get_subscription_stats(PG_FUNCTION_ARGS)
 					   OIDOID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "apply_error_count",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "sync_error_count",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "sync_seq_error_count",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "confl_insert_exists",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "sync_table_error_count",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "confl_update_origin_differs",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "confl_insert_exists",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "confl_update_exists",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "confl_update_origin_differs",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "confl_update_missing",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "confl_update_exists",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 8, "confl_delete_origin_differs",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 8, "confl_update_deleted",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "confl_delete_missing",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "confl_update_missing",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "confl_multiple_unique_conflicts",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "confl_delete_origin_differs",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 11, "stats_reset",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 11, "confl_delete_missing",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 12, "confl_multiple_unique_conflicts",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 13, "stats_reset",
 					   TIMESTAMPTZOID, -1, 0);
+	TupleDescFinalize(tupdesc);
 	BlessTupleDesc(tupdesc);
 
 	if (!subentry)
@@ -2222,8 +2322,11 @@ pg_stat_get_subscription_stats(PG_FUNCTION_ARGS)
 	/* apply_error_count */
 	values[i++] = Int64GetDatum(subentry->apply_error_count);
 
-	/* sync_error_count */
-	values[i++] = Int64GetDatum(subentry->sync_error_count);
+	/* sync_seq_error_count */
+	values[i++] = Int64GetDatum(subentry->sync_seq_error_count);
+
+	/* sync_table_error_count */
+	values[i++] = Int64GetDatum(subentry->sync_table_error_count);
 
 	/* conflict count */
 	for (int nconflict = 0; nconflict < CONFLICT_NUM_TYPES; nconflict++)

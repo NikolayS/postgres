@@ -3,7 +3,7 @@
  * jsonpath_internal.h
  *     Private definitions for jsonpath scanner & parser
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/utils/adt/jsonpath_internal.h
@@ -22,10 +22,7 @@ typedef struct JsonPathString
 	int			total;
 } JsonPathString;
 
-#ifndef YY_TYPEDEF_YY_SCANNER_T
-#define YY_TYPEDEF_YY_SCANNER_T
 typedef void *yyscan_t;
-#endif
 
 #include "utils/jsonpath.h"
 #include "jsonpath_gram.h"

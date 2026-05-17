@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Test that logical replication respects permissions
 use strict;
@@ -399,8 +399,9 @@ SKIP:
 	isnt($ret, 0,
 		"non zero exit for subscription whose owner is a non-superuser must specify password parameter of the connection string"
 	);
-	ok( $stderr =~
-		  m/DETAIL:  Non-superusers must provide a password in the connection string./,
+	like(
+		$stderr,
+		qr/DETAIL:  Non-superusers must provide a password in the connection string./,
 		'subscription whose owner is a non-superuser must specify password parameter of the connection string'
 	);
 

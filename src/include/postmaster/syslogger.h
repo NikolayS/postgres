@@ -3,7 +3,7 @@
  * syslogger.h
  *	  Exports from postmaster/syslogger.c.
  *
- * Copyright (c) 2004-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2004-2026, PostgreSQL Global Development Group
  *
  * src/include/postmaster/syslogger.h
  *
@@ -46,7 +46,7 @@ typedef struct
 	char		nuls[2];		/* always \0\0 */
 	uint16		len;			/* size of this chunk (counts data only) */
 	int32		pid;			/* writer's pid */
-	bits8		flags;			/* bitmask of PIPE_PROTO_* */
+	uint8		flags;			/* bitmask of PIPE_PROTO_* */
 	char		data[FLEXIBLE_ARRAY_MEMBER];	/* data payload starts here */
 } PipeProtoHeader;
 

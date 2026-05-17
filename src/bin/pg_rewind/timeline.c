@@ -3,7 +3,7 @@
  * timeline.c
  *	  timeline-related functions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *-------------------------------------------------------------------------
  */
@@ -66,7 +66,7 @@ rewind_parseTimeLineHistory(char *buffer, TimeLineID targetTLI, int *nentries)
 		if (*ptr == '\0' || *ptr == '#')
 			continue;
 
-		nfields = sscanf(fline, "%u\t%X/%X", &tli, &switchpoint_hi, &switchpoint_lo);
+		nfields = sscanf(fline, "%u\t%X/%08X", &tli, &switchpoint_hi, &switchpoint_lo);
 
 		if (nfields < 1)
 		{
@@ -91,7 +91,7 @@ rewind_parseTimeLineHistory(char *buffer, TimeLineID targetTLI, int *nentries)
 		lasttli = tli;
 
 		nlines++;
-		entries = pg_realloc(entries, nlines * sizeof(TimeLineHistoryEntry));
+		entries = pg_realloc_array(entries, TimeLineHistoryEntry, nlines);
 
 		entry = &entries[nlines - 1];
 		entry->tli = tli;
@@ -115,9 +115,9 @@ rewind_parseTimeLineHistory(char *buffer, TimeLineID targetTLI, int *nentries)
 	 */
 	nlines++;
 	if (entries)
-		entries = pg_realloc(entries, nlines * sizeof(TimeLineHistoryEntry));
+		entries = pg_realloc_array(entries, TimeLineHistoryEntry, nlines);
 	else
-		entries = pg_malloc(1 * sizeof(TimeLineHistoryEntry));
+		entries = pg_malloc_array(TimeLineHistoryEntry, 1);
 
 	entry = &entries[nlines - 1];
 	entry->tli = targetTLI;

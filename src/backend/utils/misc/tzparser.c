@@ -11,7 +11,7 @@
  * PG_TRY if necessary.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -466,7 +466,7 @@ load_tzoffsets(const char *filename)
 
 	/* Initialize array at a reasonable size */
 	arraysize = 128;
-	array = (tzEntry *) palloc(arraysize * sizeof(tzEntry));
+	array = palloc_array(tzEntry, arraysize);
 
 	/* Parse the file(s) */
 	n = ParseTzFile(filename, 0, &array, &arraysize, 0);

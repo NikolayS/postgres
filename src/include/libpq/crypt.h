@@ -3,7 +3,7 @@
  * crypt.h
  *	  Interface to libpq/crypt.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/libpq/crypt.h
@@ -24,6 +24,9 @@
  * this.
  */
 #define MAX_ENCRYPTED_PASSWORD_LEN (512)
+
+/* Threshold for password expiration warnings. */
+extern PGDLLIMPORT int password_expiration_warning_threshold;
 
 /* Enables deprecation warnings for MD5 passwords. */
 extern PGDLLIMPORT bool md5_password_warnings;

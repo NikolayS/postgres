@@ -15,7 +15,7 @@
  * there's hardly any use case for using these without superuser-rights
  * anyway.
  *
- * Copyright (c) 2007-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2007-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/pageinspect/heapfuncs.c
@@ -32,6 +32,7 @@
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "pageinspect.h"
 #include "port/pg_bitutils.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -46,7 +47,7 @@ static inline Oid
 HeapTupleHeaderGetOidOld(const HeapTupleHeaderData *tup)
 {
 	if (tup->t_infomask & HEAP_HASOID_OLD)
-		return *((Oid *) ((char *) (tup) + (tup)->t_hoff - sizeof(Oid)));
+		return *((const Oid *) ((const char *) (tup) + (tup)->t_hoff - sizeof(Oid)));
 	else
 		return InvalidOid;
 }
@@ -55,11 +56,11 @@ HeapTupleHeaderGetOidOld(const HeapTupleHeaderData *tup)
 /*
  * bits_to_text
  *
- * Converts a bits8-array of 'len' bits to a human-readable
+ * Converts a uint8-array of 'len' bits to a human-readable
  * c-string representation.
  */
 static char *
-bits_to_text(bits8 *bits, int len)
+bits_to_text(uint8 *bits, int len)
 {
 	int			i;
 	char	   *str;
@@ -78,13 +79,13 @@ bits_to_text(bits8 *bits, int len)
 /*
  * text_to_bits
  *
- * Converts a c-string representation of bits into a bits8-array. This is
+ * Converts a c-string representation of bits into a uint8-array. This is
  * the reverse operation of previous routine.
  */
-static bits8 *
+static uint8 *
 text_to_bits(char *str, int len)
 {
-	bits8	   *bits;
+	uint8	   *bits;
 	int			off = 0;
 	char		byte = 0;
 
@@ -101,7 +102,7 @@ text_to_bits(char *str, int len)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg("invalid character \"%.*s\" in t_bits string",
-							pg_mblen(str + off), str + off)));
+							pg_mblen_cstr(str + off), str + off)));
 
 		if (off % 8 == 7)
 			bits[off / 8] = byte;
@@ -132,29 +133,21 @@ heap_page_items(PG_FUNCTION_ARGS)
 	bytea	   *raw_page = PG_GETARG_BYTEA_P(0);
 	heap_page_items_state *inter_call_data = NULL;
 	FuncCallContext *fctx;
-	int			raw_page_size;
 
 	if (!superuser())
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 				 errmsg("must be superuser to use raw page functions")));
 
-	raw_page_size = VARSIZE(raw_page) - VARHDRSZ;
-
 	if (SRF_IS_FIRSTCALL())
 	{
 		TupleDesc	tupdesc;
 		MemoryContext mctx;
 
-		if (raw_page_size < SizeOfPageHeaderData)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("input page too small (%d bytes)", raw_page_size)));
-
 		fctx = SRF_FIRSTCALL_INIT();
 		mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
 
-		inter_call_data = palloc(sizeof(heap_page_items_state));
+		inter_call_data = palloc_object(heap_page_items_state);
 
 		/* Build a tuple descriptor for our result type */
 		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
@@ -163,7 +156,7 @@ heap_page_items(PG_FUNCTION_ARGS)
 		inter_call_data->tupd = tupdesc;
 
 		inter_call_data->offset = FirstOffsetNumber;
-		inter_call_data->page = VARDATA(raw_page);
+		inter_call_data->page = get_page_from_raw(raw_page);
 
 		fctx->max_calls = PageGetMaxOffsetNumber(inter_call_data->page);
 		fctx->user_fctx = inter_call_data;
@@ -209,7 +202,7 @@ heap_page_items(PG_FUNCTION_ARGS)
 		if (ItemIdHasStorage(id) &&
 			lp_len >= MinHeapTupleSize &&
 			lp_offset == MAXALIGN(lp_offset) &&
-			lp_offset + lp_len <= raw_page_size)
+			lp_offset + lp_len <= BLCKSZ)
 		{
 			HeapTupleHeader tuphdr;
 
@@ -256,7 +249,7 @@ heap_page_items(PG_FUNCTION_ARGS)
 					nulls[11] = true;
 
 				if (tuphdr->t_infomask & HEAP_HASOID_OLD)
-					values[12] = HeapTupleHeaderGetOidOld(tuphdr);
+					values[12] = ObjectIdGetDatum(HeapTupleHeaderGetOidOld(tuphdr));
 				else
 					nulls[12] = true;
 
@@ -312,7 +305,7 @@ heap_page_items(PG_FUNCTION_ARGS)
 static Datum
 tuple_data_split_internal(Oid relid, char *tupdata,
 						  uint16 tupdata_len, uint16 t_infomask,
-						  uint16 t_infomask2, bits8 *t_bits,
+						  uint16 t_infomask2, uint8 *t_bits,
 						  bool do_detoast)
 {
 	ArrayBuildState *raw_attrs;
@@ -396,7 +389,7 @@ tuple_data_split_internal(Oid relid, char *tupdata,
 						 errmsg("unexpected end of tuple data")));
 
 			if (attr->attlen == -1 && do_detoast)
-				attr_data = pg_detoast_datum_copy((struct varlena *) (tupdata + off));
+				attr_data = pg_detoast_datum_copy((varlena *) (tupdata + off));
 			else
 			{
 				attr_data = (bytea *) palloc(len + VARHDRSZ);
@@ -441,7 +434,7 @@ tuple_data_split(PG_FUNCTION_ARGS)
 	uint16		t_infomask2;
 	char	   *t_bits_str;
 	bool		do_detoast = false;
-	bits8	   *t_bits = NULL;
+	uint8	   *t_bits = NULL;
 	Datum		res;
 
 	relid = PG_GETARG_OID(0);
@@ -463,7 +456,7 @@ tuple_data_split(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	/*
-	 * Convert t_bits string back to the bits8 array as represented in the
+	 * Convert t_bits string back to the uint8 array as represented in the
 	 * tuple header.
 	 */
 	if (t_infomask & HEAP_HASNULL)
@@ -553,7 +546,7 @@ heap_tuple_infomask_flags(PG_FUNCTION_ARGS)
 	}
 
 	/* build set of raw flags */
-	flags = (Datum *) palloc0(sizeof(Datum) * bitcnt);
+	flags = palloc0_array(Datum, bitcnt);
 
 	/* decode t_infomask */
 	if ((t_infomask & HEAP_HASNULL) != 0)

@@ -10,7 +10,7 @@
  * columns in a different order, taking into account dropped columns.
  * They are also used by the tuple conversion routines in tupconvert.c.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -41,9 +41,9 @@ make_attrmap(int maplen)
 {
 	AttrMap    *res;
 
-	res = (AttrMap *) palloc0(sizeof(AttrMap));
+	res = palloc0_object(AttrMap);
 	res->maplen = maplen;
-	res->attnums = (AttrNumber *) palloc0(sizeof(AttrNumber) * maplen);
+	res->attnums = palloc0_array(AttrNumber, maplen);
 	return res;
 }
 

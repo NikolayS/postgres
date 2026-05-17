@@ -5,7 +5,7 @@
  *		number of background workers for shared memory message queue
  *		testing.
  *
- * Copyright (c) 2013-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2013-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_shm_mq/setup.c
@@ -18,9 +18,11 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgworker.h"
+#include "storage/proc.h"
 #include "storage/shm_toc.h"
 #include "test_shm_mq.h"
 #include "utils/memutils.h"
+#include "utils/wait_event.h"
 
 typedef struct
 {
@@ -228,6 +230,7 @@ setup_background_workers(int nworkers, dsm_segment *seg)
 	/* Register the workers. */
 	for (i = 0; i < nworkers; ++i)
 	{
+		snprintf(worker.bgw_name, BGW_MAXLEN, "test_shm_mq worker %d", i + 1);
 		if (!RegisterDynamicBackgroundWorker(&worker, &wstate->handle[i]))
 			ereport(ERROR,
 					(errcode(ERRCODE_INSUFFICIENT_RESOURCES),

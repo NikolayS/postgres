@@ -8,7 +8,7 @@
  * do nothing if it's enabled. You should avoid accessing the target files
  * directly but if you do, make sure you honor the --dry-run mode!
  *
- * Portions Copyright (c) 2013-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2013-2026, PostgreSQL Global Development Group
  *
  *-------------------------------------------------------------------------
  */
@@ -327,7 +327,7 @@ slurpFile(const char *datadir, const char *path, size_t *filesize)
 				 fullpath);
 
 	if (fstat(fd, &statbuf) < 0)
-		pg_fatal("could not open file \"%s\" for reading: %m",
+		pg_fatal("could not stat file \"%s\": %m",
 				 fullpath);
 
 	len = statbuf.st_size;

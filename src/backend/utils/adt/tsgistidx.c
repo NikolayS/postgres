@@ -3,7 +3,7 @@
  * tsgistidx.c
  *	  GiST support functions for tsvector_ops
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -212,7 +212,7 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 			res = ressign;
 		}
 
-		retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		gistentryinit(*retval, PointerGetDatum(res),
 					  entry->rel, entry->page,
 					  entry->offset, false);
@@ -231,7 +231,7 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 		}
 
 		res = gtsvector_alloc(SIGNKEY | ALLISTRUE, siglen, sign);
-		retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		gistentryinit(*retval, PointerGetDatum(res),
 					  entry->rel, entry->page,
 					  entry->offset, false);
@@ -251,7 +251,7 @@ gtsvector_decompress(PG_FUNCTION_ARGS)
 
 	if (key != (SignTSVector *) DatumGetPointer(entry->key))
 	{
-		GISTENTRY  *retval = (GISTENTRY *) palloc(sizeof(GISTENTRY));
+		GISTENTRY  *retval = palloc_object(GISTENTRY);
 
 		gistentryinit(*retval, PointerGetDatum(key),
 					  entry->rel, entry->page,
@@ -326,9 +326,10 @@ gtsvector_consistent(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	TSQuery		query = PG_GETARG_TSQUERY(1);
-
-	/* StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2); */
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	SignTSVector *key = (SignTSVector *) DatumGetPointer(entry->key);
 
@@ -641,7 +642,7 @@ gtsvector_picksplit(PG_FUNCTION_ARGS)
 	v->spl_left = (OffsetNumber *) palloc(nbytes);
 	v->spl_right = (OffsetNumber *) palloc(nbytes);
 
-	cache = (CACHESIGN *) palloc(sizeof(CACHESIGN) * (maxoff + 2));
+	cache = palloc_array(CACHESIGN, maxoff + 2);
 	cache_sign = palloc(siglen * (maxoff + 2));
 
 	for (j = 0; j < maxoff + 2; j++)
@@ -688,7 +689,7 @@ gtsvector_picksplit(PG_FUNCTION_ARGS)
 	maxoff = OffsetNumberNext(maxoff);
 	fillcache(&cache[maxoff], GETENTRY(entryvec, maxoff), siglen);
 	/* sort before ... */
-	costvector = (SPLITCOST *) palloc(sizeof(SPLITCOST) * maxoff);
+	costvector = palloc_array(SPLITCOST, maxoff);
 	for (j = FirstOffsetNumber; j <= maxoff; j = OffsetNumberNext(j))
 	{
 		costvector[j - 1].pos = j;

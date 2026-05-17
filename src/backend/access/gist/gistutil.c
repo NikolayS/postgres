@@ -4,7 +4,7 @@
  *	  utilities routines for the postgres GiST index access method.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -44,10 +44,10 @@ gistfillbuffer(Page page, IndexTuple *itup, int len, OffsetNumber off)
 		Size		sz = IndexTupleSize(itup[i]);
 		OffsetNumber l;
 
-		l = PageAddItem(page, (Item) itup[i], sz, off, false, false);
+		l = PageAddItem(page, itup[i], sz, off, false, false);
 		if (l == InvalidOffsetNumber)
-			elog(ERROR, "failed to add item to GiST index page, item %d out of %d, size %d bytes",
-				 i, len, (int) sz);
+			elog(ERROR, "failed to add item to GiST index page, item %d out of %d, size %zu bytes",
+				 i, len, sz);
 		off++;
 	}
 }
@@ -100,7 +100,7 @@ gistextractpage(Page page, int *len /* out */ )
 
 	maxoff = PageGetMaxOffsetNumber(page);
 	*len = maxoff;
-	itvec = palloc(sizeof(IndexTuple) * maxoff);
+	itvec = palloc_array(IndexTuple, maxoff);
 	for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
 		itvec[i - FirstOffsetNumber] = (IndexTuple) PageGetItem(page, PageGetItemId(page, i));
 
@@ -113,7 +113,7 @@ gistextractpage(Page page, int *len /* out */ )
 IndexTuple *
 gistjoinvector(IndexTuple *itvec, int *len, IndexTuple *additvec, int addlen)
 {
-	itvec = (IndexTuple *) repalloc(itvec, sizeof(IndexTuple) * ((*len) + addlen));
+	itvec = repalloc_array(itvec, IndexTuple, (*len) + addlen);
 	memmove(&itvec[*len], additvec, sizeof(IndexTuple) * addlen);
 	*len += addlen;
 	return itvec;
@@ -157,7 +157,7 @@ gistMakeUnionItVec(GISTSTATE *giststate, IndexTuple *itvec, int len,
 {
 	int			i;
 	GistEntryVector *evec;
-	int			attrsize;
+	int			attrsize = 0;	/* silence compiler warning */
 
 	evec = (GistEntryVector *) palloc((len + 2) * sizeof(GISTENTRY) + GEVHDRSZ);
 
@@ -242,7 +242,7 @@ gistMakeUnionKey(GISTSTATE *giststate, int attno,
 		char		padding[2 * sizeof(GISTENTRY) + GEVHDRSZ];
 	}			storage;
 	GistEntryVector *evec = &storage.gev;
-	int			dstsize;
+	int			dstsize = 0;	/* silence compiler warning */
 
 	evec->n = 2;
 
@@ -1008,61 +1008,11 @@ gistproperty(Oid index_oid, int attno,
 }
 
 /*
- * Some indexes are not WAL-logged, but we need LSNs to detect concurrent page
- * splits anyway. This function provides a fake sequence of LSNs for that
- * purpose.
- */
-XLogRecPtr
-gistGetFakeLSN(Relation rel)
-{
-	if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-	{
-		/*
-		 * Temporary relations are only accessible in our session, so a simple
-		 * backend-local counter will do.
-		 */
-		static XLogRecPtr counter = FirstNormalUnloggedLSN;
-
-		return counter++;
-	}
-	else if (RelationIsPermanent(rel))
-	{
-		/*
-		 * WAL-logging on this relation will start after commit, so its LSNs
-		 * must be distinct numbers smaller than the LSN at the next commit.
-		 * Emit a dummy WAL record if insert-LSN hasn't advanced after the
-		 * last call.
-		 */
-		static XLogRecPtr lastlsn = InvalidXLogRecPtr;
-		XLogRecPtr	currlsn = GetXLogInsertRecPtr();
-
-		/* Shouldn't be called for WAL-logging relations */
-		Assert(!RelationNeedsWAL(rel));
-
-		/* No need for an actual record if we already have a distinct LSN */
-		if (!XLogRecPtrIsInvalid(lastlsn) && lastlsn == currlsn)
-			currlsn = gistXLogAssignLSN();
-
-		lastlsn = currlsn;
-		return currlsn;
-	}
-	else
-	{
-		/*
-		 * Unlogged relations are accessible from other backends, and survive
-		 * (clean) restarts. GetFakeLSNForUnloggedRel() handles that for us.
-		 */
-		Assert(rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED);
-		return GetFakeLSNForUnloggedRel();
-	}
-}
-
-/*
- * This is a stratnum support function for GiST opclasses that use the
- * RT*StrategyNumber constants.
+ * This is a stratnum translation support function for GiST opclasses that use
+ * the RT*StrategyNumber constants.
  */
 Datum
-gist_stratnum_common(PG_FUNCTION_ARGS)
+gist_translate_cmptype_common(PG_FUNCTION_ARGS)
 {
 	CompareType cmptype = PG_GETARG_INT32(0);
 
@@ -1090,9 +1040,9 @@ gist_stratnum_common(PG_FUNCTION_ARGS)
 /*
  * Returns the opclass's private stratnum used for the given compare type.
  *
- * Calls the opclass's GIST_STRATNUM_PROC support function, if any,
- * and returns the result.
- * Returns InvalidStrategy if the function is not defined.
+ * Calls the opclass's GIST_TRANSLATE_CMPTYPE_PROC support function, if any,
+ * and returns the result.  Returns InvalidStrategy if the function is not
+ * defined.
  */
 StrategyNumber
 gisttranslatecmptype(CompareType cmptype, Oid opfamily)
@@ -1101,7 +1051,7 @@ gisttranslatecmptype(CompareType cmptype, Oid opfamily)
 	Datum		result;
 
 	/* Check whether the function is provided. */
-	funcid = get_opfamily_proc(opfamily, ANYOID, ANYOID, GIST_STRATNUM_PROC);
+	funcid = get_opfamily_proc(opfamily, ANYOID, ANYOID, GIST_TRANSLATE_CMPTYPE_PROC);
 	if (!OidIsValid(funcid))
 		return InvalidStrategy;
 

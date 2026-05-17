@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 tests += {
   'name': 'ldap',
@@ -8,6 +8,7 @@ tests += {
     'tests': [
       't/001_auth.pl',
       't/002_bindpasswd.pl',
+      't/003_ldap_connection_param_lookup.pl',
     ],
     'env': {
       'with_ldap': ldap.found() ? 'yes' : 'no',

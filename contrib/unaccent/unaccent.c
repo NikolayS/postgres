@@ -3,7 +3,7 @@
  * unaccent.c
  *	  Text search unaccent dictionary
  *
- * Copyright (c) 2009-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2009-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/unaccent/unaccent.c
@@ -60,7 +60,7 @@ placeChar(TrieChar *node, const unsigned char *str, int lenstr,
 	TrieChar   *curnode;
 
 	if (!node)
-		node = (TrieChar *) palloc0(sizeof(TrieChar) * 256);
+		node = palloc0_array(TrieChar, 256);
 
 	Assert(lenstr > 0);			/* else str[0] doesn't exist */
 
@@ -156,7 +156,7 @@ initTrie(const char *filename)
 				state = 0;
 				for (ptr = line; *ptr; ptr += ptrlen)
 				{
-					ptrlen = pg_mblen(ptr);
+					ptrlen = pg_mblen_cstr(ptr);
 					/* ignore whitespace, but end src or trg */
 					if (isspace((unsigned char) *ptr))
 					{
@@ -239,7 +239,7 @@ initTrie(const char *filename)
 				if (trgquoted && state > 0)
 				{
 					/* Ignore first and end quotes */
-					trgstore = (char *) palloc(sizeof(char) * (trglen - 2));
+					trgstore = palloc_array(char, trglen - 2);
 					trgstorelen = 0;
 					for (int i = 1; i < trglen - 1; i++)
 					{
@@ -252,7 +252,7 @@ initTrie(const char *filename)
 				}
 				else
 				{
-					trgstore = (char *) palloc(sizeof(char) * trglen);
+					trgstore = palloc_array(char, trglen);
 					trgstorelen = trglen;
 					memcpy(trgstore, trg, trgstorelen);
 				}
@@ -382,6 +382,7 @@ unaccent_lexize(PG_FUNCTION_ARGS)
 	char	   *srcchar = (char *) PG_GETARG_POINTER(1);
 	int32		len = PG_GETARG_INT32(2);
 	char	   *srcstart = srcchar;
+	const char *srcend = srcstart + len;
 	TSLexeme   *res;
 	StringInfoData buf;
 
@@ -409,7 +410,7 @@ unaccent_lexize(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			matchlen = pg_mblen(srcchar);
+			matchlen = pg_mblen_range(srcchar, srcend);
 			if (buf.data != NULL)
 				appendBinaryStringInfo(&buf, srcchar, matchlen);
 		}
@@ -421,7 +422,7 @@ unaccent_lexize(PG_FUNCTION_ARGS)
 	/* return a result only if we made at least one substitution */
 	if (buf.data != NULL)
 	{
-		res = (TSLexeme *) palloc0(sizeof(TSLexeme) * 2);
+		res = palloc0_array(TSLexeme, 2);
 		res->lexeme = buf.data;
 		res->flags = TSL_FILTER;
 	}

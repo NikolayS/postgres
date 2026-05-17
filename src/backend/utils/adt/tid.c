@@ -3,7 +3,7 @@
  * tid.c
  *	  Functions for the built-in type tuple id
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -17,7 +17,6 @@
  */
 #include "postgres.h"
 
-#include <math.h>
 #include <limits.h>
 
 #include "access/sysattr.h"
@@ -42,7 +41,7 @@
 #define DELIM			','
 #define NTIDARGS		2
 
-static ItemPointer currtid_for_view(Relation viewrel, ItemPointer tid);
+static ItemPointer currtid_for_view(Relation viewrel, const ItemPointerData *tid);
 
 /* ----------------------------------------------------------------
  *		tidin
@@ -84,7 +83,7 @@ tidin(PG_FUNCTION_ARGS)
 	/*
 	 * Cope with possibility that unsigned long is wider than BlockNumber, in
 	 * which case strtoul will not raise an error for some values that are out
-	 * of the range of BlockNumber.  (See similar code in oidin().)
+	 * of the range of BlockNumber.  (See similar code in uint32in_subr().)
 	 */
 #if SIZEOF_LONG > 4
 	if (cvt != (unsigned long) blockNumber &&
@@ -104,7 +103,7 @@ tidin(PG_FUNCTION_ARGS)
 						"tid", str)));
 	offsetNumber = (OffsetNumber) cvt;
 
-	result = (ItemPointer) palloc(sizeof(ItemPointerData));
+	result = (ItemPointer) palloc_object(ItemPointerData);
 
 	ItemPointerSet(result, blockNumber, offsetNumber);
 
@@ -146,7 +145,7 @@ tidrecv(PG_FUNCTION_ARGS)
 	blockNumber = pq_getmsgint(buf, sizeof(blockNumber));
 	offsetNumber = pq_getmsgint(buf, sizeof(offsetNumber));
 
-	result = (ItemPointer) palloc(sizeof(ItemPointerData));
+	result = (ItemPointer) palloc_object(ItemPointerData);
 
 	ItemPointerSet(result, blockNumber, offsetNumber);
 
@@ -280,6 +279,35 @@ hashtidextended(PG_FUNCTION_ARGS)
 							 seed);
 }
 
+/*
+ * Extract the block number from a TID
+ *
+ * Returns int8 because BlockNumber is uint32, which exceeds the range of int4.
+ */
+Datum
+tid_block(PG_FUNCTION_ARGS)
+{
+	ItemPointer tid = PG_GETARG_ITEMPOINTER(0);
+
+	/* need to use NoCheck, as tidin allows InvalidBlockNumber */
+	PG_RETURN_INT64((int64) ItemPointerGetBlockNumberNoCheck(tid));
+}
+
+/*
+ * Extract the offset number from a TID
+ *
+ * Returns int4 because OffsetNumber is uint16, which exceeds the range of
+ * int2.
+ */
+Datum
+tid_offset(PG_FUNCTION_ARGS)
+{
+	ItemPointer tid = PG_GETARG_ITEMPOINTER(0);
+
+	/* need to use NoCheck, as tidin allows InvalidOffsetNumber */
+	PG_RETURN_INT32((int32) ItemPointerGetOffsetNumberNoCheck(tid));
+}
+
 
 /*
  *	Functions to get latest tid of a specified tuple.
@@ -293,14 +321,14 @@ hashtidextended(PG_FUNCTION_ARGS)
  *		relation "rel".
  */
 static ItemPointer
-currtid_internal(Relation rel, ItemPointer tid)
+currtid_internal(Relation rel, const ItemPointerData *tid)
 {
 	ItemPointer result;
 	AclResult	aclresult;
 	Snapshot	snapshot;
 	TableScanDesc scan;
 
-	result = (ItemPointer) palloc(sizeof(ItemPointerData));
+	result = (ItemPointer) palloc_object(ItemPointerData);
 
 	aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(),
 								  ACL_SELECT);
@@ -335,7 +363,7 @@ currtid_internal(Relation rel, ItemPointer tid)
  *		correspond to the CTID of a base relation.
  */
 static ItemPointer
-currtid_for_view(Relation viewrel, ItemPointer tid)
+currtid_for_view(Relation viewrel, const ItemPointerData *tid)
 {
 	TupleDesc	att = RelationGetDescr(viewrel);
 	RuleLock   *rulelock;

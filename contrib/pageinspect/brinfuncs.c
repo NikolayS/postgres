@@ -2,7 +2,7 @@
  * brinfuncs.c
  *		Functions to investigate BRIN indexes
  *
- * Copyright (c) 2014-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		contrib/pageinspect/brinfuncs.c
@@ -22,6 +22,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/tuplestore.h"
 
 PG_FUNCTION_INFO_V1(brin_page_type);
 PG_FUNCTION_INFO_V1(brin_page_items);
@@ -186,7 +187,7 @@ brin_page_items(PG_FUNCTION_ARGS)
 	 * Initialize output functions for all indexed datatypes; simplifies
 	 * calling them later.
 	 */
-	columns = palloc(sizeof(brin_column_state *) * RelationGetDescr(indexRel)->natts);
+	columns = palloc_array(brin_column_state *, RelationGetDescr(indexRel)->natts);
 	for (attno = 1; attno <= bdesc->bd_tupdesc->natts; attno++)
 	{
 		Oid			output;

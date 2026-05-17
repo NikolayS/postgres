@@ -3,7 +3,7 @@
  * parse_coerce.c
  *		handle type coercions/conversions for parser
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_inherits.h"

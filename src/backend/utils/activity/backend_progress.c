@@ -3,7 +3,7 @@
  *
  *	Command progress reporting infrastructure.
  *
- *	Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  *	src/backend/utils/activity/backend_progress.c
  * ----------
@@ -12,6 +12,7 @@
 
 #include "access/parallel.h"
 #include "libpq/pqformat.h"
+#include "storage/proc.h"
 #include "utils/backend_progress.h"
 #include "utils/backend_status.h"
 

@@ -4,7 +4,7 @@
  *	  Post-processing of a completed plan tree: fix references to subplan
  *	  vars, compute regproc values for operators, etc
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -211,6 +211,9 @@ static List *set_windowagg_runcondition_references(PlannerInfo *root,
 												   List *runcondition,
 												   Plan *plan);
 
+static void record_elided_node(PlannerGlobal *glob, int plan_node_id,
+							   NodeTag elided_type, Bitmapset *relids);
+
 
 /*****************************************************************************
  *
@@ -307,8 +310,12 @@ set_plan_references(PlannerInfo *root, Plan *plan)
 		PlanRowMark *rc = lfirst_node(PlanRowMark, lc);
 		PlanRowMark *newrc;
 
+		/* sanity check on existing row marks */
+		Assert(root->simple_rel_array[rc->rti] != NULL &&
+			   root->simple_rte_array[rc->rti] != NULL);
+
 		/* flat copy is enough since all fields are scalars */
-		newrc = (PlanRowMark *) palloc(sizeof(PlanRowMark));
+		newrc = palloc_object(PlanRowMark);
 		memcpy(newrc, rc, sizeof(PlanRowMark));
 
 		/* adjust indexes ... but *not* the rowmarkId */
@@ -394,6 +401,26 @@ add_rtes_to_flat_rtable(PlannerInfo *root, bool recursing)
 	PlannerGlobal *glob = root->glob;
 	Index		rti;
 	ListCell   *lc;
+
+	/*
+	 * Record enough information to make it possible for code that looks at
+	 * the final range table to understand how it was constructed. (If
+	 * finalrtable is still NIL, then this is the very topmost PlannerInfo,
+	 * which will always have plan_name == NULL and rtoffset == 0; we omit the
+	 * degenerate list entry.)
+	 */
+	if (root->glob->finalrtable != NIL)
+	{
+		SubPlanRTInfo *rtinfo = makeNode(SubPlanRTInfo);
+
+		rtinfo->plan_name = root->plan_name;
+		rtinfo->rtoffset = list_length(root->glob->finalrtable);
+
+		/* When recursing = true, it's an unplanned or dummy subquery. */
+		rtinfo->dummy = recursing;
+
+		root->glob->subrtinfos = lappend(root->glob->subrtinfos, rtinfo);
+	}
 
 	/*
 	 * Add the query's own RTEs to the flattened rangetable.
@@ -541,7 +568,7 @@ add_rte_to_flat_rtable(PlannerGlobal *glob, List *rteperminfos,
 	RangeTblEntry *newrte;
 
 	/* flat copy to duplicate all the scalar fields */
-	newrte = (RangeTblEntry *) palloc(sizeof(RangeTblEntry));
+	newrte = palloc_object(RangeTblEntry);
 	memcpy(newrte, rte, sizeof(RangeTblEntry));
 
 	/* zap unneeded sub-structure */
@@ -1030,16 +1057,35 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					 * expected to occur here, it seems safer to special-case
 					 * it here and keep the assertions that ROWID_VARs
 					 * shouldn't be seen by fix_scan_expr.
+					 *
+					 * We also must handle the case where set operations have
+					 * been short-circuited resulting in a dummy Result node.
+					 * prepunion.c uses varno==0 for the set op targetlist.
+					 * See generate_setop_tlist() and generate_setop_tlist().
+					 * Here we rewrite these to use varno==1, which is the
+					 * varno of the first set-op child.  Without this, EXPLAIN
+					 * will have trouble displaying targetlists of dummy set
+					 * operations.
 					 */
 					foreach(l, splan->plan.targetlist)
 					{
 						TargetEntry *tle = (TargetEntry *) lfirst(l);
 						Var		   *var = (Var *) tle->expr;
 
-						if (var && IsA(var, Var) && var->varno == ROWID_VAR)
-							tle->expr = (Expr *) makeNullConst(var->vartype,
-															   var->vartypmod,
-															   var->varcollid);
+						if (var && IsA(var, Var))
+						{
+							if (var->varno == ROWID_VAR)
+								tle->expr = (Expr *) makeNullConst(var->vartype,
+																   var->vartypmod,
+																   var->varcollid);
+							else if (var->varno == 0)
+								tle->expr = (Expr *) makeVar(1,
+															 var->varattno,
+															 var->vartype,
+															 var->vartypmod,
+															 var->varcollid,
+															 var->varlevelsup);
+						}
 					}
 
 					splan->plan.targetlist =
@@ -1052,6 +1098,8 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 				/* resconstantqual can't contain any subplan variable refs */
 				splan->resconstantqual =
 					fix_scan_expr(root, splan->resconstantqual, rtoffset, 1);
+				/* adjust the relids set */
+				splan->relids = offset_relid_set(splan->relids, rtoffset);
 			}
 			break;
 		case T_ProjectSet:
@@ -1115,7 +1163,8 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 				 * those are already used by RETURNING and it seems better to
 				 * be non-conflicting.
 				 */
-				if (splan->onConflictSet)
+				if (splan->onConflictAction == ONCONFLICT_UPDATE ||
+					splan->onConflictAction == ONCONFLICT_SELECT)
 				{
 					indexed_tlist *itlist;
 
@@ -1415,10 +1464,17 @@ set_subqueryscan_references(PlannerInfo *root,
 
 	if (trivial_subqueryscan(plan))
 	{
+		Index		scanrelid;
+
 		/*
 		 * We can omit the SubqueryScan node and just pull up the subplan.
 		 */
 		result = clean_up_removed_plan_level((Plan *) plan, plan->subplan);
+
+		/* Remember that we removed a SubqueryScan */
+		scanrelid = plan->scan.scanrelid + rtoffset;
+		record_elided_node(root->glob, plan->subplan->plan_node_id,
+						   T_SubqueryScan, bms_make_singleton(scanrelid));
 	}
 	else
 	{
@@ -1846,7 +1902,17 @@ set_append_references(PlannerInfo *root,
 		Plan	   *p = (Plan *) linitial(aplan->appendplans);
 
 		if (p->parallel_aware == aplan->plan.parallel_aware)
-			return clean_up_removed_plan_level((Plan *) aplan, p);
+		{
+			Plan	   *result;
+
+			result = clean_up_removed_plan_level((Plan *) aplan, p);
+
+			/* Remember that we removed an Append */
+			record_elided_node(root->glob, p->plan_node_id, T_Append,
+							   offset_relid_set(aplan->apprelids, rtoffset));
+
+			return result;
+		}
 	}
 
 	/*
@@ -1914,7 +1980,17 @@ set_mergeappend_references(PlannerInfo *root,
 		Plan	   *p = (Plan *) linitial(mplan->mergeplans);
 
 		if (p->parallel_aware == mplan->plan.parallel_aware)
-			return clean_up_removed_plan_level((Plan *) mplan, p);
+		{
+			Plan	   *result;
+
+			result = clean_up_removed_plan_level((Plan *) mplan, p);
+
+			/* Remember that we removed a MergeAppend */
+			record_elided_node(root->glob, p->plan_node_id, T_MergeAppend,
+							   offset_relid_set(mplan->apprelids, rtoffset));
+
+			return result;
+		}
 	}
 
 	/*
@@ -2003,7 +2079,7 @@ offset_relid_set(Relids relids, int rtoffset)
 static inline Var *
 copyVar(Var *var)
 {
-	Var		   *newvar = (Var *) palloc(sizeof(Var));
+	Var		   *newvar = palloc_object(Var);
 
 	*newvar = *var;
 	return newvar;
@@ -2158,9 +2234,12 @@ fix_alternative_subplan(PlannerInfo *root, AlternativeSubPlan *asplan,
 
 	/*
 	 * Compute the estimated cost of each subplan assuming num_exec
-	 * executions, and keep the cheapest one.  In event of exact equality of
-	 * estimates, we prefer the later plan; this is a bit arbitrary, but in
-	 * current usage it biases us to break ties against fast-start subplans.
+	 * executions, and keep the cheapest one.  If one subplan has more
+	 * disabled nodes than another, choose the one with fewer disabled nodes
+	 * regardless of cost; this parallels compare_path_costs.  In event of
+	 * exact equality of estimates, we prefer the later plan; this is a bit
+	 * arbitrary, but in current usage it biases us to break ties against
+	 * fast-start subplans.
 	 */
 	Assert(asplan->subplans != NIL);
 
@@ -2170,7 +2249,10 @@ fix_alternative_subplan(PlannerInfo *root, AlternativeSubPlan *asplan,
 		Cost		curcost;
 
 		curcost = curplan->startup_cost + num_exec * curplan->per_call_cost;
-		if (bestplan == NULL || curcost <= bestcost)
+		if (bestplan == NULL ||
+			curplan->disabled_nodes < bestplan->disabled_nodes ||
+			(curplan->disabled_nodes == bestplan->disabled_nodes &&
+			 curcost <= bestcost))
 		{
 			bestplan = curplan;
 			bestcost = curcost;
@@ -3071,7 +3153,7 @@ search_indexed_tlist_for_sortgroupref(Expr *node,
  *	  other-relation Vars by OUTER_VAR references, while leaving target Vars
  *	  alone. Thus inner_itlist = NULL and acceptable_rel = the ID of the
  *	  target relation should be passed.
- * 3) ON CONFLICT UPDATE SET/WHERE clauses.  Here references to EXCLUDED are
+ * 3) ON CONFLICT SET and WHERE clauses.  Here references to EXCLUDED are
  *	  to be replaced with INNER_VAR references, while leaving target Vars (the
  *	  to-be-updated relation) alone. Correspondingly inner_itlist is to be
  *	  EXCLUDED elements, outer_itlist = NULL and acceptable_rel the target
@@ -3728,4 +3810,22 @@ extract_query_dependencies_walker(Node *node, PlannerInfo *context)
 	fix_expr_common(context, node);
 	return expression_tree_walker(node, extract_query_dependencies_walker,
 								  context);
+}
+
+/*
+ * Record some details about a node removed from the plan during setrefs
+ * processing, for the benefit of code trying to reconstruct planner decisions
+ * from examination of the final plan tree.
+ */
+static void
+record_elided_node(PlannerGlobal *glob, int plan_node_id,
+				   NodeTag elided_type, Bitmapset *relids)
+{
+	ElidedNode *n = makeNode(ElidedNode);
+
+	n->plan_node_id = plan_node_id;
+	n->elided_type = elided_type;
+	n->relids = relids;
+
+	glob->elidedNodes = lappend(glob->elidedNodes, n);
 }

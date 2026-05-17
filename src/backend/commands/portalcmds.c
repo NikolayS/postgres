@@ -9,7 +9,7 @@
  * storage management for portals (but doesn't run any queries in them).
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -99,7 +99,8 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 		elog(ERROR, "non-SELECT statement in DECLARE CURSOR");
 
 	/* Plan the query, applying the specified options */
-	plan = pg_plan_query(query, pstate->p_sourcetext, cstmt->options, params);
+	plan = pg_plan_query(query, pstate->p_sourcetext, cstmt->options, params,
+						 NULL);
 
 	/*
 	 * Create a portal and copy the plan and query string into its memory.

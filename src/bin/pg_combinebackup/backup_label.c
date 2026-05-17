@@ -2,7 +2,7 @@
  *
  * Read and manipulate backup label files
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_combinebackup/backup_label.c
@@ -247,7 +247,7 @@ parse_lsn(char *s, char *e, XLogRecPtr *lsn, char **c)
 	unsigned	lo;
 
 	*e = '\0';
-	success = (sscanf(s, "%X/%X%n", &hi, &lo, &nchars) == 2);
+	success = (sscanf(s, "%X/%08X%n", &hi, &lo, &nchars) == 2);
 	*e = save;
 
 	if (success)

@@ -2,7 +2,7 @@
  * reorderbuffer.h
  *	  PostgreSQL logical replay/reorder buffer management.
  *
- * Copyright (c) 2012-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2026, PostgreSQL Global Development Group
  *
  * src/include/replication/reorderbuffer.h
  */
@@ -83,7 +83,7 @@ typedef struct ReorderBufferChange
 	/* Transaction this change belongs to. */
 	struct ReorderBufferTXN *txn;
 
-	RepOriginId origin_id;
+	ReplOriginId origin_id;
 
 	/*
 	 * Context data for the change. Which part of the union is valid depends
@@ -176,6 +176,7 @@ typedef struct ReorderBufferChange
 #define RBTXN_SENT_PREPARE			0x0200
 #define RBTXN_IS_COMMITTED			0x0400
 #define RBTXN_IS_ABORTED			0x0800
+#define RBTXN_DISTR_INVAL_OVERFLOWED	0x1000
 
 #define RBTXN_PREPARE_STATUS_MASK	(RBTXN_IS_PREPARED | RBTXN_SKIPPED_PREPARE | RBTXN_SENT_PREPARE)
 
@@ -265,6 +266,12 @@ typedef struct ReorderBufferChange
 	((txn)->txn_flags & RBTXN_SKIPPED_PREPARE) != 0 \
 )
 
+/* Is the array of distributed inval messages overflowed? */
+#define rbtxn_distr_inval_overflowed(txn) \
+( \
+	((txn)->txn_flags & RBTXN_DISTR_INVAL_OVERFLOWED) != 0 \
+)
+
 /* Is this a top-level transaction? */
 #define rbtxn_is_toptxn(txn) \
 ( \
@@ -286,7 +293,7 @@ typedef struct ReorderBufferChange
 typedef struct ReorderBufferTXN
 {
 	/* See above */
-	bits32		txn_flags;
+	uint32		txn_flags;
 
 	/* The transaction's transaction id, can be a toplevel or sub xid. */
 	TransactionId xid;
@@ -340,7 +347,7 @@ typedef struct ReorderBufferTXN
 	XLogRecPtr	restart_decoding_lsn;
 
 	/* origin of the change that caused this transaction */
-	RepOriginId origin_id;
+	ReplOriginId origin_id;
 	XLogRecPtr	origin_lsn;
 
 	/*
@@ -352,7 +359,7 @@ typedef struct ReorderBufferTXN
 		TimestampTz commit_time;
 		TimestampTz prepare_time;
 		TimestampTz abort_time;
-	}			xact_time;
+	};
 
 	/*
 	 * The base snapshot is used to decode all changes until either this
@@ -421,6 +428,12 @@ typedef struct ReorderBufferTXN
 	 */
 	uint32		ninvalidations;
 	SharedInvalidationMessage *invalidations;
+
+	/*
+	 * Stores cache invalidation messages distributed by other transactions.
+	 */
+	uint32		ninvalidations_distributed;
+	SharedInvalidationMessage *invalidations_distributed;
 
 	/* ---
 	 * Position in one of two lists:
@@ -677,6 +690,9 @@ struct ReorderBuffer
 	int64		streamCount;	/* streaming invocation counter */
 	int64		streamBytes;	/* amount of data decoded */
 
+	/* Number of times the logical_decoding_work_mem limit has been reached */
+	int64		memExceededCount;
+
 	/*
 	 * Statistics about all the transactions sent to the decoding output
 	 * plugin
@@ -708,12 +724,12 @@ extern void ReorderBufferQueueMessage(ReorderBuffer *rb, TransactionId xid,
 									  Size message_size, const char *message);
 extern void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 								XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-								TimestampTz commit_time, RepOriginId origin_id, XLogRecPtr origin_lsn);
+								TimestampTz commit_time, ReplOriginId origin_id, XLogRecPtr origin_lsn);
 extern void ReorderBufferFinishPrepared(ReorderBuffer *rb, TransactionId xid,
 										XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
 										XLogRecPtr two_phase_at,
 										TimestampTz commit_time,
-										RepOriginId origin_id, XLogRecPtr origin_lsn,
+										ReplOriginId origin_id, XLogRecPtr origin_lsn,
 										char *gid, bool is_commit);
 extern void ReorderBufferAssignChild(ReorderBuffer *rb, TransactionId xid,
 									 TransactionId subxid, XLogRecPtr lsn);
@@ -738,6 +754,9 @@ extern void ReorderBufferAddNewTupleCids(ReorderBuffer *rb, TransactionId xid,
 										 CommandId cmin, CommandId cmax, CommandId combocid);
 extern void ReorderBufferAddInvalidations(ReorderBuffer *rb, TransactionId xid, XLogRecPtr lsn,
 										  Size nmsgs, SharedInvalidationMessage *msgs);
+extern void ReorderBufferAddDistributedInvalidations(ReorderBuffer *rb, TransactionId xid,
+													 XLogRecPtr lsn, Size nmsgs,
+													 SharedInvalidationMessage *msgs);
 extern void ReorderBufferImmediateInvalidation(ReorderBuffer *rb, uint32 ninvalidations,
 											   SharedInvalidationMessage *invalidations);
 extern void ReorderBufferProcessXid(ReorderBuffer *rb, TransactionId xid, XLogRecPtr lsn);
@@ -749,7 +768,7 @@ extern bool ReorderBufferXidHasBaseSnapshot(ReorderBuffer *rb, TransactionId xid
 extern bool ReorderBufferRememberPrepareInfo(ReorderBuffer *rb, TransactionId xid,
 											 XLogRecPtr prepare_lsn, XLogRecPtr end_lsn,
 											 TimestampTz prepare_time,
-											 RepOriginId origin_id, XLogRecPtr origin_lsn);
+											 ReplOriginId origin_id, XLogRecPtr origin_lsn);
 extern void ReorderBufferSkipPrepare(ReorderBuffer *rb, TransactionId xid);
 extern void ReorderBufferPrepare(ReorderBuffer *rb, TransactionId xid, char *gid);
 extern ReorderBufferTXN *ReorderBufferGetOldestTXN(ReorderBuffer *rb);

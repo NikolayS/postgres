@@ -2,7 +2,7 @@
 # Exercises the API for custom OAuth client flows, using the oauth_hook_client
 # test driver.
 #
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 #
 
 use strict;
@@ -29,6 +29,8 @@ $node->init;
 $node->append_conf('postgresql.conf', "log_connections = all\n");
 $node->append_conf('postgresql.conf',
 	"oauth_validator_libraries = 'validator'\n");
+# Needed to inspect postmaster log after connection failure:
+$node->append_conf('postgresql.conf', "log_min_messages = debug2");
 $node->start;
 
 $node->safe_psql('postgres', 'CREATE USER test;');
@@ -47,7 +49,7 @@ local all test oauth issuer="$issuer" scope="$scope"
 });
 $node->reload;
 
-my $log_start = $node->wait_for_log(qr/reloading configuration files/);
+$node->wait_for_log(qr/reloading configuration files/);
 
 $ENV{PGOAUTHDEBUG} = "UNSAFE";
 
@@ -73,11 +75,12 @@ sub test
 	my @cmd = ("oauth_hook_client", @{$flags}, $common_connstr);
 	note "running '" . join("' '", @cmd) . "'";
 
+	my $log_start = -s $node->logfile;
 	my ($stdout, $stderr) = run_command(\@cmd);
 
-	if (defined($params{expected_stdout}))
+	if ($params{expect_success})
 	{
-		like($stdout, $params{expected_stdout}, "$test_name: stdout matches");
+		like($stdout, qr/connection succeeded/, "$test_name: stdout matches");
 	}
 
 	if (defined($params{expected_stderr}))
@@ -88,6 +91,18 @@ sub test
 	{
 		is($stderr, "", "$test_name: no stderr");
 	}
+
+	if (defined($params{log_like}))
+	{
+		# See Cluster::connect_fails(). To avoid races, we have to wait for the
+		# postmaster to flush the log for the finished connection.
+		$node->wait_for_log(
+			qr/DEBUG:  (?:00000: )?forked new client backend, pid=(\d+) socket.*DEBUG:  (?:00000: )?client backend \(PID \1\) exited with exit code \d/s,
+			$log_start);
+
+		$node->log_check("$test_name: log matches",
+			$log_start, log_like => $params{log_like});
+	}
 }
 
 test(
@@ -95,13 +110,40 @@ test(
 	flags => [
 		"--token", "my-token",
 		"--expected-uri", "$issuer/.well-known/openid-configuration",
+		"--expected-issuer", "$issuer",
 		"--expected-scope", $scope,
 	],
-	expected_stdout => qr/connection succeeded/);
+	expect_success => 1,
+	log_like => [qr/oauth_validator: token="my-token", role="$user"/]);
 
-$node->log_check("validator receives correct token",
-	$log_start,
-	log_like => [ qr/oauth_validator: token="my-token", role="$user"/, ]);
+# The issuer ID provided to the hook is based on, but not equal to,
+# oauth_issuer. Make sure the correct string is passed.
+$common_connstr =
+  "$base_connstr oauth_issuer=$issuer/.well-known/openid-configuration oauth_client_id=myID oauth_scope='$scope'";
+test(
+	"derived issuer ID is correctly provided",
+	flags => [
+		"--token", "my-token",
+		"--expected-uri", "$issuer/.well-known/openid-configuration",
+		"--expected-issuer", "$issuer",
+		"--expected-scope", $scope,
+	],
+	expect_success => 1,
+	log_like => [qr/oauth_validator: token="my-token", role="$user"/]);
+
+$common_connstr = "$base_connstr oauth_issuer=$issuer oauth_client_id=myID";
+
+# Make sure the v1 hook continues to work.
+test(
+	"v1 synchronous hook can provide a token",
+	flags => [
+		"-v1",
+		"--token" => "my-token-v1",
+		"--expected-uri" => "$issuer/.well-known/openid-configuration",
+		"--expected-scope" => $scope,
+	],
+	expect_success => 1,
+	log_like => [qr/oauth_validator: token="my-token-v1", role="$user"/]);
 
 if ($ENV{with_libcurl} ne 'yes')
 {
@@ -113,6 +155,15 @@ if ($ENV{with_libcurl} ne 'yes')
 		  qr/no OAuth flows are available \(try installing the libpq-oauth package\)/
 	);
 }
+
+# v2 synchronous flows should be able to set custom error messages.
+test(
+	"basic synchronous hook can set error messages",
+	flags => [
+		"--error" => "a custom error message",
+	],
+	expected_stderr =>
+	  qr/user-defined OAuth flow failed: a custom error message/);
 
 # connect_timeout should work if the flow doesn't respond.
 $common_connstr = "$common_connstr connect_timeout=1";
@@ -151,6 +202,21 @@ foreach my $c (@cases)
 		"hook misbehavior: $c->{'flag'}",
 		flags => [ $c->{'flag'} ],
 		expected_stderr => $c->{'expected_error'});
+
+	test(
+		"hook misbehavior: $c->{'flag'} (v1)",
+		flags => [ '-v1', $c->{'flag'} ],
+		expected_stderr => $c->{'expected_error'});
 }
+
+# v2 async flows should be able to set error messages, too.
+test(
+	"asynchronous hook can set error messages",
+	flags => [
+		"--misbehave" => "fail-async",
+		"--error" => "async error message",
+	],
+	expected_stderr =>
+	  qr/user-defined OAuth flow failed: async error message/);
 
 done_testing();

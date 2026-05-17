@@ -1,5 +1,5 @@
 
-# Copyright (c) 2024-2025, PostgreSQL Global Development Group
+# Copyright (c) 2024-2026, PostgreSQL Global Development Group
 
 # Run the standard regression tests with streaming replication
 use strict;
@@ -68,31 +68,25 @@ my $outputdir = $PostgreSQL::Test::Utils::tmp_check;
 
 # Run the regression tests against the primary.
 my $extra_opts = $ENV{EXTRA_REGRESS_OPTS} || "";
-my $rc =
-  system($ENV{PG_REGRESS}
-	  . " $extra_opts "
-	  . "--dlpath=\"$dlpath\" "
-	  . "--bindir= "
-	  . "--host="
-	  . $node_primary->host . " "
-	  . "--port="
-	  . $node_primary->port . " "
-	  . "--schedule=../regress/parallel_schedule "
-	  . "--max-concurrent-tests=20 "
-	  . "--inputdir=../regress "
-	  . "--outputdir=\"$outputdir\"");
-if ($rc != 0)
-{
-	# Dump out the regression diffs file, if there is one
-	my $diffs = "$outputdir/regression.diffs";
-	if (-e $diffs)
-	{
-		print "=== dumping $diffs ===\n";
-		print slurp_file($diffs);
-		print "=== EOF ===\n";
-	}
-}
-is($rc, 0, 'regression tests pass');
+command_ok(
+	[
+		$ENV{PG_REGRESS},
+		split(' ', $extra_opts),
+		"--dlpath=$dlpath",
+		'--bindir=',
+		'--host=' . $node_primary->host,
+		'--port=' . $node_primary->port,
+		'--schedule=../regress/parallel_schedule',
+		'--max-concurrent-tests=20',
+		'--inputdir=../regress',
+		"--outputdir=$outputdir"
+	],
+	'regression tests pass');
+
+my $primary_alive = $node_primary->is_alive;
+my $standby_alive = $node_standby_1->is_alive;
+is($primary_alive, 1, 'primary alive after regression test run');
+is($standby_alive, 1, 'standby alive after regression test run');
 
 # Clobber all sequences with their next value, so that we don't have
 # differences between nodes due to caching.
@@ -108,6 +102,7 @@ command_ok(
 		'pg_dumpall',
 		'--file' => $outputdir . '/primary.dump',
 		'--no-sync', '--no-statistics',
+		'--restrict-key' => 'test',
 		'--port' => $node_primary->port,
 		'--no-unlogged-table-data',    # if unlogged, standby has schema only
 	],
@@ -117,6 +112,7 @@ command_ok(
 		'pg_dumpall',
 		'--file' => $outputdir . '/standby.dump',
 		'--no-sync', '--no-statistics',
+		'--restrict-key' => 'test',
 		'--port' => $node_standby_1->port,
 	],
 	'dump standby server');
@@ -136,6 +132,7 @@ command_ok(
 		'--schema' => 'pg_catalog',
 		'--file' => $outputdir . '/catalogs_primary.dump',
 		'--no-sync',
+		'--restrict-key' => 'test',
 		'--port', $node_primary->port,
 		'--no-unlogged-table-data',
 		'regression',
@@ -147,6 +144,7 @@ command_ok(
 		'--schema' => 'pg_catalog',
 		'--file' => $outputdir . '/catalogs_standby.dump',
 		'--no-sync',
+		'--restrict-key' => 'test',
 		'--port' => $node_standby_1->port,
 		'regression',
 	],

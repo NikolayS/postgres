@@ -108,6 +108,29 @@ typedef struct BackgroundWorker
      </listitem>
     </varlistentry>
 
+    <varlistentry>
+     <term><literal>BGWORKER_INTERRUPTIBLE</literal></term>
+     <listitem>
+     <para>
+      <indexterm><primary>BGWORKER_INTERRUPTIBLE</primary></indexterm>
+      Requests termination of the background worker when its connected database is
+      dropped, renamed, moved to a different tablespace, or used as a template for
+      <command>CREATE DATABASE</command>. Specifically, the postmaster sends a
+      termination signal when any of these commands affect the worker's database:
+      <itemizedlist>
+       <listitem><para><command>DROP DATABASE</command></para></listitem>
+       <listitem><para><command>ALTER DATABASE RENAME
+       TO</command></para></listitem>
+       <listitem><para><command>ALTER DATABASE SET
+       TABLESPACE</command></para></listitem>
+       <listitem><para><command>CREATE DATABASE</command></para></listitem>
+      </itemizedlist>
+      Requires both <literal>BGWORKER_SHMEM_ACCESS</literal> and
+      <literal>BGWORKER_BACKEND_DATABASE_CONNECTION</literal>.
+     </para>
+     </listitem>
+    </varlistentry>
+
    </variablelist>
 
   </para>
@@ -209,12 +232,22 @@ typedef struct BackgroundWorker
   </para>
 
   <para>
+   A well-behaved background worker must react promptly to standard signals
+   that the postmaster uses to control its child processes.
    Signals are initially blocked when control reaches the
    background worker's main function, and must be unblocked by it; this is to
    allow the process to customize its signal handlers, if necessary.
    Signals can be unblocked in the new process by calling
    <function>BackgroundWorkerUnblockSignals</function> and blocked by calling
    <function>BackgroundWorkerBlockSignals</function>.
+  </para>
+
+  <para>
+   The default signal handlers merely set interrupt flags
+   that are processed later by <function>CHECK_FOR_INTERRUPTS()</function>.
+   <function>CHECK_FOR_INTERRUPTS()</function> should be called in any
+   long-running loop to ensure that the background worker doesn't prevent the
+   system from shutting down in a timely fashion.
   </para>
 
   <para>

@@ -3,7 +3,7 @@
  * pg_constraint.c
  *	  routines to support manipulation of the pg_constraint relation
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -179,7 +179,7 @@ CreateConstraintEntry(const char *constraintName,
 	for (i = 0; i < Natts_pg_constraint; i++)
 	{
 		nulls[i] = false;
-		values[i] = (Datum) NULL;
+		values[i] = (Datum) 0;
 	}
 
 	conOid = GetNewOidWithIndex(conDesc, ConstraintOidIndexId,
@@ -731,14 +731,15 @@ extractNotNullColumn(HeapTuple constrTup)
  * If a constraint exists but the connoinherit flag is not what the caller
  * wants, throw an error about the incompatibility.  If the desired
  * constraint is valid but the existing constraint is not valid, also
- * throw an error about that (the opposite case is acceptable).
+ * throw an error about that (the opposite case is acceptable).  If
+ * the proposed constraint has a different name, also throw an error.
  *
  * If everything checks out, we adjust conislocal/coninhcount and return
  * true.  If is_local is true we flip conislocal true, or do nothing if
  * it's already true; otherwise we increment coninhcount by 1.
  */
 bool
-AdjustNotNullInheritance(Oid relid, AttrNumber attnum,
+AdjustNotNullInheritance(Oid relid, AttrNumber attnum, const char *new_conname,
 						 bool is_local, bool is_no_inherit, bool is_notvalid)
 {
 	HeapTuple	tup;
@@ -776,6 +777,22 @@ AdjustNotNullInheritance(Oid relid, AttrNumber attnum,
 						   NameStr(conform->conname), get_rel_name(relid)),
 					errhint("You might need to validate it using %s.",
 							"ALTER TABLE ... VALIDATE CONSTRAINT"));
+
+		/*
+		 * If, for a new constraint that is being defined locally (i.e., not
+		 * being passed down via inheritance), a name was specified, then
+		 * verify that the existing constraint has the same name.  Otherwise
+		 * throw an error.  Names of inherited constraints are ignored because
+		 * they are not directly user-specified, so matching is not important.
+		 */
+		if (is_local && new_conname &&
+			strcmp(new_conname, NameStr(conform->conname)) != 0)
+			ereport(ERROR,
+					errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					errmsg("cannot create not-null constraint \"%s\" on column \"%s\" of table \"%s\"",
+						   new_conname, get_attname(relid, attnum, false), get_rel_name(relid)),
+					errdetail("A not-null constraint named \"%s\" already exists for this column.",
+							  NameStr(conform->conname)));
 
 		if (!is_local)
 		{
@@ -846,7 +863,7 @@ RelationGetNotNullConstraints(Oid relid, bool cooked, bool include_noinh)
 		{
 			CookedConstraint *cooked;
 
-			cooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
+			cooked = palloc_object(CookedConstraint);
 
 			cooked->contype = CONSTR_NOTNULL;
 			cooked->conoid = conForm->oid;
@@ -875,7 +892,7 @@ RelationGetNotNullConstraints(Oid relid, bool cooked, bool include_noinh)
 															 false)));
 			constr->is_enforced = true;
 			constr->skip_validation = !conForm->convalidated;
-			constr->initially_valid = true;
+			constr->initially_valid = conForm->convalidated;
 			constr->is_no_inherit = conForm->connoinherit;
 			notnulls = lappend(notnulls, constr);
 		}
@@ -937,10 +954,12 @@ RemoveConstraintById(Oid conId)
 					 con->conrelid);
 			classForm = (Form_pg_class) GETSTRUCT(relTup);
 
-			if (classForm->relchecks == 0)	/* should not happen */
-				elog(ERROR, "relation \"%s\" has relchecks = 0",
-					 RelationGetRelationName(rel));
-			classForm->relchecks--;
+			if (classForm->relchecks > 0)
+				classForm->relchecks--;
+			else
+				/* should not happen */
+				elog(WARNING, "relation \"%s\" has relchecks = %d",
+					 RelationGetRelationName(rel), classForm->relchecks);
 
 			CatalogTupleUpdate(pgrel, &relTup->t_self, relTup);
 
@@ -1542,7 +1561,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 	if (numkeys <= 0 || numkeys > INDEX_MAX_KEYS)
 		elog(ERROR, "foreign key constraint cannot have %d columns", numkeys);
 	memcpy(conkey, ARR_DATA_PTR(arr), numkeys * sizeof(int16));
-	if ((Pointer) arr != DatumGetPointer(adatum))
+	if (arr != DatumGetPointer(adatum))
 		pfree(arr);				/* free de-toasted copy, if any */
 
 	adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
@@ -1554,7 +1573,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 		ARR_ELEMTYPE(arr) != INT2OID)
 		elog(ERROR, "confkey is not a 1-D smallint array");
 	memcpy(confkey, ARR_DATA_PTR(arr), numkeys * sizeof(int16));
-	if ((Pointer) arr != DatumGetPointer(adatum))
+	if (arr != DatumGetPointer(adatum))
 		pfree(arr);				/* free de-toasted copy, if any */
 
 	if (pf_eq_oprs)
@@ -1569,7 +1588,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 			ARR_ELEMTYPE(arr) != OIDOID)
 			elog(ERROR, "conpfeqop is not a 1-D Oid array");
 		memcpy(pf_eq_oprs, ARR_DATA_PTR(arr), numkeys * sizeof(Oid));
-		if ((Pointer) arr != DatumGetPointer(adatum))
+		if (arr != DatumGetPointer(adatum))
 			pfree(arr);			/* free de-toasted copy, if any */
 	}
 
@@ -1584,7 +1603,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 			ARR_ELEMTYPE(arr) != OIDOID)
 			elog(ERROR, "conppeqop is not a 1-D Oid array");
 		memcpy(pp_eq_oprs, ARR_DATA_PTR(arr), numkeys * sizeof(Oid));
-		if ((Pointer) arr != DatumGetPointer(adatum))
+		if (arr != DatumGetPointer(adatum))
 			pfree(arr);			/* free de-toasted copy, if any */
 	}
 
@@ -1599,7 +1618,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 			ARR_ELEMTYPE(arr) != OIDOID)
 			elog(ERROR, "conffeqop is not a 1-D Oid array");
 		memcpy(ff_eq_oprs, ARR_DATA_PTR(arr), numkeys * sizeof(Oid));
-		if ((Pointer) arr != DatumGetPointer(adatum))
+		if (arr != DatumGetPointer(adatum))
 			pfree(arr);			/* free de-toasted copy, if any */
 	}
 
@@ -1622,7 +1641,7 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 				elog(ERROR, "confdelsetcols is not a 1-D smallint array");
 			num_delete_cols = ARR_DIMS(arr)[0];
 			memcpy(fk_del_set_cols, ARR_DATA_PTR(arr), num_delete_cols * sizeof(int16));
-			if ((Pointer) arr != DatumGetPointer(adatum))
+			if (arr != DatumGetPointer(adatum))
 				pfree(arr);		/* free de-toasted copy, if any */
 
 			*num_fk_del_set_cols = num_delete_cols;

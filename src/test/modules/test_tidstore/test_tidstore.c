@@ -7,7 +7,7 @@
  * a single process to use the TidStore. It is meant to be an example of
  * usage.
  *
- * Copyright (c) 2024-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2024-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_tidstore/test_tidstore.c
@@ -56,16 +56,16 @@ itemptr_cmp(const void *left, const void *right)
 	OffsetNumber loff,
 				roff;
 
-	lblk = ItemPointerGetBlockNumber((ItemPointer) left);
-	rblk = ItemPointerGetBlockNumber((ItemPointer) right);
+	lblk = ItemPointerGetBlockNumber((const ItemPointerData *) left);
+	rblk = ItemPointerGetBlockNumber((const ItemPointerData *) right);
 
 	if (lblk < rblk)
 		return -1;
 	if (lblk > rblk)
 		return 1;
 
-	loff = ItemPointerGetOffsetNumber((ItemPointer) left);
-	roff = ItemPointerGetOffsetNumber((ItemPointer) right);
+	loff = ItemPointerGetOffsetNumber((const ItemPointerData *) left);
+	roff = ItemPointerGetOffsetNumber((const ItemPointerData *) right);
 
 	if (loff < roff)
 		return -1;
@@ -103,8 +103,7 @@ test_create(PG_FUNCTION_ARGS)
 	{
 		int			tranche_id;
 
-		tranche_id = LWLockNewTrancheId();
-		LWLockRegisterTranche(tranche_id, "test_tidstore");
+		tranche_id = LWLockNewTrancheId("test_tidstore");
 
 		tidstore = TidStoreCreateShared(tidstore_max_size, tranche_id);
 

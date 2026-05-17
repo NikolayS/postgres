@@ -38,7 +38,7 @@
  *
  * This code is released under the terms of the PostgreSQL License.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/initdb/initdb.c
@@ -177,6 +177,7 @@ static int	encodingid;
 static char *bki_file;
 static char *hba_file;
 static char *ident_file;
+static char *hosts_file;
 static char *conf_file;
 static char *dictionary_file;
 static char *info_schema_file;
@@ -444,7 +445,7 @@ escape_quotes_bki(const char *src)
 static void
 add_stringlist_item(_stringlist **listhead, const char *str)
 {
-	_stringlist *newentry = pg_malloc(sizeof(_stringlist));
+	_stringlist *newentry = pg_malloc_object(_stringlist);
 	_stringlist *oldentry;
 
 	newentry->str = pg_strdup(str);
@@ -461,7 +462,8 @@ add_stringlist_item(_stringlist **listhead, const char *str)
 
 /*
  * Modify the array of lines, replacing "token" by "replacement"
- * the first time it occurs on each line.
+ * the first time it occurs on each line.  To prevent false matches, the
+ * occurrence of "token" must be surrounded by whitespace or line start/end.
  *
  * The array must be a malloc'd array of individually malloc'd strings.
  * We free any discarded strings.
@@ -483,11 +485,23 @@ replace_token(char **lines, const char *token, const char *replacement)
 	for (int i = 0; lines[i]; i++)
 	{
 		char	   *where;
+		char	   *endwhere;
 		char	   *newline;
 		int			pre;
 
 		/* nothing to do if no change needed */
 		if ((where = strstr(lines[i], token)) == NULL)
+			continue;
+
+		/*
+		 * Reject false match.  Note a blind spot: we don't check for a valid
+		 * match following a false match.  That case can't occur at present,
+		 * so not worth complicating this code for it.
+		 */
+		if (!(where == lines[i] || isspace((unsigned char) where[-1])))
+			continue;
+		endwhere = where + strlen(token);
+		if (!(*endwhere == '\0' || isspace((unsigned char) *endwhere)))
 			continue;
 
 		/* if we get here a change is needed - set up new line */
@@ -687,7 +701,7 @@ readfile(const char *path)
 	initStringInfo(&line);
 
 	maxlines = 1024;
-	result = (char **) pg_malloc(maxlines * sizeof(char *));
+	result = pg_malloc_array(char *, maxlines);
 
 	n = 0;
 	while (pg_get_line_buf(infile, &line))
@@ -696,7 +710,7 @@ readfile(const char *path)
 		if (n >= maxlines - 1)
 		{
 			maxlines *= 2;
-			result = (char **) pg_realloc(result, maxlines * sizeof(char *));
+			result = pg_realloc_array(result, char *, maxlines);
 		}
 
 		result[n++] = pg_strdup(line.data);
@@ -910,6 +924,8 @@ static const struct tsearch_config_match tsearch_config_languages[] =
 	{"nepali", "Nepali"},
 	{"norwegian", "no"},
 	{"norwegian", "Norwegian"},
+	{"polish", "pl"},
+	{"polish", "Polish"},
 	{"portuguese", "pt"},
 	{"portuguese", "Portuguese"},
 	{"romanian", "ro"},
@@ -1424,6 +1440,11 @@ setup_config(void)
 									  "0640", false);
 	}
 
+#if USE_LZ4
+	conflines = replace_guc_value(conflines, "default_toast_compression",
+								  "lz4", true);
+#endif
+
 	/*
 	 * Now replace anything that's overridden via -c switches.
 	 */
@@ -1461,9 +1482,6 @@ setup_config(void)
 
 	conflines = readfile(hba_file);
 
-	conflines = replace_token(conflines, "@remove-line-for-nolocal@", "");
-
-
 	/*
 	 * Probe to see if there is really any platform support for IPv6, and
 	 * comment out the relevant pg_hba line if not.  This avoids runtime
@@ -1497,11 +1515,11 @@ setup_config(void)
 			getaddrinfo("::1", NULL, &hints, &gai_result) != 0)
 		{
 			conflines = replace_token(conflines,
-									  "host    all             all             ::1",
-									  "#host    all             all             ::1");
+									  "host    all             all             ::1/128",
+									  "#host    all             all             ::1/128");
 			conflines = replace_token(conflines,
-									  "host    replication     all             ::1",
-									  "#host    replication     all             ::1");
+									  "host    replication     all             ::1/128",
+									  "#host    replication     all             ::1/128");
 		}
 	}
 
@@ -1529,6 +1547,14 @@ setup_config(void)
 	conflines = readfile(ident_file);
 
 	snprintf(path, sizeof(path), "%s/pg_ident.conf", pg_data);
+
+	writefile(path, conflines);
+	if (chmod(path, pg_file_create_mode) != 0)
+		pg_fatal("could not change permissions of \"%s\": %m", path);
+
+	/* pg_hosts.conf */
+	conflines = readfile(hosts_file);
+	snprintf(path, sizeof(path), "%s/pg_hosts.conf", pg_data);
 
 	writefile(path, conflines);
 	if (chmod(path, pg_file_create_mode) != 0)
@@ -1579,9 +1605,6 @@ bootstrap_template1(void)
 
 	bki_lines = replace_token(bki_lines, "ALIGNOF_POINTER",
 							  (sizeof(Pointer) == 4) ? "i" : "d");
-
-	bki_lines = replace_token(bki_lines, "FLOAT8PASSBYVAL",
-							  FLOAT8PASSBYVAL ? "true" : "false");
 
 	bki_lines = replace_token(bki_lines, "POSTGRES",
 							  escape_quotes_bki(username));
@@ -2380,7 +2403,7 @@ icu_validate_locale(const char *loc_str)
 	/* validate that we can extract the language */
 	status = U_ZERO_ERROR;
 	uloc_getLanguage(loc_str, lang, ULOC_LANG_CAPACITY, &status);
-	if (U_FAILURE(status))
+	if (U_FAILURE(status) || status == U_STRING_NOT_TERMINATED_WARNING)
 	{
 		pg_fatal("could not get language from locale \"%s\": %s",
 				 loc_str, u_errorName(status));
@@ -2400,7 +2423,7 @@ icu_validate_locale(const char *loc_str)
 
 		status = U_ZERO_ERROR;
 		uloc_getLanguage(otherloc, otherlang, ULOC_LANG_CAPACITY, &status);
-		if (U_FAILURE(status))
+		if (U_FAILURE(status) || status == U_STRING_NOT_TERMINATED_WARNING)
 			continue;
 
 		if (strcmp(lang, otherlang) == 0)
@@ -2794,6 +2817,7 @@ setup_data_file_paths(void)
 	set_input(&bki_file, "postgres.bki");
 	set_input(&hba_file, "pg_hba.conf.sample");
 	set_input(&ident_file, "pg_ident.conf.sample");
+	set_input(&hosts_file, "pg_hosts.conf.sample");
 	set_input(&conf_file, "postgresql.conf.sample");
 	set_input(&dictionary_file, "snowball_create.sql");
 	set_input(&info_schema_file, "information_schema.sql");
@@ -2809,12 +2833,12 @@ setup_data_file_paths(void)
 				"PGDATA=%s\nshare_path=%s\nPGPATH=%s\n"
 				"POSTGRES_SUPERUSERNAME=%s\nPOSTGRES_BKI=%s\n"
 				"POSTGRESQL_CONF_SAMPLE=%s\n"
-				"PG_HBA_SAMPLE=%s\nPG_IDENT_SAMPLE=%s\n",
+				"PG_HBA_SAMPLE=%s\nPG_IDENT_SAMPLE=%s\nPG_HOSTS_SAMPLE=%s\n",
 				PG_VERSION,
 				pg_data, share_path, bin_path,
 				username, bki_file,
 				conf_file,
-				hba_file, ident_file);
+				hba_file, ident_file, hosts_file);
 		if (show_setting)
 			exit(0);
 	}
@@ -2822,6 +2846,7 @@ setup_data_file_paths(void)
 	check_input(bki_file);
 	check_input(hba_file);
 	check_input(ident_file);
+	check_input(hosts_file);
 	check_input(conf_file);
 	check_input(dictionary_file);
 	check_input(info_schema_file);
@@ -2878,10 +2903,10 @@ setup_signals(void)
 	pqsignal(SIGQUIT, trapsig);
 
 	/* Ignore SIGPIPE when writing to backend, so we can clean up */
-	pqsignal(SIGPIPE, SIG_IGN);
+	pqsignal(SIGPIPE, PG_SIG_IGN);
 
 	/* Prevent SIGSYS so we can probe for kernel calls that might not work */
-	pqsignal(SIGSYS, SIG_IGN);
+	pqsignal(SIGSYS, PG_SIG_IGN);
 #endif
 }
 

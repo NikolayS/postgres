@@ -8,7 +8,7 @@
  * should end up here.
  *
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/jit/jit.c
@@ -26,10 +26,11 @@
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "portability/instr_time.h"
+#include "storage/fd.h"
 #include "utils/fmgrprotos.h"
 
 /* GUCs */
-bool		jit_enabled = true;
+bool		jit_enabled = false;
 char	   *jit_provider = NULL;
 bool		jit_debugging_support = false;
 bool		jit_dump_bitcode = false;

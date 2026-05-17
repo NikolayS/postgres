@@ -25,7 +25,7 @@
  *
  * See gen_partprune_steps_internal() for more details on step generation.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -49,6 +49,7 @@
 #include "optimizer/cost.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/pathnode.h"
+#include "optimizer/placeholder.h"
 #include "parser/parsetree.h"
 #include "partitioning/partbounds.h"
 #include "partitioning/partprune.h"
@@ -158,7 +159,7 @@ static PartitionPruneStep *gen_prune_step_combine(GeneratePruningStepsContext *c
 static List *gen_prune_steps_from_opexps(GeneratePruningStepsContext *context,
 										 List **keyclauses, Bitmapset *nullkeys);
 static PartClauseMatchStatus match_clause_to_partition_key(GeneratePruningStepsContext *context,
-														   Expr *clause, Expr *partkey, int partkeyidx,
+														   Expr *clause, const Expr *partkey, int partkeyidx,
 														   bool *clause_is_not_null,
 														   PartClauseInfo **pc, List **clause_steps);
 static List *get_steps_using_prefix(GeneratePruningStepsContext *context,
@@ -179,13 +180,13 @@ static List *get_steps_using_prefix_recurse(GeneratePruningStepsContext *context
 											List *step_exprs,
 											List *step_cmpfns);
 static PruneStepResult *get_matching_hash_bounds(PartitionPruneContext *context,
-												 StrategyNumber opstrategy, Datum *values, int nvalues,
+												 StrategyNumber opstrategy, const Datum *values, int nvalues,
 												 FmgrInfo *partsupfunc, Bitmapset *nullkeys);
 static PruneStepResult *get_matching_list_bounds(PartitionPruneContext *context,
 												 StrategyNumber opstrategy, Datum value, int nvalues,
 												 FmgrInfo *partsupfunc, Bitmapset *nullkeys);
 static PruneStepResult *get_matching_range_bounds(PartitionPruneContext *context,
-												  StrategyNumber opstrategy, Datum *values, int nvalues,
+												  StrategyNumber opstrategy, const Datum *values, int nvalues,
 												  FmgrInfo *partsupfunc, Bitmapset *nullkeys);
 static Bitmapset *pull_exec_paramids(Expr *expr);
 static bool pull_exec_paramids_walker(Node *node, Bitmapset **context);
@@ -197,7 +198,7 @@ static PruneStepResult *perform_pruning_combine_step(PartitionPruneContext *cont
 													 PruneStepResult **step_results);
 static PartClauseMatchStatus match_boolean_partition_clause(Oid partopfamily,
 															Expr *clause,
-															Expr *partkey,
+															const Expr *partkey,
 															Expr **outconst,
 															bool *notclause);
 static void partkey_datum_from_expr(PartitionPruneContext *context,
@@ -246,7 +247,7 @@ make_partition_pruneinfo(PlannerInfo *root, RelOptInfo *parentrel,
 	 * that zero can represent an un-filled array entry.
 	 */
 	allpartrelids = NIL;
-	relid_subplan_map = palloc0(sizeof(int) * root->simple_rel_array_size);
+	relid_subplan_map = palloc0_array(int, root->simple_rel_array_size);
 
 	i = 1;
 	foreach(lc, subpaths)
@@ -465,7 +466,7 @@ make_partitionedrel_pruneinfo(PlannerInfo *root, RelOptInfo *parentrel,
 	 * In this phase we discover whether runtime pruning is needed at all; if
 	 * not, we can avoid doing further work.
 	 */
-	relid_subpart_map = palloc0(sizeof(int) * root->simple_rel_array_size);
+	relid_subpart_map = palloc0_array(int, root->simple_rel_array_size);
 
 	i = 1;
 	rti = -1;
@@ -818,9 +819,8 @@ prune_append_rel_partitions(RelOptInfo *rel)
 	context.boundinfo = rel->boundinfo;
 	context.partcollation = rel->part_scheme->partcollation;
 	context.partsupfunc = rel->part_scheme->partsupfunc;
-	context.stepcmpfuncs = (FmgrInfo *) palloc0(sizeof(FmgrInfo) *
-												context.partnatts *
-												list_length(pruning_steps));
+	context.stepcmpfuncs = palloc0_array(FmgrInfo,
+										 context.partnatts * list_length(pruning_steps));
 	context.ppccontext = CurrentMemoryContext;
 
 	/* These are not valid when being called from the planner */
@@ -1814,10 +1814,19 @@ gen_prune_steps_from_opexps(GeneratePruningStepsContext *context,
  *   and couldn't possibly match any other one either, due to its form or
  *   properties (such as containing a volatile function).
  *   Output arguments: none set.
+ *
+ * Note that when pulling up a subquery, the clause operands may get wrapped
+ * in PlaceHolderVars to enforce separate identity or as a result of outer
+ * joins.  We must strip such no-op PlaceHolderVars before comparing operands
+ * to the partition key, otherwise the equal() checks will fail to recognize
+ * valid matches.  This is safe because the clauses here are always
+ * relation-scan-level expressions, where a PlaceHolderVar with empty
+ * phnullingrels is effectively a no-op.  Stripping may also bring separate
+ * RelabelType nodes into adjacency, so we must loop when peeling those.
  */
 static PartClauseMatchStatus
 match_clause_to_partition_key(GeneratePruningStepsContext *context,
-							  Expr *clause, Expr *partkey, int partkeyidx,
+							  Expr *clause, const Expr *partkey, int partkeyidx,
 							  bool *clause_is_not_null, PartClauseInfo **pc,
 							  List **clause_steps)
 {
@@ -1890,7 +1899,7 @@ match_clause_to_partition_key(GeneratePruningStepsContext *context,
 			return PARTCLAUSE_MATCH_STEPS;
 		}
 
-		partclause = (PartClauseInfo *) palloc(sizeof(PartClauseInfo));
+		partclause = palloc_object(PartClauseInfo);
 		partclause->keyno = partkeyidx;
 		/* Do pruning with the Boolean equality operator. */
 		partclause->opno = BooleanEqualOperator;
@@ -1929,10 +1938,12 @@ match_clause_to_partition_key(GeneratePruningStepsContext *context,
 		PartClauseInfo *partclause;
 
 		leftop = (Expr *) get_leftop(clause);
-		if (IsA(leftop, RelabelType))
+		leftop = (Expr *) strip_noop_phvs((Node *) leftop);
+		while (IsA(leftop, RelabelType))
 			leftop = ((RelabelType *) leftop)->arg;
 		rightop = (Expr *) get_rightop(clause);
-		if (IsA(rightop, RelabelType))
+		rightop = (Expr *) strip_noop_phvs((Node *) rightop);
+		while (IsA(rightop, RelabelType))
 			rightop = ((RelabelType *) rightop)->arg;
 		opno = opclause->opno;
 
@@ -2147,7 +2158,7 @@ match_clause_to_partition_key(GeneratePruningStepsContext *context,
 		/*
 		 * Build the clause, passing the negator if applicable.
 		 */
-		partclause = (PartClauseInfo *) palloc(sizeof(PartClauseInfo));
+		partclause = palloc_object(PartClauseInfo);
 		partclause->keyno = partkeyidx;
 		if (is_opne_listp)
 		{
@@ -2180,7 +2191,8 @@ match_clause_to_partition_key(GeneratePruningStepsContext *context,
 				   *elem_clauses;
 		ListCell   *lc1;
 
-		if (IsA(leftop, RelabelType))
+		leftop = (Expr *) strip_noop_phvs((Node *) leftop);
+		while (IsA(leftop, RelabelType))
 			leftop = ((RelabelType *) leftop)->arg;
 
 		/* check if the LHS matches this partition key */
@@ -2406,7 +2418,8 @@ match_clause_to_partition_key(GeneratePruningStepsContext *context,
 		NullTest   *nulltest = (NullTest *) clause;
 		Expr	   *arg = nulltest->arg;
 
-		if (IsA(arg, RelabelType))
+		arg = (Expr *) strip_noop_phvs((Node *) arg);
+		while (IsA(arg, RelabelType))
 			arg = ((RelabelType *) arg)->arg;
 
 		/* Does arg match with this partition key column? */
@@ -2690,10 +2703,10 @@ get_steps_using_prefix_recurse(GeneratePruningStepsContext *context,
  */
 static PruneStepResult *
 get_matching_hash_bounds(PartitionPruneContext *context,
-						 StrategyNumber opstrategy, Datum *values, int nvalues,
+						 StrategyNumber opstrategy, const Datum *values, int nvalues,
 						 FmgrInfo *partsupfunc, Bitmapset *nullkeys)
 {
-	PruneStepResult *result = (PruneStepResult *) palloc0(sizeof(PruneStepResult));
+	PruneStepResult *result = palloc0_object(PruneStepResult);
 	PartitionBoundInfo boundinfo = context->boundinfo;
 	int		   *partindices = boundinfo->indexes;
 	int			partnatts = context->partnatts;
@@ -2770,7 +2783,7 @@ get_matching_list_bounds(PartitionPruneContext *context,
 						 StrategyNumber opstrategy, Datum value, int nvalues,
 						 FmgrInfo *partsupfunc, Bitmapset *nullkeys)
 {
-	PruneStepResult *result = (PruneStepResult *) palloc0(sizeof(PruneStepResult));
+	PruneStepResult *result = palloc0_object(PruneStepResult);
 	PartitionBoundInfo boundinfo = context->boundinfo;
 	int			off,
 				minoff,
@@ -2881,7 +2894,7 @@ get_matching_list_bounds(PartitionPruneContext *context,
 
 		case BTGreaterEqualStrategyNumber:
 			inclusive = true;
-			/* fall through */
+			pg_fallthrough;
 		case BTGreaterStrategyNumber:
 			off = partition_list_bsearch(partsupfunc,
 										 partcollation,
@@ -2916,7 +2929,7 @@ get_matching_list_bounds(PartitionPruneContext *context,
 
 		case BTLessEqualStrategyNumber:
 			inclusive = true;
-			/* fall through */
+			pg_fallthrough;
 		case BTLessStrategyNumber:
 			off = partition_list_bsearch(partsupfunc,
 										 partcollation,
@@ -2978,10 +2991,10 @@ get_matching_list_bounds(PartitionPruneContext *context,
  */
 static PruneStepResult *
 get_matching_range_bounds(PartitionPruneContext *context,
-						  StrategyNumber opstrategy, Datum *values, int nvalues,
+						  StrategyNumber opstrategy, const Datum *values, int nvalues,
 						  FmgrInfo *partsupfunc, Bitmapset *nullkeys)
 {
-	PruneStepResult *result = (PruneStepResult *) palloc0(sizeof(PruneStepResult));
+	PruneStepResult *result = palloc0_object(PruneStepResult);
 	PartitionBoundInfo boundinfo = context->boundinfo;
 	Oid		   *partcollation = context->partcollation;
 	int			partnatts = context->partnatts;
@@ -3163,7 +3176,7 @@ get_matching_range_bounds(PartitionPruneContext *context,
 
 		case BTGreaterEqualStrategyNumber:
 			inclusive = true;
-			/* fall through */
+			pg_fallthrough;
 		case BTGreaterStrategyNumber:
 
 			/*
@@ -3244,7 +3257,7 @@ get_matching_range_bounds(PartitionPruneContext *context,
 
 		case BTLessEqualStrategyNumber:
 			inclusive = true;
-			/* fall through */
+			pg_fallthrough;
 		case BTLessStrategyNumber:
 
 			/*
@@ -3504,7 +3517,7 @@ perform_pruning_base_step(PartitionPruneContext *context,
 			{
 				PruneStepResult *result;
 
-				result = (PruneStepResult *) palloc(sizeof(PruneStepResult));
+				result = palloc_object(PruneStepResult);
 				result->bound_offsets = NULL;
 				result->scan_default = false;
 				result->scan_null = false;
@@ -3593,7 +3606,7 @@ perform_pruning_combine_step(PartitionPruneContext *context,
 							 PartitionPruneStepCombine *cstep,
 							 PruneStepResult **step_results)
 {
-	PruneStepResult *result = (PruneStepResult *) palloc0(sizeof(PruneStepResult));
+	PruneStepResult *result = palloc0_object(PruneStepResult);
 	bool		firststep;
 	ListCell   *lc1;
 
@@ -3698,7 +3711,7 @@ perform_pruning_combine_step(PartitionPruneContext *context,
  * 'partkey'.
  */
 static PartClauseMatchStatus
-match_boolean_partition_clause(Oid partopfamily, Expr *clause, Expr *partkey,
+match_boolean_partition_clause(Oid partopfamily, Expr *clause, const Expr *partkey,
 							   Expr **outconst, bool *notclause)
 {
 	Expr	   *leftop;
@@ -3718,7 +3731,8 @@ match_boolean_partition_clause(Oid partopfamily, Expr *clause, Expr *partkey,
 		BooleanTest *btest = (BooleanTest *) clause;
 
 		leftop = btest->arg;
-		if (IsA(leftop, RelabelType))
+		leftop = (Expr *) strip_noop_phvs((Node *) leftop);
+		while (IsA(leftop, RelabelType))
 			leftop = ((RelabelType *) leftop)->arg;
 
 		if (equal(leftop, partkey))
@@ -3727,19 +3741,19 @@ match_boolean_partition_clause(Oid partopfamily, Expr *clause, Expr *partkey,
 			{
 				case IS_NOT_TRUE:
 					*notclause = true;
-					/* fall through */
+					pg_fallthrough;
 				case IS_TRUE:
 					*outconst = (Expr *) makeBoolConst(true, false);
 					return PARTCLAUSE_MATCH_CLAUSE;
 				case IS_NOT_FALSE:
 					*notclause = true;
-					/* fall through */
+					pg_fallthrough;
 				case IS_FALSE:
 					*outconst = (Expr *) makeBoolConst(false, false);
 					return PARTCLAUSE_MATCH_CLAUSE;
 				case IS_NOT_UNKNOWN:
 					*notclause = true;
-					/* fall through */
+					pg_fallthrough;
 				case IS_UNKNOWN:
 					return PARTCLAUSE_MATCH_NULLNESS;
 				default:
@@ -3755,7 +3769,8 @@ match_boolean_partition_clause(Oid partopfamily, Expr *clause, Expr *partkey,
 
 		leftop = is_not_clause ? get_notclausearg(clause) : clause;
 
-		if (IsA(leftop, RelabelType))
+		leftop = (Expr *) strip_noop_phvs((Node *) leftop);
+		while (IsA(leftop, RelabelType))
 			leftop = ((RelabelType *) leftop)->arg;
 
 		/* Compare to the partition key, and make up a clause ... */

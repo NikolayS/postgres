@@ -3,7 +3,7 @@
  * outfuncs.c
  *	  Output functions for Postgres tree nodes.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -50,6 +50,12 @@ static void outDouble(StringInfo str, double d);
 /* Write an unsigned integer field (anything written as ":fldname %u") */
 #define WRITE_UINT_FIELD(fldname) \
 	appendStringInfo(str, " :" CppAsString(fldname) " %u", node->fldname)
+
+/* Write a signed integer field (anything written with INT64_FORMAT) */
+#define WRITE_INT64_FIELD(fldname) \
+	appendStringInfo(str, \
+					 " :" CppAsString(fldname) " " INT64_FORMAT, \
+					 node->fldname)
 
 /* Write an unsigned integer field (anything written with UINT64_FORMAT) */
 #define WRITE_UINT64_FIELD(fldname) \
@@ -340,8 +346,7 @@ outBitmapset(StringInfo str, const Bitmapset *bms)
 void
 outDatum(StringInfo str, Datum value, int typlen, bool typbyval)
 {
-	Size		length,
-				i;
+	Size		length;
 	char	   *s;
 
 	length = datumGetSize(value, typbyval, typlen);
@@ -349,20 +354,20 @@ outDatum(StringInfo str, Datum value, int typlen, bool typbyval)
 	if (typbyval)
 	{
 		s = (char *) (&value);
-		appendStringInfo(str, "%u [ ", (unsigned int) length);
-		for (i = 0; i < (Size) sizeof(Datum); i++)
+		appendStringInfo(str, "%zu [ ", length);
+		for (Size i = 0; i < (Size) sizeof(Datum); i++)
 			appendStringInfo(str, "%d ", (int) (s[i]));
 		appendStringInfoChar(str, ']');
 	}
 	else
 	{
 		s = (char *) DatumGetPointer(value);
-		if (!PointerIsValid(s))
+		if (!s)
 			appendStringInfoString(str, "0 [ ]");
 		else
 		{
-			appendStringInfo(str, "%u [ ", (unsigned int) length);
-			for (i = 0; i < length; i++)
+			appendStringInfo(str, "%zu [ ", length);
+			for (Size i = 0; i < length; i++)
 				appendStringInfo(str, "%d ", (int) (s[i]));
 			appendStringInfoChar(str, ']');
 		}
@@ -428,8 +433,6 @@ _outBoolExpr(StringInfo str, const BoolExpr *node)
 static void
 _outForeignKeyOptInfo(StringInfo str, const ForeignKeyOptInfo *node)
 {
-	int			i;
-
 	WRITE_NODE_TYPE("FOREIGNKEYOPTINFO");
 
 	WRITE_UINT_FIELD(con_relid);
@@ -444,10 +447,10 @@ _outForeignKeyOptInfo(StringInfo str, const ForeignKeyOptInfo *node)
 	WRITE_INT_FIELD(nmatched_ri);
 	/* for compactness, just print the number of matches per column: */
 	appendStringInfoString(str, " :eclass");
-	for (i = 0; i < node->nkeys; i++)
+	for (int i = 0; i < node->nkeys; i++)
 		appendStringInfo(str, " %d", (node->eclass[i] != NULL));
 	appendStringInfoString(str, " :rinfos");
-	for (i = 0; i < node->nkeys; i++)
+	for (int i = 0; i < node->nkeys; i++)
 		appendStringInfo(str, " %d", list_length(node->rinfos[i]));
 }
 
@@ -562,6 +565,15 @@ _outRangeTblEntry(StringInfo str, const RangeTblEntry *node)
 			/* we re-use these RELATION fields, too: */
 			WRITE_OID_FIELD(relid);
 			break;
+		case RTE_GRAPH_TABLE:
+			WRITE_NODE_FIELD(graph_pattern);
+			WRITE_NODE_FIELD(graph_table_columns);
+			/* we re-use these RELATION fields, too: */
+			WRITE_OID_FIELD(relid);
+			WRITE_CHAR_FIELD(relkind);
+			WRITE_INT_FIELD(rellockmode);
+			WRITE_UINT_FIELD(perminfoindex);
+			break;
 		case RTE_RESULT:
 			/* no extra fields */
 			break;
@@ -647,6 +659,8 @@ _outA_Expr(StringInfo str, const A_Expr *node)
 
 	WRITE_NODE_FIELD(lexpr);
 	WRITE_NODE_FIELD(rexpr);
+	WRITE_LOCATION_FIELD(rexpr_list_start);
+	WRITE_LOCATION_FIELD(rexpr_list_end);
 	WRITE_LOCATION_FIELD(location);
 }
 
@@ -731,17 +745,17 @@ outNode(StringInfo str, const void *obj)
 		_outList(str, obj);
 	/* nodeRead does not want to see { } around these! */
 	else if (IsA(obj, Integer))
-		_outInteger(str, (Integer *) obj);
+		_outInteger(str, (const Integer *) obj);
 	else if (IsA(obj, Float))
-		_outFloat(str, (Float *) obj);
+		_outFloat(str, (const Float *) obj);
 	else if (IsA(obj, Boolean))
-		_outBoolean(str, (Boolean *) obj);
+		_outBoolean(str, (const Boolean *) obj);
 	else if (IsA(obj, String))
-		_outString(str, (String *) obj);
+		_outString(str, (const String *) obj);
 	else if (IsA(obj, BitString))
-		_outBitString(str, (BitString *) obj);
+		_outBitString(str, (const BitString *) obj);
 	else if (IsA(obj, Bitmapset))
-		outBitmapset(str, (Bitmapset *) obj);
+		outBitmapset(str, (const Bitmapset *) obj);
 	else
 	{
 		appendStringInfoChar(str, '{');

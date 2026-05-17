@@ -2,7 +2,7 @@
  *
  * pg_test_fsync --- tests all supported fsync() methods
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * src/bin/pg_test_fsync/pg_test_fsync.c
  *
@@ -68,9 +68,8 @@ static const char *progname;
 
 static unsigned int secs_per_test = 5;
 static int	needs_unlink = 0;
-static char full_buf[DEFAULT_XLOG_SEG_SIZE],
-		   *buf,
-		   *filename = FSYNC_FILENAME;
+alignas(PGAlignedXLogBlock) static char buf[DEFAULT_XLOG_SEG_SIZE];
+static char *filename = FSYNC_FILENAME;
 static struct timeval start_t,
 			stop_t;
 static sig_atomic_t alarm_triggered = false;
@@ -232,9 +231,7 @@ prepare_buf(void)
 
 	/* write random data into buffer */
 	for (ops = 0; ops < DEFAULT_XLOG_SEG_SIZE; ops++)
-		full_buf[ops] = (char) pg_prng_int32(&pg_global_prng_state);
-
-	buf = (char *) TYPEALIGN(XLOG_BLCKSZ, full_buf);
+		buf[ops] = (char) pg_prng_int32(&pg_global_prng_state);
 }
 
 static void
@@ -248,7 +245,7 @@ test_open(void)
 	if ((tmpfile = open(filename, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR)) == -1)
 		die("could not open output file");
 	needs_unlink = 1;
-	if (write(tmpfile, full_buf, DEFAULT_XLOG_SEG_SIZE) !=
+	if (write(tmpfile, buf, DEFAULT_XLOG_SEG_SIZE) !=
 		DEFAULT_XLOG_SEG_SIZE)
 		die("write failed");
 

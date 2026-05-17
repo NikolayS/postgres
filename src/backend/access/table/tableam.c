@@ -3,7 +3,7 @@
  * tableam.c
  *		Table access method routines too big to be inline functions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -11,7 +11,7 @@
  *	  src/backend/access/table/tableam.c
  *
  * NOTES
- *	  Note that most function in here are documented in tableam.h, rather than
+ *	  Note that most functions in here are documented in tableam.h, rather than
  *	  here. That's because there's a lot of inline functions in tableam.h and
  *	  it'd be harder to understand if one constantly had to switch between files.
  *
@@ -110,15 +110,15 @@ table_slot_create(Relation relation, List **reglist)
  */
 
 TableScanDesc
-table_beginscan_catalog(Relation relation, int nkeys, struct ScanKeyData *key)
+table_beginscan_catalog(Relation relation, int nkeys, ScanKeyData *key)
 {
 	uint32		flags = SO_TYPE_SEQSCAN |
 		SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE | SO_TEMP_SNAPSHOT;
 	Oid			relid = RelationGetRelid(relation);
 	Snapshot	snapshot = RegisterSnapshot(GetCatalogSnapshot(relid));
 
-	return relation->rd_tableam->scan_begin(relation, snapshot, nkeys, key,
-											NULL, flags);
+	return table_beginscan_common(relation, snapshot, nkeys, key,
+								  NULL, flags, SO_NONE);
 }
 
 
@@ -163,10 +163,11 @@ table_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan,
 }
 
 TableScanDesc
-table_beginscan_parallel(Relation relation, ParallelTableScanDesc pscan)
+table_beginscan_parallel(Relation relation, ParallelTableScanDesc pscan,
+						 uint32 flags)
 {
 	Snapshot	snapshot;
-	uint32		flags = SO_TYPE_SEQSCAN |
+	uint32		internal_flags = SO_TYPE_SEQSCAN |
 		SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE;
 
 	Assert(RelFileLocatorEquals(relation->rd_locator, pscan->phs_locator));
@@ -176,7 +177,7 @@ table_beginscan_parallel(Relation relation, ParallelTableScanDesc pscan)
 		/* Snapshot was serialized -- restore it */
 		snapshot = RestoreSnapshot((char *) pscan + pscan->phs_snapshot_off);
 		RegisterSnapshot(snapshot);
-		flags |= SO_TEMP_SNAPSHOT;
+		internal_flags |= SO_TEMP_SNAPSHOT;
 	}
 	else
 	{
@@ -184,8 +185,40 @@ table_beginscan_parallel(Relation relation, ParallelTableScanDesc pscan)
 		snapshot = SnapshotAny;
 	}
 
-	return relation->rd_tableam->scan_begin(relation, snapshot, 0, NULL,
-											pscan, flags);
+	return table_beginscan_common(relation, snapshot, 0, NULL,
+								  pscan, internal_flags, flags);
+}
+
+TableScanDesc
+table_beginscan_parallel_tidrange(Relation relation,
+								  ParallelTableScanDesc pscan,
+								  uint32 flags)
+{
+	Snapshot	snapshot;
+	TableScanDesc sscan;
+	uint32		internal_flags = SO_TYPE_TIDRANGESCAN | SO_ALLOW_PAGEMODE;
+
+	Assert(RelFileLocatorEquals(relation->rd_locator, pscan->phs_locator));
+
+	/* disable syncscan in parallel tid range scan. */
+	pscan->phs_syncscan = false;
+
+	if (!pscan->phs_snapshot_any)
+	{
+		/* Snapshot was serialized -- restore it */
+		snapshot = RestoreSnapshot((char *) pscan + pscan->phs_snapshot_off);
+		RegisterSnapshot(snapshot);
+		internal_flags |= SO_TEMP_SNAPSHOT;
+	}
+	else
+	{
+		/* SnapshotAny passed by caller (not serialized) */
+		snapshot = SnapshotAny;
+	}
+
+	sscan = table_beginscan_common(relation, snapshot, 0, NULL,
+								   pscan, internal_flags, flags);
+	return sscan;
 }
 
 
@@ -217,7 +250,7 @@ table_index_fetch_tuple_check(Relation rel,
 	bool		found;
 
 	slot = table_slot_create(rel, NULL);
-	scan = table_index_fetch_begin(rel);
+	scan = table_index_fetch_begin(rel, SO_NONE);
 	found = table_index_fetch_tuple(scan, tid, snapshot, slot, &call_again,
 									all_dead);
 	table_index_fetch_end(scan);
@@ -237,14 +270,6 @@ table_tuple_get_latest_tid(TableScanDesc scan, ItemPointer tid)
 {
 	Relation	rel = scan->rs_rd;
 	const TableAmRoutine *tableam = rel->rd_tableam;
-
-	/*
-	 * We don't expect direct calls to table_tuple_get_latest_tid with valid
-	 * CheckXidAlive for catalog or regular tables.  See detailed comments in
-	 * xact.c where these variables are declared.
-	 */
-	if (unlikely(TransactionIdIsValid(CheckXidAlive) && !bsysscan))
-		elog(ERROR, "unexpected table_tuple_get_latest_tid call during logical decoding");
 
 	/*
 	 * Since this can be called with user-supplied TID, don't trust the input
@@ -295,9 +320,9 @@ simple_table_tuple_delete(Relation rel, ItemPointer tid, Snapshot snapshot)
 
 	result = table_tuple_delete(rel, tid,
 								GetCurrentCommandId(true),
-								snapshot, InvalidSnapshot,
+								0, snapshot, InvalidSnapshot,
 								true /* wait for commit */ ,
-								&tmfd, false /* changingPart */ );
+								&tmfd);
 
 	switch (result)
 	{
@@ -344,7 +369,7 @@ simple_table_tuple_update(Relation rel, ItemPointer otid,
 
 	result = table_tuple_update(rel, otid, slot,
 								GetCurrentCommandId(true),
-								snapshot, InvalidSnapshot,
+								0, snapshot, InvalidSnapshot,
 								true /* wait for commit */ ,
 								&tmfd, &lockmode, update_indexes);
 
@@ -398,6 +423,7 @@ table_block_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 		bpscan->phs_nblocks > NBuffers / 4;
 	SpinLockInit(&bpscan->phs_mutex);
 	bpscan->phs_startblock = InvalidBlockNumber;
+	bpscan->phs_numblock = InvalidBlockNumber;
 	pg_atomic_init_u64(&bpscan->phs_nallocated, 0);
 
 	return sizeof(ParallelBlockTableScanDescData);
@@ -416,57 +442,59 @@ table_block_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan)
  *
  * Determine where the parallel seq scan should start.  This function may be
  * called many times, once by each parallel worker.  We must be careful only
- * to set the startblock once.
+ * to set the phs_startblock and phs_numblock fields once.
+ *
+ * Callers may optionally specify a non-InvalidBlockNumber value for
+ * 'startblock' to force the scan to start at the given page.  Likewise,
+ * 'numblocks' can be specified as a non-InvalidBlockNumber to limit the
+ * number of blocks to scan to that many blocks.
  */
 void
 table_block_parallelscan_startblock_init(Relation rel,
 										 ParallelBlockTableScanWorker pbscanwork,
-										 ParallelBlockTableScanDesc pbscan)
+										 ParallelBlockTableScanDesc pbscan,
+										 BlockNumber startblock,
+										 BlockNumber numblocks)
 {
+	StaticAssertDecl(MaxBlockNumber <= 0xFFFFFFFE,
+					 "pg_nextpower2_32 may be too small for non-standard BlockNumber width");
+
 	BlockNumber sync_startpage = InvalidBlockNumber;
+	BlockNumber scan_nblocks;
 
 	/* Reset the state we use for controlling allocation size. */
 	memset(pbscanwork, 0, sizeof(*pbscanwork));
-
-	StaticAssertStmt(MaxBlockNumber <= 0xFFFFFFFE,
-					 "pg_nextpower2_32 may be too small for non-standard BlockNumber width");
-
-	/*
-	 * We determine the chunk size based on the size of the relation. First we
-	 * split the relation into PARALLEL_SEQSCAN_NCHUNKS chunks but we then
-	 * take the next highest power of 2 number of the chunk size.  This means
-	 * we split the relation into somewhere between PARALLEL_SEQSCAN_NCHUNKS
-	 * and PARALLEL_SEQSCAN_NCHUNKS / 2 chunks.
-	 */
-	pbscanwork->phsw_chunk_size = pg_nextpower2_32(Max(pbscan->phs_nblocks /
-													   PARALLEL_SEQSCAN_NCHUNKS, 1));
-
-	/*
-	 * Ensure we don't go over the maximum chunk size with larger tables. This
-	 * means we may get much more than PARALLEL_SEQSCAN_NCHUNKS for larger
-	 * tables.  Too large a chunk size has been shown to be detrimental to
-	 * synchronous scan performance.
-	 */
-	pbscanwork->phsw_chunk_size = Min(pbscanwork->phsw_chunk_size,
-									  PARALLEL_SEQSCAN_MAX_CHUNK_SIZE);
 
 retry:
 	/* Grab the spinlock. */
 	SpinLockAcquire(&pbscan->phs_mutex);
 
 	/*
-	 * If the scan's startblock has not yet been initialized, we must do so
-	 * now.  If this is not a synchronized scan, we just start at block 0, but
-	 * if it is a synchronized scan, we must get the starting position from
-	 * the synchronized scan machinery.  We can't hold the spinlock while
-	 * doing that, though, so release the spinlock, get the information we
-	 * need, and retry.  If nobody else has initialized the scan in the
-	 * meantime, we'll fill in the value we fetched on the second time
-	 * through.
+	 * When the caller specified a limit on the number of blocks to scan, set
+	 * that in the ParallelBlockTableScanDesc, if it's not been done by
+	 * another worker already.
+	 */
+	if (numblocks != InvalidBlockNumber &&
+		pbscan->phs_numblock == InvalidBlockNumber)
+	{
+		pbscan->phs_numblock = numblocks;
+	}
+
+	/*
+	 * If the scan's phs_startblock has not yet been initialized, we must do
+	 * so now.  If a startblock was specified, start there, otherwise if this
+	 * is not a synchronized scan, we just start at block 0, but if it is a
+	 * synchronized scan, we must get the starting position from the
+	 * synchronized scan machinery.  We can't hold the spinlock while doing
+	 * that, though, so release the spinlock, get the information we need, and
+	 * retry.  If nobody else has initialized the scan in the meantime, we'll
+	 * fill in the value we fetched on the second time through.
 	 */
 	if (pbscan->phs_startblock == InvalidBlockNumber)
 	{
-		if (!pbscan->base.phs_syncscan)
+		if (startblock != InvalidBlockNumber)
+			pbscan->phs_startblock = startblock;
+		else if (!pbscan->base.phs_syncscan)
 			pbscan->phs_startblock = 0;
 		else if (sync_startpage != InvalidBlockNumber)
 			pbscan->phs_startblock = sync_startpage;
@@ -478,6 +506,34 @@ retry:
 		}
 	}
 	SpinLockRelease(&pbscan->phs_mutex);
+
+	/*
+	 * Figure out how many blocks we're going to scan; either all of them, or
+	 * just phs_numblock's worth, if a limit has been imposed.
+	 */
+	if (pbscan->phs_numblock == InvalidBlockNumber)
+		scan_nblocks = pbscan->phs_nblocks;
+	else
+		scan_nblocks = pbscan->phs_numblock;
+
+	/*
+	 * We determine the chunk size based on scan_nblocks.  First we split
+	 * scan_nblocks into PARALLEL_SEQSCAN_NCHUNKS chunks then we calculate the
+	 * next highest power of 2 number of the result.  This means we split the
+	 * blocks we're scanning into somewhere between PARALLEL_SEQSCAN_NCHUNKS
+	 * and PARALLEL_SEQSCAN_NCHUNKS / 2 chunks.
+	 */
+	pbscanwork->phsw_chunk_size = pg_nextpower2_32(Max(scan_nblocks /
+													   PARALLEL_SEQSCAN_NCHUNKS, 1));
+
+	/*
+	 * Ensure we don't go over the maximum chunk size with larger tables. This
+	 * means we may get much more than PARALLEL_SEQSCAN_NCHUNKS for larger
+	 * tables.  Too large a chunk size has been shown to be detrimental to
+	 * sequential scan performance.
+	 */
+	pbscanwork->phsw_chunk_size = Min(pbscanwork->phsw_chunk_size,
+									  PARALLEL_SEQSCAN_MAX_CHUNK_SIZE);
 }
 
 /*
@@ -493,6 +549,7 @@ table_block_parallelscan_nextpage(Relation rel,
 								  ParallelBlockTableScanWorker pbscanwork,
 								  ParallelBlockTableScanDesc pbscan)
 {
+	BlockNumber scan_nblocks;
 	BlockNumber page;
 	uint64		nallocated;
 
@@ -513,7 +570,7 @@ table_block_parallelscan_nextpage(Relation rel,
 	 *
 	 * Here we name these ranges of blocks "chunks".  The initial size of
 	 * these chunks is determined in table_block_parallelscan_startblock_init
-	 * based on the size of the relation.  Towards the end of the scan, we
+	 * based on the number of blocks to scan.  Towards the end of the scan, we
 	 * start making reductions in the size of the chunks in order to attempt
 	 * to divide the remaining work over all the workers as evenly as
 	 * possible.
@@ -530,17 +587,23 @@ table_block_parallelscan_nextpage(Relation rel,
 	 * phs_nallocated counter will exceed rs_nblocks, because workers will
 	 * still increment the value, when they try to allocate the next block but
 	 * all blocks have been allocated already. The counter must be 64 bits
-	 * wide because of that, to avoid wrapping around when rs_nblocks is close
-	 * to 2^32.
+	 * wide because of that, to avoid wrapping around when scan_nblocks is
+	 * close to 2^32.
 	 *
 	 * The actual block to return is calculated by adding the counter to the
-	 * starting block number, modulo nblocks.
+	 * starting block number, modulo phs_nblocks.
 	 */
 
+	/* First, figure out how many blocks we're planning on scanning */
+	if (pbscan->phs_numblock == InvalidBlockNumber)
+		scan_nblocks = pbscan->phs_nblocks;
+	else
+		scan_nblocks = pbscan->phs_numblock;
+
 	/*
-	 * First check if we have any remaining blocks in a previous chunk for
-	 * this worker.  We must consume all of the blocks from that before we
-	 * allocate a new chunk to the worker.
+	 * Now check if we have any remaining blocks in a previous chunk for this
+	 * worker.  We must consume all of the blocks from that before we allocate
+	 * a new chunk to the worker.
 	 */
 	if (pbscanwork->phsw_chunk_remaining > 0)
 	{
@@ -562,7 +625,7 @@ table_block_parallelscan_nextpage(Relation rel,
 		 * chunk size set to 1.
 		 */
 		if (pbscanwork->phsw_chunk_size > 1 &&
-			pbscanwork->phsw_nallocated > pbscan->phs_nblocks -
+			pbscanwork->phsw_nallocated > scan_nblocks -
 			(pbscanwork->phsw_chunk_size * PARALLEL_SEQSCAN_RAMPDOWN_CHUNKS))
 			pbscanwork->phsw_chunk_size >>= 1;
 
@@ -577,7 +640,8 @@ table_block_parallelscan_nextpage(Relation rel,
 		pbscanwork->phsw_chunk_remaining = pbscanwork->phsw_chunk_size - 1;
 	}
 
-	if (nallocated >= pbscan->phs_nblocks)
+	/* Check if we've run out of blocks to scan */
+	if (nallocated >= scan_nblocks)
 		page = InvalidBlockNumber;	/* all blocks have been allocated */
 	else
 		page = (nallocated + pbscan->phs_startblock) % pbscan->phs_nblocks;

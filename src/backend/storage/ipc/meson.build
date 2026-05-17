@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'barrier.c',
@@ -14,6 +14,7 @@ backend_sources += files(
   'shm_mq.c',
   'shm_toc.c',
   'shmem.c',
+  'shmem_hash.c',
   'signalfuncs.c',
   'sinval.c',
   'sinvaladt.c',

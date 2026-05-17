@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pg_rewind_sources = files(
   'datapagemap.c',
@@ -44,6 +44,7 @@ tests += {
       't/008_min_recovery_point.pl',
       't/009_growing_files.pl',
       't/010_keep_recycled_wals.pl',
+      't/011_wal_copy.pl',
     ],
   },
 }

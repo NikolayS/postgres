@@ -1,10 +1,10 @@
 /*
  * Copy entire files.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * src/bin/pg_combinebackup/copy_file.h
+ * src/bin/pg_combinebackup/copy_file.c
  *
  *-------------------------------------------------------------------------
  */
@@ -210,7 +210,7 @@ copy_file_blocks(const char *src, const char *dst,
 	}
 
 	if (rb < 0)
-		pg_fatal("could not read from file \"%s\": %m", dst);
+		pg_fatal("could not read from file \"%s\": %m", src);
 
 	pg_free(buffer);
 	close(src_fd);

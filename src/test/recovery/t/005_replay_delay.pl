@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Checks for recovery_min_apply_delay and recovery pause
 use strict;
@@ -53,10 +53,8 @@ $node_standby->poll_query_until('postgres',
 
 # This test is successful if and only if the LSN has been applied with at least
 # the configured apply delay.
-ok(time() - $primary_insert_time >= $delay,
-	"standby applies WAL only after replication delay");
-
-
+cmp_ok(time() - $primary_insert_time,
+	'>=', $delay, "standby applies WAL only after replication delay");
 # Check that recovery can be paused or resumed expectedly.
 my $node_standby2 = PostgreSQL::Test::Cluster->new('standby2');
 $node_standby2->init_from_backup($node_primary, $backup_name,
