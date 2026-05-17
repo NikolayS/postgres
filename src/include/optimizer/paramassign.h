@@ -3,7 +3,7 @@
  * paramassign.h
  *		Functions for assigning PARAM_EXEC slots during planning.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/paramassign.h
@@ -30,7 +30,8 @@ extern Param *replace_nestloop_param_placeholdervar(PlannerInfo *root,
 extern void process_subquery_nestloop_params(PlannerInfo *root,
 											 List *subplan_params);
 extern List *identify_current_nestloop_params(PlannerInfo *root,
-											  Relids leftrelids);
+											  Relids leftrelids,
+											  Relids outerrelids);
 extern Param *generate_new_exec_param(PlannerInfo *root, Oid paramtype,
 									  int32 paramtypmod, Oid paramcollation);
 extern int	assign_special_exec_param(PlannerInfo *root);

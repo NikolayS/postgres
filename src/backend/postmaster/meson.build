@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'autovacuum.c',
@@ -6,6 +6,7 @@ backend_sources += files(
   'bgworker.c',
   'bgwriter.c',
   'checkpointer.c',
+  'datachecksum_state.c',
   'fork_process.c',
   'interrupt.c',
   'launch_backend.c',

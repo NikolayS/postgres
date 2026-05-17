@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 package RewindTest;
 
@@ -285,7 +285,7 @@ sub run_pg_rewind
 		# Check that pg_rewind with dbname and --write-recovery-conf
 		# wrote the dbname in the generated primary_conninfo value.
 		like(slurp_file("$primary_pgdata/postgresql.auto.conf"),
-		     qr/dbname=postgres/m, 'recovery conf file sets dbname');
+			qr/dbname=postgres/m, 'recovery conf file sets dbname');
 
 		# Check that standby.signal is here as recovery configuration
 		# was requested.

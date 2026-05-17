@@ -7,10 +7,10 @@
 # Select the format archetype to be used by gcc to check printf-type functions.
 # We prefer "gnu_printf", as that most closely matches the features supported
 # by src/port/snprintf.c (particularly the %m conversion spec).  However,
-# on some NetBSD versions, that doesn't work while "__syslog__" does.
-# If all else fails, use "printf".
+# on clang and on some NetBSD versions, that doesn't work while "__syslog__"
+# does.  If all else fails, use "printf".
 AC_DEFUN([PGAC_PRINTF_ARCHETYPE],
-[AC_CACHE_CHECK([for printf format archetype], pgac_cv_printf_archetype,
+[AC_CACHE_CHECK([for C printf format archetype], pgac_cv_printf_archetype,
 [pgac_cv_printf_archetype=gnu_printf
 PGAC_TEST_PRINTF_ARCHETYPE
 if [[ "$ac_archetype_ok" = no ]]; then
@@ -20,8 +20,8 @@ if [[ "$ac_archetype_ok" = no ]]; then
     pgac_cv_printf_archetype=printf
   fi
 fi])
-AC_DEFINE_UNQUOTED([PG_PRINTF_ATTRIBUTE], [$pgac_cv_printf_archetype],
-[Define to best printf format archetype, usually gnu_printf if available.])
+AC_DEFINE_UNQUOTED([PG_C_PRINTF_ATTRIBUTE], [$pgac_cv_printf_archetype],
+[Define to best C printf format archetype, usually gnu_printf if available.])
 ])# PGAC_PRINTF_ARCHETYPE
 
 # Subroutine: test $pgac_cv_printf_archetype, set $ac_archetype_ok to yes or no
@@ -36,6 +36,42 @@ __attribute__((format($pgac_cv_printf_archetype, 2, 3)));],
                   [ac_archetype_ok=no])
 ac_c_werror_flag=$ac_save_c_werror_flag
 ])# PGAC_TEST_PRINTF_ARCHETYPE
+
+
+# PGAC_CXX_PRINTF_ARCHETYPE
+# -------------------------
+# Because we support using gcc as C compiler with clang as C++ compiler,
+# we have to be prepared to use different printf archetypes in C++ code.
+# So, do the above test all over in C++.
+AC_DEFUN([PGAC_CXX_PRINTF_ARCHETYPE],
+[AC_CACHE_CHECK([for C++ printf format archetype], pgac_cv_cxx_printf_archetype,
+[pgac_cv_cxx_printf_archetype=gnu_printf
+PGAC_TEST_CXX_PRINTF_ARCHETYPE
+if [[ "$ac_archetype_ok" = no ]]; then
+  pgac_cv_cxx_printf_archetype=__syslog__
+  PGAC_TEST_CXX_PRINTF_ARCHETYPE
+  if [[ "$ac_archetype_ok" = no ]]; then
+    pgac_cv_cxx_printf_archetype=printf
+  fi
+fi])
+AC_DEFINE_UNQUOTED([PG_CXX_PRINTF_ATTRIBUTE], [$pgac_cv_cxx_printf_archetype],
+[Define to best C++ printf format archetype, usually gnu_printf if available.])
+])# PGAC_CXX_PRINTF_ARCHETYPE
+
+# Subroutine: test $pgac_cv_cxx_printf_archetype, set $ac_archetype_ok to yes or no
+AC_DEFUN([PGAC_TEST_CXX_PRINTF_ARCHETYPE],
+[ac_save_cxx_werror_flag=$ac_cxx_werror_flag
+ac_cxx_werror_flag=yes
+AC_LANG_PUSH(C++)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+[extern void pgac_write(int ignore, const char *fmt,...)
+__attribute__((format($pgac_cv_cxx_printf_archetype, 2, 3)));],
+[pgac_write(0, "error %s: %m", "foo");])],
+                  [ac_archetype_ok=yes],
+                  [ac_archetype_ok=no])
+AC_LANG_POP([])
+ac_cxx_werror_flag=$ac_save_cxx_werror_flag
+])# PGAC_TEST_CXX_PRINTF_ARCHETYPE
 
 
 # PGAC_TYPE_128BIT_INT
@@ -83,7 +119,7 @@ if test x"$pgac_cv__128bit_int" = xyes ; then
   AC_CACHE_CHECK([for __int128 alignment bug], [pgac_cv__128bit_int_bug],
   [AC_RUN_IFELSE([AC_LANG_PROGRAM([
 /* This must match the corresponding code in c.h: */
-#if defined(__GNUC__) || defined(__SUNPRO_C)
+#if defined(__GNUC__)
 #define pg_attribute_aligned(a) __attribute__((aligned(a)))
 #elif defined(_MSC_VER)
 #define pg_attribute_aligned(a) __declspec(align(a))
@@ -114,26 +150,6 @@ fi])# PGAC_TYPE_128BIT_INT
 
 
 
-# PGAC_C_STATIC_ASSERT
-# --------------------
-# Check if the C compiler understands _Static_assert(),
-# and define HAVE__STATIC_ASSERT if so.
-#
-# We actually check the syntax ({ _Static_assert(...) }), because we need
-# gcc-style compound expressions to be able to wrap the thing into macros.
-AC_DEFUN([PGAC_C_STATIC_ASSERT],
-[AC_CACHE_CHECK(for _Static_assert, pgac_cv__static_assert,
-[AC_LINK_IFELSE([AC_LANG_PROGRAM([],
-[({ _Static_assert(1, "foo"); })])],
-[pgac_cv__static_assert=yes],
-[pgac_cv__static_assert=no])])
-if test x"$pgac_cv__static_assert" = xyes ; then
-AC_DEFINE(HAVE__STATIC_ASSERT, 1,
-          [Define to 1 if your compiler understands _Static_assert.])
-fi])# PGAC_C_STATIC_ASSERT
-
-
-
 # PGAC_C_TYPEOF
 # -------------
 # Check if the C compiler understands typeof or a variant.  Define
@@ -158,6 +174,96 @@ if test "$pgac_cv_c_typeof" != no; then
     AC_DEFINE_UNQUOTED(typeof, $pgac_cv_c_typeof, [Define to how the compiler spells `typeof'.])
   fi
 fi])# PGAC_C_TYPEOF
+
+
+# PGAC_C_TYPEOF_UNQUAL
+# --------------------
+# Check if the C compiler understands typeof_unqual or a variant.  Define
+# HAVE_TYPEOF_UNQUAL if so, and define 'typeof_unqual' to the actual key word.
+#
+AC_DEFUN([PGAC_C_TYPEOF_UNQUAL],
+[AC_CACHE_CHECK(for typeof_unqual, pgac_cv_c_typeof_unqual,
+[pgac_cv_c_typeof_unqual=no
+# Test with a void pointer, because MSVC doesn't handle that, and we
+# need that for copyObject().
+for pgac_kw in typeof_unqual __typeof_unqual__; do
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+[int x = 0;
+$pgac_kw(x) y;
+const void *a;
+void *b;
+y = x;
+b = ($pgac_kw(*a) *) a;
+return y;])],
+[pgac_cv_c_typeof_unqual=$pgac_kw])
+  test "$pgac_cv_c_typeof_unqual" != no && break
+done])
+if test "$pgac_cv_c_typeof_unqual" != no; then
+  AC_DEFINE(HAVE_TYPEOF_UNQUAL, 1,
+            [Define to 1 if your compiler understands `typeof_unqual' or something similar.])
+  if test "$pgac_cv_c_typeof_unqual" != typeof_unqual; then
+    AC_DEFINE_UNQUOTED(typeof_unqual, $pgac_cv_c_typeof_unqual, [Define to how the compiler spells `typeof_unqual'.])
+  fi
+fi])# PGAC_C_TYPEOF_UNQUAL
+
+
+# PGAC_CXX_TYPEOF
+# ----------------
+# Check if the C++ compiler understands typeof or a variant.  Define
+# HAVE_CXX_TYPEOF if so, and define 'pg_cxx_typeof' to the actual key word.
+#
+AC_DEFUN([PGAC_CXX_TYPEOF],
+[AC_CACHE_CHECK(for C++ typeof, pgac_cv_cxx_typeof,
+[pgac_cv_cxx_typeof=no
+AC_LANG_PUSH(C++)
+for pgac_kw in typeof __typeof__; do
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+[int x = 0;
+$pgac_kw(x) y;
+y = x;
+return y;])],
+[pgac_cv_cxx_typeof=$pgac_kw])
+  test "$pgac_cv_cxx_typeof" != no && break
+done
+AC_LANG_POP([])])
+if test "$pgac_cv_cxx_typeof" != no; then
+  AC_DEFINE(HAVE_CXX_TYPEOF, 1,
+            [Define to 1 if your C++ compiler understands `typeof' or something similar.])
+  if test "$pgac_cv_cxx_typeof" != typeof; then
+    AC_DEFINE_UNQUOTED(pg_cxx_typeof, $pgac_cv_cxx_typeof, [Define to how the C++ compiler spells `typeof'.])
+  fi
+fi])# PGAC_CXX_TYPEOF
+
+
+# PGAC_CXX_TYPEOF_UNQUAL
+# ----------------------
+# Check if the C++ compiler understands typeof_unqual or a variant.  Define
+# HAVE_CXX_TYPEOF_UNQUAL if so, and define 'pg_cxx_typeof_unqual' to the actual key word.
+#
+AC_DEFUN([PGAC_CXX_TYPEOF_UNQUAL],
+[AC_CACHE_CHECK(for C++ typeof_unqual, pgac_cv_cxx_typeof_unqual,
+[pgac_cv_cxx_typeof_unqual=no
+AC_LANG_PUSH(C++)
+for pgac_kw in typeof_unqual __typeof_unqual__; do
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+[int x = 0;
+$pgac_kw(x) y;
+const void *a;
+void *b;
+y = x;
+b = ($pgac_kw(*a) *) a;
+return y;])],
+[pgac_cv_cxx_typeof_unqual=$pgac_kw])
+  test "$pgac_cv_cxx_typeof_unqual" != no && break
+done
+AC_LANG_POP([])])
+if test "$pgac_cv_cxx_typeof_unqual" != no; then
+  AC_DEFINE(HAVE_CXX_TYPEOF_UNQUAL, 1,
+            [Define to 1 if your C++ compiler understands `typeof_unqual' or something similar.])
+  if test "$pgac_cv_cxx_typeof_unqual" != typeof_unqual; then
+    AC_DEFINE_UNQUOTED(pg_cxx_typeof_unqual, $pgac_cv_cxx_typeof_unqual, [Define to how the C++ compiler spells `typeof_unqual'.])
+  fi
+fi])# PGAC_CXX_TYPEOF_UNQUAL
 
 
 
@@ -581,6 +687,31 @@ fi
 undefine([Ac_cachevar])dnl
 ])# PGAC_SSE42_CRC32_INTRINSICS
 
+# PGAC_AVX2_SUPPORT
+# ---------------------------
+# Check if the compiler supports AVX2 as a target
+#
+# If AVX2 target attribute is supported, sets pgac_avx2_support.
+#
+# There is deliberately not a guard for __has_attribute here
+AC_DEFUN([PGAC_AVX2_SUPPORT],
+[define([Ac_cachevar], [AS_TR_SH([pgac_cv_avx2_support])])dnl
+AC_CACHE_CHECK([for AVX2 target attribute support], [Ac_cachevar],
+[AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
+    __attribute__((target("avx2")))
+    static int avx2_test(void)
+    {
+      return 0;
+    }],
+  [return avx2_test();])],
+  [Ac_cachevar=yes],
+  [Ac_cachevar=no])])
+if test x"$Ac_cachevar" = x"yes"; then
+  pgac_avx2_support=yes
+fi
+undefine([Ac_cachevar])dnl
+])# PGAC_AVX2_SUPPORT
+
 # PGAC_AVX512_PCLMUL_INTRINSICS
 # ---------------------------
 # Check if the compiler supports AVX-512 carryless multiplication
@@ -602,6 +733,7 @@ AC_CACHE_CHECK([for _mm512_clmulepi64_epi128], [Ac_cachevar],
     {
       __m128i z;
 
+      x = _mm512_xor_si512(_mm512_zextsi128_si512(_mm_cvtsi32_si128(0)), x);
       y = _mm512_clmulepi64_epi128(x, y, 0);
       z = _mm_ternarylogic_epi64(
                 _mm512_castsi512_si128(y),
@@ -651,6 +783,44 @@ if test x"$Ac_cachevar" = x"yes"; then
 fi
 undefine([Ac_cachevar])dnl
 ])# PGAC_ARMV8_CRC32C_INTRINSICS
+
+# PGAC_ARM_PLMULL
+# ---------------------------
+# Check if the compiler supports Arm CRYPTO PMULL (carryless multiplication)
+# instructions used for vectorized CRC.
+#
+# If the instructions are supported, sets pgac_arm_pmull.
+AC_DEFUN([PGAC_ARM_PLMULL],
+[define([Ac_cachevar], [AS_TR_SH([pgac_cv_arm_pmull_$1])])dnl
+AC_CACHE_CHECK([for pmull and pmull2], [Ac_cachevar],
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <arm_acle.h>
+#include <arm_neon.h>
+uint64x2_t  a;
+uint64x2_t  b;
+uint64x2_t  c;
+uint64x2_t  r1;
+uint64x2_t  r2;
+
+  #if defined(__has_attribute) && __has_attribute (target)
+  __attribute__((target("+crypto")))
+  #endif
+  static int pmull_test(void)
+  {
+    __asm("pmull  %0.1q, %2.1d, %3.1d\neor %0.16b, %0.16b, %1.16b\n":"=w"(r1), "+w"(c):"w"(a), "w"(b));
+    __asm("pmull2 %0.1q, %2.2d, %3.2d\neor %0.16b, %0.16b, %1.16b\n":"=w"(r2), "+w"(c):"w"(a), "w"(b));
+
+    r1 = veorq_u64(r1, r2);
+    /* return computed value, to prevent the above being optimized away */
+    return (int) vgetq_lane_u64(r1, 0);
+  }],
+  [return pmull_test();])],
+  [Ac_cachevar=yes],
+  [Ac_cachevar=no])])
+if test x"$Ac_cachevar" = x"yes"; then
+  pgac_arm_pmull=yes
+fi
+undefine([Ac_cachevar])dnl
+])# PGAC_ARM_PLMULL
 
 # PGAC_LOONGARCH_CRC32C_INTRINSICS
 # ---------------------------

@@ -2,7 +2,7 @@
  * brin_bloom.c
  *		Implementation of Bloom opclass for BRIN
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -114,6 +114,7 @@
  */
 #include "postgres.h"
 
+#include <limits.h>
 #include <math.h>
 
 #include "access/brin.h"
@@ -126,6 +127,7 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_type.h"
 #include "common/hashfn.h"
+#include "port/pg_bitutils.h"
 #include "utils/fmgrprotos.h"
 #include "utils/rel.h"
 
@@ -540,7 +542,7 @@ brin_bloom_add_value(PG_FUNCTION_ARGS)
 	BrinDesc   *bdesc = (BrinDesc *) PG_GETARG_POINTER(0);
 	BrinValues *column = (BrinValues *) PG_GETARG_POINTER(1);
 	Datum		newval = PG_GETARG_DATUM(2);
-	bool		isnull PG_USED_FOR_ASSERTS_ONLY = PG_GETARG_DATUM(3);
+	bool		isnull PG_USED_FOR_ASSERTS_ONLY = PG_GETARG_BOOL(3);
 	BloomOptions *opts = (BloomOptions *) PG_GET_OPCLASS_OPTIONS();
 	Oid			colloid = PG_GET_COLLATION();
 	FmgrInfo   *hashFn;

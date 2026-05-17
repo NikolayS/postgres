@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * src/bin/psql/variables.c
  */
@@ -54,7 +54,7 @@ CreateVariableSpace(void)
 {
 	struct _variable *ptr;
 
-	ptr = pg_malloc(sizeof *ptr);
+	ptr = pg_malloc_object(struct _variable);
 	ptr->name = NULL;
 	ptr->value = NULL;
 	ptr->substitute_hook = NULL;
@@ -204,7 +204,7 @@ ParseVariableDouble(const char *value, const char *name, double *result, double 
 	if ((value == NULL) || (*value == '\0'))
 	{
 		if (name)
-			pg_log_error("invalid input syntax for \"%s\"", name);
+			pg_log_error("invalid input syntax for variable \"%s\"", name);
 		return false;
 	}
 
@@ -215,14 +215,14 @@ ParseVariableDouble(const char *value, const char *name, double *result, double 
 		if (dblval < min)
 		{
 			if (name)
-				pg_log_error("invalid value \"%s\" for \"%s\": must be greater than %.2f",
+				pg_log_error("invalid value \"%s\" for variable \"%s\": must be greater than %.2f",
 							 value, name, min);
 			return false;
 		}
 		else if (dblval > max)
 		{
 			if (name)
-				pg_log_error("invalid value \"%s\" for \"%s\": must be less than %.2f",
+				pg_log_error("invalid value \"%s\" for variable \"%s\": must be less than %.2f",
 							 value, name, max);
 		}
 		*result = dblval;
@@ -238,13 +238,13 @@ ParseVariableDouble(const char *value, const char *name, double *result, double 
 			 (dblval == 0.0 || dblval >= HUGE_VAL || dblval <= -HUGE_VAL))
 	{
 		if (name)
-			pg_log_error("\"%s\" is out of range for \"%s\"", value, name);
+			pg_log_error("value \"%s\" is out of range for variable \"%s\"", value, name);
 		return false;
 	}
 	else
 	{
 		if (name)
-			pg_log_error("invalid value \"%s\" for \"%s\"", value, name);
+			pg_log_error("invalid value \"%s\" for variable \"%s\"", value, name);
 		return false;
 	}
 }
@@ -353,7 +353,7 @@ SetVariable(VariableSpace space, const char *name, const char *value)
 	/* not present, make new entry ... unless we were asked to delete */
 	if (value)
 	{
-		current = pg_malloc(sizeof *current);
+		current = pg_malloc_object(struct _variable);
 		current->name = pg_strdup(name);
 		current->value = pg_strdup(value);
 		current->substitute_hook = NULL;
@@ -416,7 +416,7 @@ SetVariableHooks(VariableSpace space, const char *name,
 	}
 
 	/* not present, make new entry */
-	current = pg_malloc(sizeof *current);
+	current = pg_malloc_object(struct _variable);
 	current->name = pg_strdup(name);
 	current->value = NULL;
 	current->substitute_hook = shook;

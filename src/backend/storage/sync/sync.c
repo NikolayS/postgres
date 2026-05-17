@@ -3,7 +3,7 @@
  * sync.c
  *	  File synchronization management code.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -31,6 +31,7 @@
 #include "storage/md.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/wait_event.h"
 
 /*
  * In some contexts (currently, standalone backends and the checkpointer)
@@ -531,7 +532,7 @@ RememberSyncRequest(const FileTag *ftag, SyncRequestType type)
 		MemoryContext oldcxt = MemoryContextSwitchTo(pendingOpsCxt);
 		PendingUnlinkEntry *entry;
 
-		entry = palloc(sizeof(PendingUnlinkEntry));
+		entry = palloc_object(PendingUnlinkEntry);
 		entry->tag = *ftag;
 		entry->cycle_ctr = checkpoint_cycle_ctr;
 		entry->canceled = false;

@@ -3,7 +3,7 @@
  * pg_foreign_server.h
  *	  definition of the "foreign server" system catalog (pg_foreign_server)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_foreign_server.h
@@ -25,6 +25,8 @@
  *		typedef struct FormData_pg_foreign_server
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_foreign_server,1417,ForeignServerRelationId)
 {
 	Oid			oid;			/* oid */
@@ -39,6 +41,8 @@ CATALOG(pg_foreign_server,1417,ForeignServerRelationId)
 	text		srvoptions[1];	/* FDW-specific options */
 #endif
 } FormData_pg_foreign_server;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_foreign_server corresponds to a pointer to a tuple with

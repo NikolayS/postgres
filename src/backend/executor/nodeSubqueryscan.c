@@ -7,7 +7,7 @@
  * we need two sets of code.  Ought to look at trying to unify the cases.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -130,7 +130,8 @@ ExecInitSubqueryScan(SubqueryScan *node, EState *estate, int eflags)
 	 */
 	ExecInitScanTupleSlot(estate, &subquerystate->ss,
 						  ExecGetResultType(subquerystate->subplan),
-						  ExecGetResultSlotOps(subquerystate->subplan, NULL));
+						  ExecGetResultSlotOps(subquerystate->subplan, NULL),
+						  0);
 
 	/*
 	 * The slot used as the scantuple isn't the slot above (outside of EPQ),

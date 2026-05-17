@@ -3,7 +3,7 @@
  * toast_internals.c
  *	  Functions for internal use by the TOAST system.
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/access/common/toast_internals.c
@@ -45,7 +45,7 @@ static bool toastid_valueid_exists(Oid toastrelid, Oid valueid);
 Datum
 toast_compress_datum(Datum value, char cmethod)
 {
-	struct varlena *tmp = NULL;
+	varlena    *tmp = NULL;
 	int32		valsize;
 	ToastCompressionId cmid = TOAST_INVALID_COMPRESSION_ID;
 
@@ -64,11 +64,11 @@ toast_compress_datum(Datum value, char cmethod)
 	switch (cmethod)
 	{
 		case TOAST_PGLZ_COMPRESSION:
-			tmp = pglz_compress_datum((const struct varlena *) value);
+			tmp = pglz_compress_datum((const varlena *) DatumGetPointer(value));
 			cmid = TOAST_PGLZ_COMPRESSION_ID;
 			break;
 		case TOAST_LZ4_COMPRESSION:
-			tmp = lz4_compress_datum((const struct varlena *) value);
+			tmp = lz4_compress_datum((const varlena *) DatumGetPointer(value));
 			cmid = TOAST_LZ4_COMPRESSION_ID;
 			break;
 		default:
@@ -117,26 +117,14 @@ toast_compress_datum(Datum value, char cmethod)
  */
 Datum
 toast_save_datum(Relation rel, Datum value,
-				 struct varlena *oldexternal, int options)
+				 varlena *oldexternal, uint32 options)
 {
 	Relation	toastrel;
 	Relation   *toastidxs;
-	HeapTuple	toasttup;
 	TupleDesc	toasttupDesc;
-	Datum		t_values[3];
-	bool		t_isnull[3];
 	CommandId	mycid = GetCurrentCommandId(true);
-	struct varlena *result;
-	struct varatt_external toast_pointer;
-	union
-	{
-		struct varlena hdr;
-		/* this is to make the union big enough for a chunk: */
-		char		data[TOAST_MAX_CHUNK_SIZE + VARHDRSZ];
-		/* ensure union is aligned well enough: */
-		int32		align_it;
-	}			chunk_data;
-	int32		chunk_size;
+	varlena    *result;
+	varatt_external toast_pointer;
 	int32		chunk_seq = 0;
 	char	   *data_p;
 	int32		data_todo;
@@ -144,7 +132,7 @@ toast_save_datum(Relation rel, Datum value,
 	int			num_indexes;
 	int			validIndex;
 
-	Assert(!VARATT_IS_EXTERNAL(value));
+	Assert(!VARATT_IS_EXTERNAL(dval));
 
 	/*
 	 * Open the toast relation and its indexes.  We can use the index to check
@@ -237,7 +225,7 @@ toast_save_datum(Relation rel, Datum value,
 		toast_pointer.va_valueid = InvalidOid;
 		if (oldexternal != NULL)
 		{
-			struct varatt_external old_toast_pointer;
+			varatt_external old_toast_pointer;
 
 			Assert(VARATT_IS_EXTERNAL_ONDISK(oldexternal));
 			/* Must copy to access aligned fields */
@@ -290,20 +278,20 @@ toast_save_datum(Relation rel, Datum value,
 	}
 
 	/*
-	 * Initialize constant parts of the tuple data
-	 */
-	t_values[0] = ObjectIdGetDatum(toast_pointer.va_valueid);
-	t_values[2] = PointerGetDatum(&chunk_data);
-	t_isnull[0] = false;
-	t_isnull[1] = false;
-	t_isnull[2] = false;
-
-	/*
 	 * Split up the item into chunks
 	 */
 	while (data_todo > 0)
 	{
-		int			i;
+		HeapTuple	toasttup;
+		Datum		t_values[3];
+		bool		t_isnull[3] = {0};
+		union
+		{
+			alignas(int32) varlena hdr;
+			/* this is to make the union big enough for a chunk: */
+			char		data[TOAST_MAX_CHUNK_SIZE + VARHDRSZ];
+		}			chunk_data;
+		int32		chunk_size;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -315,9 +303,12 @@ toast_save_datum(Relation rel, Datum value,
 		/*
 		 * Build a tuple and store it
 		 */
+		t_values[0] = ObjectIdGetDatum(toast_pointer.va_valueid);
 		t_values[1] = Int32GetDatum(chunk_seq++);
 		SET_VARSIZE(&chunk_data, chunk_size + VARHDRSZ);
 		memcpy(VARDATA(&chunk_data), data_p, chunk_size);
+		t_values[2] = PointerGetDatum(&chunk_data);
+
 		toasttup = heap_form_tuple(toasttupDesc, t_values, t_isnull);
 
 		heap_insert(toastrel, toasttup, mycid, options, NULL);
@@ -333,7 +324,7 @@ toast_save_datum(Relation rel, Datum value,
 		 * Note also that there had better not be any user-created index on
 		 * the TOAST table, since we don't bother to update anything else.
 		 */
-		for (i = 0; i < num_indexes; i++)
+		for (int i = 0; i < num_indexes; i++)
 		{
 			/* Only index relations marked as ready can be updated */
 			if (toastidxs[i]->rd_index->indisready)
@@ -368,7 +359,7 @@ toast_save_datum(Relation rel, Datum value,
 	/*
 	 * Create the TOAST pointer value that we'll return
 	 */
-	result = (struct varlena *) palloc(TOAST_POINTER_SIZE);
+	result = (varlena *) palloc(TOAST_POINTER_SIZE);
 	SET_VARTAG_EXTERNAL(result, VARTAG_ONDISK);
 	memcpy(VARDATA_EXTERNAL(result), &toast_pointer, sizeof(toast_pointer));
 
@@ -384,8 +375,8 @@ toast_save_datum(Relation rel, Datum value,
 void
 toast_delete_datum(Relation rel, Datum value, bool is_speculative)
 {
-	struct varlena *attr = (struct varlena *) DatumGetPointer(value);
-	struct varatt_external toast_pointer;
+	varlena    *attr = (varlena *) DatumGetPointer(value);
+	varatt_external toast_pointer;
 	Relation	toastrel;
 	Relation   *toastidxs;
 	ScanKeyData toastkey;
@@ -577,7 +568,7 @@ toast_open_indexes(Relation toastrel,
 	*num_indexes = list_length(indexlist);
 
 	/* Open all the index relations */
-	*toastidxs = (Relation *) palloc(*num_indexes * sizeof(Relation));
+	*toastidxs = palloc_array(Relation, *num_indexes);
 	foreach(lc, indexlist)
 		(*toastidxs)[i++] = index_open(lfirst_oid(lc), lock);
 

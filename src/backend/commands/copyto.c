@@ -3,7 +3,7 @@
  * copyto.c
  *		COPY <table> TO file/program/client
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,12 +18,16 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include "access/table.h"
 #include "access/tableam.h"
+#include "access/tupconvert.h"
+#include "catalog/pg_inherits.h"
 #include "commands/copyapi.h"
 #include "commands/progress.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/tuptable.h"
+#include "funcapi.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
@@ -31,10 +35,12 @@
 #include "pgstat.h"
 #include "storage/fd.h"
 #include "tcop/tcopprot.h"
+#include "utils/json.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#include "utils/wait_event.h"
 
 /*
  * Represents the different dest cases we need to worry about at
@@ -82,10 +88,19 @@ typedef struct CopyToStateData
 	List	   *attnumlist;		/* integer list of attnums to copy */
 	char	   *filename;		/* filename, or NULL for STDOUT */
 	bool		is_program;		/* is 'filename' a program to popen? */
+	bool		json_row_delim_needed;	/* need delimiter before next row */
+	StringInfo	json_buf;		/* reusable buffer for JSON output,
+								 * initialized in BeginCopyTo */
+	TupleDesc	tupDesc;		/* Descriptor for JSON output; for a column
+								 * list this is a projected descriptor */
+	Datum	   *json_projvalues;	/* pre-allocated projection values, or
+									 * NULL */
+	bool	   *json_projnulls; /* pre-allocated projection nulls, or NULL */
 	copy_data_dest_cb data_dest_cb; /* function for writing data */
 
 	CopyFormatOptions opts;
 	Node	   *whereClause;	/* WHERE condition (or NULL) */
+	List	   *partitions;		/* OID list of partitions to copy data from */
 
 	/*
 	 * Working state
@@ -116,6 +131,8 @@ static void CopyOneRowTo(CopyToState cstate, TupleTableSlot *slot);
 static void CopyAttributeOutText(CopyToState cstate, const char *string);
 static void CopyAttributeOutCSV(CopyToState cstate, const char *string,
 								bool use_quote);
+static void CopyRelationTo(CopyToState cstate, Relation rel, Relation root_rel,
+						   uint64 *processed);
 
 /* built-in format-specific routines */
 static void CopyToTextLikeStart(CopyToState cstate, TupleDesc tupDesc);
@@ -125,6 +142,8 @@ static void CopyToCSVOneRow(CopyToState cstate, TupleTableSlot *slot);
 static void CopyToTextLikeOneRow(CopyToState cstate, TupleTableSlot *slot,
 								 bool is_csv);
 static void CopyToTextLikeEnd(CopyToState cstate);
+static void CopyToJsonOneRow(CopyToState cstate, TupleTableSlot *slot);
+static void CopyToJsonEnd(CopyToState cstate);
 static void CopyToBinaryStart(CopyToState cstate, TupleDesc tupDesc);
 static void CopyToBinaryOutFunc(CopyToState cstate, Oid atttypid, FmgrInfo *finfo);
 static void CopyToBinaryOneRow(CopyToState cstate, TupleTableSlot *slot);
@@ -143,9 +162,6 @@ static void CopySendInt16(CopyToState cstate, int16 val);
 
 /*
  * COPY TO routines for built-in formats.
- *
- * CSV and text formats share the same TextLike routines except for the
- * one-row callback.
  */
 
 /* text format */
@@ -164,6 +180,14 @@ static const CopyToRoutine CopyToRoutineCSV = {
 	.CopyToEnd = CopyToTextLikeEnd,
 };
 
+/* json format */
+static const CopyToRoutine CopyToRoutineJson = {
+	.CopyToStart = CopyToTextLikeStart,
+	.CopyToOutFunc = CopyToTextLikeOutFunc,
+	.CopyToOneRow = CopyToJsonOneRow,
+	.CopyToEnd = CopyToJsonEnd,
+};
+
 /* binary format */
 static const CopyToRoutine CopyToRoutineBinary = {
 	.CopyToStart = CopyToBinaryStart,
@@ -176,16 +200,18 @@ static const CopyToRoutine CopyToRoutineBinary = {
 static const CopyToRoutine *
 CopyToGetRoutine(const CopyFormatOptions *opts)
 {
-	if (opts->csv_mode)
+	if (opts->format == COPY_FORMAT_CSV)
 		return &CopyToRoutineCSV;
-	else if (opts->binary)
+	else if (opts->format == COPY_FORMAT_BINARY)
 		return &CopyToRoutineBinary;
+	else if (opts->format == COPY_FORMAT_JSON)
+		return &CopyToRoutineJson;
 
 	/* default is text */
 	return &CopyToRoutineText;
 }
 
-/* Implementation of the start callback for text and CSV formats */
+/* Implementation of the start callback for text, CSV, and json formats */
 static void
 CopyToTextLikeStart(CopyToState cstate, TupleDesc tupDesc)
 {
@@ -199,10 +225,12 @@ CopyToTextLikeStart(CopyToState cstate, TupleDesc tupDesc)
 														  cstate->file_encoding);
 
 	/* if a header has been requested send the line */
-	if (cstate->opts.header_line)
+	if (cstate->opts.header_line == COPY_HEADER_TRUE)
 	{
 		ListCell   *cur;
 		bool		hdr_delim = false;
+
+		Assert(cstate->opts.format != COPY_FORMAT_JSON);
 
 		foreach(cur, cstate->attnumlist)
 		{
@@ -215,7 +243,7 @@ CopyToTextLikeStart(CopyToState cstate, TupleDesc tupDesc)
 
 			colname = NameStr(TupleDescAttr(tupDesc, attnum - 1)->attname);
 
-			if (cstate->opts.csv_mode)
+			if (cstate->opts.format == COPY_FORMAT_CSV)
 				CopyAttributeOutCSV(cstate, colname, false);
 			else
 				CopyAttributeOutText(cstate, colname);
@@ -223,10 +251,19 @@ CopyToTextLikeStart(CopyToState cstate, TupleDesc tupDesc)
 
 		CopySendTextLikeEndOfRow(cstate);
 	}
+
+	/*
+	 * If FORCE_ARRAY has been specified, send the opening bracket.
+	 */
+	if (cstate->opts.format == COPY_FORMAT_JSON && cstate->opts.force_array)
+	{
+		CopySendChar(cstate, '[');
+		CopySendTextLikeEndOfRow(cstate);
+	}
 }
 
 /*
- * Implementation of the outfunc callback for text and CSV formats. Assign
+ * Implementation of the outfunc callback for text, CSV, and json formats. Assign
  * the output function data to the given *finfo.
  */
 static void
@@ -304,6 +341,95 @@ static void
 CopyToTextLikeEnd(CopyToState cstate)
 {
 	/* Nothing to do here */
+}
+
+/* Implementation of the end callback for json format */
+static void
+CopyToJsonEnd(CopyToState cstate)
+{
+	if (cstate->opts.force_array)
+	{
+		CopySendChar(cstate, ']');
+		CopySendTextLikeEndOfRow(cstate);
+	}
+}
+
+/* Implementation of per-row callback for json format */
+static void
+CopyToJsonOneRow(CopyToState cstate, TupleTableSlot *slot)
+{
+	Datum		rowdata;
+
+	resetStringInfo(cstate->json_buf);
+
+	if (cstate->json_projvalues != NULL)
+	{
+		/*
+		 * Column list case: project selected column values into sequential
+		 * positions matching the custom TupleDesc, then form a new tuple.
+		 */
+		HeapTuple	tup;
+		int			i = 0;
+
+		foreach_int(attnum, cstate->attnumlist)
+		{
+			cstate->json_projvalues[i] = slot->tts_values[attnum - 1];
+			cstate->json_projnulls[i] = slot->tts_isnull[attnum - 1];
+			i++;
+		}
+
+		tup = heap_form_tuple(cstate->tupDesc,
+							  cstate->json_projvalues,
+							  cstate->json_projnulls);
+
+		/*
+		 * heap_form_tuple already stamps the datum-length, type-id, and
+		 * type-mod fields on t_data, so we can use it directly as a composite
+		 * Datum without the extra pallocmemcpy that heap_copy_tuple_as_datum
+		 * would do.  Any TOAST pointers in the projected values will be
+		 * detoasted by the per-column output functions called from
+		 * composite_to_json.
+		 */
+		rowdata = HeapTupleGetDatum(tup);
+	}
+	else
+	{
+		/*
+		 * Full table or query without column list.  For queries, the slot's
+		 * TupleDesc may carry RECORDOID, which is not registered in the type
+		 * cache and would cause composite_to_json's lookup_rowtype_tupdesc
+		 * call to fail.  Build a HeapTuple stamped with the blessed
+		 * descriptor so the type can be looked up correctly.
+		 */
+		if (!cstate->rel && slot->tts_tupleDescriptor->tdtypeid == RECORDOID)
+		{
+			HeapTuple	tup = heap_form_tuple(cstate->tupDesc,
+											  slot->tts_values,
+											  slot->tts_isnull);
+
+			rowdata = HeapTupleGetDatum(tup);
+		}
+		else
+			rowdata = ExecFetchSlotHeapTupleDatum(slot);
+	}
+
+	composite_to_json(rowdata, cstate->json_buf, false);
+
+	if (cstate->opts.force_array)
+	{
+		if (cstate->json_row_delim_needed)
+			CopySendChar(cstate, ',');
+		else
+		{
+			/* first row needs no delimiter */
+			CopySendChar(cstate, ' ');
+			cstate->json_row_delim_needed = true;
+		}
+	}
+
+	CopySendData(cstate, cstate->json_buf->data, cstate->json_buf->len);
+
+	CopySendTextLikeEndOfRow(cstate);
 }
 
 /*
@@ -392,14 +518,28 @@ SendCopyBegin(CopyToState cstate)
 {
 	StringInfoData buf;
 	int			natts = list_length(cstate->attnumlist);
-	int16		format = (cstate->opts.binary ? 1 : 0);
+	int16		format = (cstate->opts.format == COPY_FORMAT_BINARY ? 1 : 0);
 	int			i;
 
 	pq_beginmessage(&buf, PqMsg_CopyOutResponse);
 	pq_sendbyte(&buf, format);	/* overall format */
-	pq_sendint16(&buf, natts);
-	for (i = 0; i < natts; i++)
-		pq_sendint16(&buf, format); /* per-column formats */
+	if (cstate->opts.format != COPY_FORMAT_JSON)
+	{
+		pq_sendint16(&buf, natts);
+		for (i = 0; i < natts; i++)
+			pq_sendint16(&buf, format); /* per-column formats */
+	}
+	else
+	{
+		/*
+		 * For JSON format, report one text-format column.  Each CopyData
+		 * message contains one complete JSON object, not individual column
+		 * values, so the per-column count is always 1.
+		 */
+		pq_sendint16(&buf, 1);
+		pq_sendint16(&buf, 0);
+	}
+
 	pq_endmessage(&buf);
 	cstate->copy_dest = COPY_FRONTEND;
 }
@@ -449,6 +589,7 @@ CopySendEndOfRow(CopyToState cstate)
 	switch (cstate->copy_dest)
 	{
 		case COPY_FILE:
+			pgstat_report_wait_start(WAIT_EVENT_COPY_TO_WRITE);
 			if (fwrite(fe_msgbuf->data, fe_msgbuf->len, 1,
 					   cstate->copy_file) != 1 ||
 				ferror(cstate->copy_file))
@@ -481,6 +622,7 @@ CopySendEndOfRow(CopyToState cstate)
 							(errcode_for_file_access(),
 							 errmsg("could not write to COPY file: %m")));
 			}
+			pgstat_report_wait_end();
 			break;
 		case COPY_FRONTEND:
 			/* Dump the accumulated row as one CopyData message */
@@ -499,7 +641,7 @@ CopySendEndOfRow(CopyToState cstate)
 }
 
 /*
- * Wrapper function of CopySendEndOfRow for text and CSV formats. Sends the
+ * Wrapper function of CopySendEndOfRow for text, CSV, and json formats. Sends the
  * line termination and do common appropriate things for the end of row.
  */
 static inline void
@@ -581,7 +723,7 @@ ClosePipeToProgram(CopyToState cstate)
 }
 
 /*
- * Release resources allocated in a cstate for COPY TO/FROM.
+ * Release resources allocated in a cstate for COPY TO.
  */
 static void
 EndCopy(CopyToState cstate)
@@ -602,6 +744,10 @@ EndCopy(CopyToState cstate)
 	pgstat_progress_end_command();
 
 	MemoryContextDelete(cstate->copycontext);
+
+	if (cstate->partitions)
+		list_free(cstate->partitions);
+
 	pfree(cstate);
 }
 
@@ -643,6 +789,7 @@ BeginCopyTo(ParseState *pstate,
 		PROGRESS_COPY_COMMAND_TO,
 		0
 	};
+	List	   *children = NIL;
 
 	if (rel != NULL && rel->rd_rel->relkind != RELKIND_RELATION)
 	{
@@ -673,11 +820,34 @@ BeginCopyTo(ParseState *pstate,
 					 errmsg("cannot copy from sequence \"%s\"",
 							RelationGetRelationName(rel))));
 		else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("cannot copy from partitioned table \"%s\"",
-							RelationGetRelationName(rel)),
-					 errhint("Try the COPY (SELECT ...) TO variant.")));
+		{
+			/*
+			 * Collect OIDs of relation containing data, so that later
+			 * DoCopyTo can copy the data from them.
+			 */
+			children = find_all_inheritors(RelationGetRelid(rel), AccessShareLock, NULL);
+
+			foreach_oid(child, children)
+			{
+				char		relkind = get_rel_relkind(child);
+
+				if (relkind == RELKIND_FOREIGN_TABLE)
+				{
+					char	   *relation_name = get_rel_name(child);
+
+					ereport(ERROR,
+							errcode(ERRCODE_WRONG_OBJECT_TYPE),
+							errmsg("cannot copy from foreign table \"%s\"", relation_name),
+							errdetail("Partition \"%s\" is a foreign table in partitioned table \"%s\"",
+									  relation_name, RelationGetRelationName(rel)),
+							errhint("Try the COPY (SELECT ...) TO variant."));
+				}
+
+				/* Exclude tables with no data */
+				if (RELKIND_HAS_PARTITIONS(relkind))
+					children = foreach_delete_current(children, child);
+			}
+		}
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -687,7 +857,7 @@ BeginCopyTo(ParseState *pstate,
 
 
 	/* Allocate workspace and zero all fields */
-	cstate = (CopyToStateData *) palloc0(sizeof(CopyToStateData));
+	cstate = palloc0_object(CopyToStateData);
 
 	/*
 	 * We allocate everything used by a cstate in a new memory context. This
@@ -713,6 +883,8 @@ BeginCopyTo(ParseState *pstate,
 		cstate->rel = rel;
 
 		tupDesc = RelationGetDescr(cstate->rel);
+		cstate->partitions = children;
+		cstate->tupDesc = tupDesc;
 	}
 	else
 	{
@@ -722,6 +894,7 @@ BeginCopyTo(ParseState *pstate,
 		DestReceiver *dest;
 
 		cstate->rel = NULL;
+		cstate->partitions = NIL;
 
 		/*
 		 * Run parse analysis and rewrite.  Note this also acquires sufficient
@@ -796,7 +969,7 @@ BeginCopyTo(ParseState *pstate,
 
 		/* plan the query */
 		plan = pg_plan_query(query, pstate->p_sourcetext,
-							 CURSOR_OPT_PARALLEL_OK, NULL);
+							 CURSOR_OPT_PARALLEL_OK, NULL, NULL);
 
 		/*
 		 * With row-level security and a user using "COPY relation TO", we
@@ -848,10 +1021,52 @@ BeginCopyTo(ParseState *pstate,
 		ExecutorStart(cstate->queryDesc, 0);
 
 		tupDesc = cstate->queryDesc->tupDesc;
+		tupDesc = BlessTupleDesc(tupDesc);
+		cstate->tupDesc = tupDesc;
 	}
 
 	/* Generate or convert list of attributes to process */
 	cstate->attnumlist = CopyGetAttnums(tupDesc, cstate->rel, attnamelist);
+
+	/* Set up JSON-specific state */
+	if (cstate->opts.format == COPY_FORMAT_JSON)
+	{
+		cstate->json_buf = makeStringInfo();
+
+		if (rel && list_length(cstate->attnumlist) < tupDesc->natts)
+		{
+			int			natts = list_length(cstate->attnumlist);
+			TupleDesc	resultDesc;
+
+			/*
+			 * Build a TupleDesc describing only the selected columns so that
+			 * composite_to_json() emits the right column names and types.
+			 */
+			resultDesc = CreateTemplateTupleDesc(natts);
+
+			foreach_int(attnum, cstate->attnumlist)
+			{
+				Form_pg_attribute attr = TupleDescAttr(tupDesc, attnum - 1);
+
+				TupleDescInitEntry(resultDesc,
+								   foreach_current_index(attnum) + 1,
+								   NameStr(attr->attname),
+								   attr->atttypid,
+								   attr->atttypmod,
+								   attr->attndims);
+			}
+
+			TupleDescFinalize(resultDesc);
+			cstate->tupDesc = BlessTupleDesc(resultDesc);
+
+			/*
+			 * Pre-allocate arrays for projecting selected column values into
+			 * sequential positions matching the custom TupleDesc.
+			 */
+			cstate->json_projvalues = palloc_array(Datum, natts);
+			cstate->json_projnulls = palloc_array(bool, natts);
+		}
+	}
 
 	num_phys_attrs = tupDesc->natts;
 
@@ -1030,7 +1245,7 @@ DoCopyTo(CopyToState cstate)
 	TupleDesc	tupDesc;
 	int			num_phys_attrs;
 	ListCell   *cur;
-	uint64		processed;
+	uint64		processed = 0;
 
 	if (fe_copy)
 		SendCopyBegin(cstate);
@@ -1070,33 +1285,24 @@ DoCopyTo(CopyToState cstate)
 
 	if (cstate->rel)
 	{
-		TupleTableSlot *slot;
-		TableScanDesc scandesc;
-
-		scandesc = table_beginscan(cstate->rel, GetActiveSnapshot(), 0, NULL);
-		slot = table_slot_create(cstate->rel, NULL);
-
-		processed = 0;
-		while (table_scan_getnextslot(scandesc, ForwardScanDirection, slot))
+		/*
+		 * If COPY TO source table is a partitioned table, then open each
+		 * partition and process each individual partition.
+		 */
+		if (cstate->rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 		{
-			CHECK_FOR_INTERRUPTS();
+			foreach_oid(child, cstate->partitions)
+			{
+				Relation	scan_rel;
 
-			/* Deconstruct the tuple ... */
-			slot_getallattrs(slot);
-
-			/* Format and send the data */
-			CopyOneRowTo(cstate, slot);
-
-			/*
-			 * Increment the number of processed tuples, and report the
-			 * progress.
-			 */
-			pgstat_progress_update_param(PROGRESS_COPY_TUPLES_PROCESSED,
-										 ++processed);
+				/* We already got the lock in BeginCopyTo */
+				scan_rel = table_open(child, NoLock);
+				CopyRelationTo(cstate, scan_rel, cstate->rel, &processed);
+				table_close(scan_rel, NoLock);
+			}
 		}
-
-		ExecDropSingleTupleTableSlot(slot);
-		table_endscan(scandesc);
+		else
+			CopyRelationTo(cstate, cstate->rel, NULL, &processed);
 	}
 	else
 	{
@@ -1113,6 +1319,74 @@ DoCopyTo(CopyToState cstate)
 		SendCopyEnd(cstate);
 
 	return processed;
+}
+
+/*
+ * Scans a single table and exports its rows to the COPY destination.
+ *
+ * root_rel can be set to the root table of rel if rel is a partition
+ * table so that we can send tuples in root_rel's rowtype, which might
+ * differ from individual partitions.
+*/
+static void
+CopyRelationTo(CopyToState cstate, Relation rel, Relation root_rel, uint64 *processed)
+{
+	TupleTableSlot *slot;
+	TableScanDesc scandesc;
+	AttrMap    *map = NULL;
+	TupleTableSlot *root_slot = NULL;
+
+	scandesc = table_beginscan(rel, GetActiveSnapshot(), 0, NULL,
+							   SO_NONE);
+	slot = table_slot_create(rel, NULL);
+
+	/*
+	 * If we are exporting partition data here, we check if converting tuples
+	 * to the root table's rowtype, because a partition might have column
+	 * order different than its root table.
+	 */
+	if (root_rel != NULL)
+	{
+		root_slot = table_slot_create(root_rel, NULL);
+		map = build_attrmap_by_name_if_req(RelationGetDescr(root_rel),
+										   RelationGetDescr(rel),
+										   false);
+	}
+
+	while (table_scan_getnextslot(scandesc, ForwardScanDirection, slot))
+	{
+		TupleTableSlot *copyslot;
+
+		CHECK_FOR_INTERRUPTS();
+
+		if (map != NULL)
+			copyslot = execute_attr_map_slot(map, slot, root_slot);
+		else
+		{
+			/* Deconstruct the tuple */
+			slot_getallattrs(slot);
+			copyslot = slot;
+		}
+
+		/* Format and send the data */
+		CopyOneRowTo(cstate, copyslot);
+
+		/*
+		 * Increment the number of processed tuples, and report the progress.
+		 */
+		pgstat_progress_update_param(PROGRESS_COPY_TUPLES_PROCESSED,
+									 ++(*processed));
+	}
+
+	ExecDropSingleTupleTableSlot(slot);
+
+	if (root_slot != NULL)
+		ExecDropSingleTupleTableSlot(root_slot);
+
+	if (map != NULL)
+		free_attrmap(map);
+
+	table_endscan(scandesc);
 }
 
 /*
@@ -1434,7 +1708,7 @@ copy_dest_destroy(DestReceiver *self)
 DestReceiver *
 CreateCopyDestReceiver(void)
 {
-	DR_copy    *self = (DR_copy *) palloc(sizeof(DR_copy));
+	DR_copy    *self = palloc_object(DR_copy);
 
 	self->pub.receiveSlot = copy_dest_receive;
 	self->pub.rStartup = copy_dest_startup;

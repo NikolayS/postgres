@@ -4,7 +4,7 @@
  *	  definition of the "policy" system catalog (pg_policy)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_policy.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_policy
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_policy,3256,PolicyRelationId)
 {
 	Oid			oid;			/* oid */
@@ -42,6 +44,8 @@ CATALOG(pg_policy,3256,PolicyRelationId)
 	pg_node_tree polwithcheck;	/* WITH CHECK quals. */
 #endif
 } FormData_pg_policy;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_policy corresponds to a pointer to a row with

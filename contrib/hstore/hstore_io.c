@@ -67,7 +67,7 @@ prssyntaxerror(HSParser *state)
 	errsave(state->escontext,
 			(errcode(ERRCODE_SYNTAX_ERROR),
 			 errmsg("syntax error in hstore, near \"%.*s\" at position %d",
-					pg_mblen(state->ptr), state->ptr,
+					pg_mblen_cstr(state->ptr), state->ptr,
 					(int) (state->ptr - state->begin))));
 	/* In soft error situation, return false as convenience for caller */
 	return false;
@@ -221,7 +221,7 @@ parse_hstore(HSParser *state)
 	bool		escaped = false;
 
 	state->plen = 16;
-	state->pairs = (Pairs *) palloc(sizeof(Pairs) * state->plen);
+	state->pairs = palloc_array(Pairs, state->plen);
 	state->pcur = 0;
 	state->ptr = state->begin;
 	state->word = NULL;
@@ -385,7 +385,8 @@ hstoreUniquePairs(Pairs *a, int32 l, int32 *buflen)
 			if (ptr->needfree)
 			{
 				pfree(ptr->key);
-				pfree(ptr->val);
+				if (ptr->val != NULL)
+					pfree(ptr->val);
 			}
 		}
 		else
@@ -684,22 +685,22 @@ hstore_from_arrays(PG_FUNCTION_ARGS)
 
 		if (!value_nulls || value_nulls[i])
 		{
-			pairs[i].key = VARDATA(key_datums[i]);
+			pairs[i].key = VARDATA(DatumGetPointer(key_datums[i]));
 			pairs[i].val = NULL;
 			pairs[i].keylen =
-				hstoreCheckKeyLen(VARSIZE(key_datums[i]) - VARHDRSZ);
+				hstoreCheckKeyLen(VARSIZE(DatumGetPointer(key_datums[i])) - VARHDRSZ);
 			pairs[i].vallen = 4;
 			pairs[i].isnull = true;
 			pairs[i].needfree = false;
 		}
 		else
 		{
-			pairs[i].key = VARDATA(key_datums[i]);
-			pairs[i].val = VARDATA(value_datums[i]);
+			pairs[i].key = VARDATA(DatumGetPointer(key_datums[i]));
+			pairs[i].val = VARDATA(DatumGetPointer(value_datums[i]));
 			pairs[i].keylen =
-				hstoreCheckKeyLen(VARSIZE(key_datums[i]) - VARHDRSZ);
+				hstoreCheckKeyLen(VARSIZE(DatumGetPointer(key_datums[i])) - VARHDRSZ);
 			pairs[i].vallen =
-				hstoreCheckValLen(VARSIZE(value_datums[i]) - VARHDRSZ);
+				hstoreCheckValLen(VARSIZE(DatumGetPointer(value_datums[i])) - VARHDRSZ);
 			pairs[i].isnull = false;
 			pairs[i].needfree = false;
 		}
@@ -778,22 +779,22 @@ hstore_from_array(PG_FUNCTION_ARGS)
 
 		if (in_nulls[i * 2 + 1])
 		{
-			pairs[i].key = VARDATA(in_datums[i * 2]);
+			pairs[i].key = VARDATA(DatumGetPointer(in_datums[i * 2]));
 			pairs[i].val = NULL;
 			pairs[i].keylen =
-				hstoreCheckKeyLen(VARSIZE(in_datums[i * 2]) - VARHDRSZ);
+				hstoreCheckKeyLen(VARSIZE(DatumGetPointer(in_datums[i * 2])) - VARHDRSZ);
 			pairs[i].vallen = 4;
 			pairs[i].isnull = true;
 			pairs[i].needfree = false;
 		}
 		else
 		{
-			pairs[i].key = VARDATA(in_datums[i * 2]);
-			pairs[i].val = VARDATA(in_datums[i * 2 + 1]);
+			pairs[i].key = VARDATA(DatumGetPointer(in_datums[i * 2]));
+			pairs[i].val = VARDATA(DatumGetPointer(in_datums[i * 2 + 1]));
 			pairs[i].keylen =
-				hstoreCheckKeyLen(VARSIZE(in_datums[i * 2]) - VARHDRSZ);
+				hstoreCheckKeyLen(VARSIZE(DatumGetPointer(in_datums[i * 2])) - VARHDRSZ);
 			pairs[i].vallen =
-				hstoreCheckValLen(VARSIZE(in_datums[i * 2 + 1]) - VARHDRSZ);
+				hstoreCheckValLen(VARSIZE(DatumGetPointer(in_datums[i * 2 + 1])) - VARHDRSZ);
 			pairs[i].isnull = false;
 			pairs[i].needfree = false;
 		}
@@ -1439,10 +1440,9 @@ hstore_to_jsonb(PG_FUNCTION_ARGS)
 	int			count = HS_COUNT(in);
 	char	   *base = STRPTR(in);
 	HEntry	   *entries = ARRPTR(in);
-	JsonbParseState *state = NULL;
-	JsonbValue *res;
+	JsonbInState state = {0};
 
-	(void) pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 
 	for (i = 0; i < count; i++)
 	{
@@ -1453,7 +1453,7 @@ hstore_to_jsonb(PG_FUNCTION_ARGS)
 		key.val.string.len = HSTORE_KEYLEN(entries, i);
 		key.val.string.val = HSTORE_KEY(entries, base, i);
 
-		(void) pushJsonbValue(&state, WJB_KEY, &key);
+		pushJsonbValue(&state, WJB_KEY, &key);
 
 		if (HSTORE_VALISNULL(entries, i))
 		{
@@ -1465,12 +1465,12 @@ hstore_to_jsonb(PG_FUNCTION_ARGS)
 			val.val.string.len = HSTORE_VALLEN(entries, i);
 			val.val.string.val = HSTORE_VAL(entries, base, i);
 		}
-		(void) pushJsonbValue(&state, WJB_VALUE, &val);
+		pushJsonbValue(&state, WJB_VALUE, &val);
 	}
 
-	res = pushJsonbValue(&state, WJB_END_OBJECT, NULL);
+	pushJsonbValue(&state, WJB_END_OBJECT, NULL);
 
-	PG_RETURN_POINTER(JsonbValueToJsonb(res));
+	PG_RETURN_POINTER(JsonbValueToJsonb(state.result));
 }
 
 PG_FUNCTION_INFO_V1(hstore_to_jsonb_loose);
@@ -1482,13 +1482,12 @@ hstore_to_jsonb_loose(PG_FUNCTION_ARGS)
 	int			count = HS_COUNT(in);
 	char	   *base = STRPTR(in);
 	HEntry	   *entries = ARRPTR(in);
-	JsonbParseState *state = NULL;
-	JsonbValue *res;
+	JsonbInState state = {0};
 	StringInfoData tmp;
 
 	initStringInfo(&tmp);
 
-	(void) pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 
 	for (i = 0; i < count; i++)
 	{
@@ -1499,7 +1498,7 @@ hstore_to_jsonb_loose(PG_FUNCTION_ARGS)
 		key.val.string.len = HSTORE_KEYLEN(entries, i);
 		key.val.string.val = HSTORE_KEY(entries, base, i);
 
-		(void) pushJsonbValue(&state, WJB_KEY, &key);
+		pushJsonbValue(&state, WJB_KEY, &key);
 
 		if (HSTORE_VALISNULL(entries, i))
 		{
@@ -1541,10 +1540,10 @@ hstore_to_jsonb_loose(PG_FUNCTION_ARGS)
 				val.val.string.val = HSTORE_VAL(entries, base, i);
 			}
 		}
-		(void) pushJsonbValue(&state, WJB_VALUE, &val);
+		pushJsonbValue(&state, WJB_VALUE, &val);
 	}
 
-	res = pushJsonbValue(&state, WJB_END_OBJECT, NULL);
+	pushJsonbValue(&state, WJB_END_OBJECT, NULL);
 
-	PG_RETURN_POINTER(JsonbValueToJsonb(res));
+	PG_RETURN_POINTER(JsonbValueToJsonb(state.result));
 }

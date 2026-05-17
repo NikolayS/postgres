@@ -7,7 +7,7 @@
  * common code for calling set-returning functions according to the
  * ReturnSetInfo API.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -30,6 +30,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/tuplestore.h"
 #include "utils/typcache.h"
 
 
@@ -272,6 +273,7 @@ ExecMakeTableFunctionResult(SetExprState *setexpr,
 									   funcrettype,
 									   -1,
 									   0);
+					TupleDescFinalize(tupdesc);
 					rsinfo.setDesc = tupdesc;
 				}
 				MemoryContextSwitchTo(oldcontext);
@@ -776,6 +778,7 @@ init_sexpr(Oid foid, Oid input_collation, Expr *node,
 							   funcrettype,
 							   -1,
 							   0);
+			TupleDescFinalize(tupdesc);
 			sexpr->funcResultDesc = tupdesc;
 			sexpr->funcReturnsTuple = false;
 		}

@@ -1,5 +1,5 @@
 
-# Copyright (c) 2024-2025, PostgreSQL Global Development Group
+# Copyright (c) 2024-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -91,7 +91,7 @@ $node_standby->wait_for_event('checkpointer', 'create-restart-point');
 # Check the logs that the restart point has started on standby.  This is
 # optional, but let's be sure.
 ok( $node_standby->log_contains(
-		"restartpoint starting: immediate wait", $logstart),
+		"restartpoint starting: fast wait", $logstart),
 	"restartpoint has started");
 
 # Trigger promotion during the restart point.

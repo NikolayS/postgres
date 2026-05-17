@@ -6,7 +6,7 @@
  * archive_command GUC) to copy write-ahead log files.  It is used as the
  * default, but other modules may define their own custom archiving logic.
  *
- * Copyright (c) 2022-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2022-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/archive/shell_archive.c
@@ -22,6 +22,7 @@
 #include "archive/shell_archive.h"
 #include "common/percentrepl.h"
 #include "pgstat.h"
+#include "utils/wait_event.h"
 
 static bool shell_archive_configured(ArchiveModuleState *state);
 static bool shell_archive_file(ArchiveModuleState *state,

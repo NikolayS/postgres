@@ -7,7 +7,7 @@
 # - wait_event_funcs_data.c (if --code is passed)
 # - wait_event_types.sgml (if --docs is passed)
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/backend/utils/activity/generate-wait_event_types.pl
@@ -85,7 +85,7 @@ while (<$wait_event_names>)
 # Sort the lines based on the second column.
 # uc() is being used to force the comparison to be case-insensitive.
 my @lines_sorted =
-  sort { uc((split(/\t/, $a))[1]) cmp uc((split(/\t/, $b))[1]) } @lines;
+  sort { uc((split(/\t+/, $a))[1]) cmp uc((split(/\t+/, $b))[1]) } @lines;
 
 # If we are generating code, concat @lines_sorted and then
 # @abi_compatibility_lines.
@@ -101,7 +101,7 @@ foreach my $line (@lines_sorted)
 	  unless $line =~ /^(\w+)\t+(\w+)\t+("\w.*\.")$/;
 
 	(my $waitclassname, my $waiteventname, my $waitevendocsentence) =
-	  split(/\t/, $line);
+	  ($1, $2, $3);
 
 	# Generate the element name for the enums based on the
 	# description.  The C symbols are prefixed with "WAIT_EVENT_".
@@ -150,7 +150,7 @@ if ($gen_code)
  * %s
  *    Generated wait events infrastructure code
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES
@@ -334,12 +334,12 @@ close $wait_event_names;
 sub usage
 {
 	die <<EOM;
-Usage: perl  [--output <path>] [--code ] [ --sgml ] input_file
+Usage: perl  [--output <path>] [--code ] [ --docs ] input_file
 
 Options:
     --outdir         Output directory (default '.')
     --code           Generate C and header files.
-    --sgml           Generate wait_event_types.sgml.
+    --docs           Generate wait_event_types.sgml.
 
 generate-wait_event_types.pl generates the SGML documentation and code
 related to wait events.  This should use wait_event_names.txt in input, or

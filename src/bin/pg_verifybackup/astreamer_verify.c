@@ -5,7 +5,7 @@
  * Archive streamer for verification of a tar format backup (including
  * compressed tar format backups).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * src/bin/pg_verifybackup/astreamer_verify.c
  *
@@ -69,7 +69,7 @@ astreamer_verify_content_new(astreamer *next, verifier_context *context,
 {
 	astreamer_verify *streamer;
 
-	streamer = palloc0(sizeof(astreamer_verify));
+	streamer = palloc0_object(astreamer_verify);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_verify_ops;
 
@@ -79,7 +79,7 @@ astreamer_verify_content_new(astreamer *next, verifier_context *context,
 	streamer->tblspc_oid = tblspc_oid;
 
 	if (!context->skip_checksums)
-		streamer->checksum_ctx = pg_malloc(sizeof(pg_checksum_context));
+		streamer->checksum_ctx = pg_malloc_object(pg_checksum_context);
 
 	return &streamer->base;
 }
@@ -165,7 +165,7 @@ member_verify_header(astreamer *streamer, astreamer_member *member)
 	char		pathname[MAXPGPATH];
 
 	/* We are only interested in normal files. */
-	if (member->is_directory || member->is_link)
+	if (!member->is_regular)
 		return;
 
 	/*
@@ -268,7 +268,7 @@ member_compute_checksum(astreamer *streamer, astreamer_member *member,
 	mystreamer->checksum_bytes += len;
 
 	/* Feed these bytes to the checksum calculation. */
-	if (pg_checksum_update(checksum_ctx, (uint8 *) data, len) < 0)
+	if (pg_checksum_update(checksum_ctx, (const uint8 *) data, len) < 0)
 	{
 		report_backup_error(mystreamer->context,
 							"could not update checksum of file \"%s\"",

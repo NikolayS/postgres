@@ -2,7 +2,7 @@
  * ginxlog.h
  *	  header file for postgres inverted index xlog implementation.
  *
- *	Copyright (c) 2006-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2006-2026, PostgreSQL Global Development Group
  *
  *	src/include/access/ginxlog.h
  *--------------------------------------------------------------------------
@@ -179,6 +179,9 @@ typedef struct ginxlogUpdateMeta
 
 #define XLOG_GIN_INSERT_LISTPAGE  0x70
 
+/*
+ * Backup Blk 0: list page with inserted tuples
+ */
 typedef struct ginxlogInsertListPage
 {
 	BlockNumber rightlink;

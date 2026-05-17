@@ -4,7 +4,7 @@
  *	  Copy functions for Postgres tree nodes.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -204,7 +204,7 @@ copyObjectImpl(const void *from)
 
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(from));
-			retval = 0;			/* keep compiler quiet */
+			retval = NULL;		/* keep compiler quiet */
 			break;
 	}
 

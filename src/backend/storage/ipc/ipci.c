@@ -3,7 +3,7 @@
  * ipci.c
  *	  POSTGRES inter-process communication initialization code.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,43 +14,16 @@
  */
 #include "postgres.h"
 
-#include "access/clog.h"
-#include "access/commit_ts.h"
-#include "access/multixact.h"
-#include "access/nbtree.h"
-#include "access/subtrans.h"
-#include "access/syncscan.h"
-#include "access/transam.h"
-#include "access/twophase.h"
-#include "access/xlogprefetcher.h"
-#include "access/xlogrecovery.h"
-#include "commands/async.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "postmaster/autovacuum.h"
-#include "postmaster/bgworker_internals.h"
-#include "postmaster/bgwriter.h"
-#include "postmaster/walsummarizer.h"
-#include "replication/logicallauncher.h"
-#include "replication/origin.h"
-#include "replication/slot.h"
-#include "replication/slotsync.h"
-#include "replication/walreceiver.h"
-#include "replication/walsender.h"
-#include "storage/aio_subsys.h"
-#include "storage/bufmgr.h"
 #include "storage/dsm.h"
-#include "storage/dsm_registry.h"
 #include "storage/ipc.h"
+#include "storage/lock.h"
 #include "storage/pg_shmem.h"
-#include "storage/pmsignal.h"
-#include "storage/predicate.h"
 #include "storage/proc.h"
-#include "storage/procarray.h"
-#include "storage/procsignal.h"
-#include "storage/sinvaladt.h"
+#include "storage/shmem_internal.h"
+#include "storage/subsystems.h"
 #include "utils/guc.h"
-#include "utils/injection_point.h"
 
 /* GUCs */
 int			shared_memory_type = DEFAULT_SHARED_MEMORY_TYPE;
@@ -58,8 +31,6 @@ int			shared_memory_type = DEFAULT_SHARED_MEMORY_TYPE;
 shmem_startup_hook_type shmem_startup_hook = NULL;
 
 static Size total_addin_request = 0;
-
-static void CreateOrAttachShmemStructs(void);
 
 /*
  * RequestAddinShmemSpace
@@ -80,23 +51,12 @@ RequestAddinShmemSpace(Size size)
 
 /*
  * CalculateShmemSize
- *		Calculates the amount of shared memory and number of semaphores needed.
- *
- * If num_semaphores is not NULL, it will be set to the number of semaphores
- * required.
+ *		Calculates the amount of shared memory needed.
  */
 Size
-CalculateShmemSize(int *num_semaphores)
+CalculateShmemSize(void)
 {
 	Size		size;
-	int			numSemas;
-
-	/* Compute number of semaphores we'll need */
-	numSemas = ProcGlobalSemas();
-
-	/* Return the number of semaphores if requested by the caller */
-	if (num_semaphores)
-		*num_semaphores = numSemas;
 
 	/*
 	 * Size of the Postgres shared-memory block is estimated via moderately-
@@ -108,48 +68,7 @@ CalculateShmemSize(int *num_semaphores)
 	 * during the actual allocation phase.
 	 */
 	size = 100000;
-	size = add_size(size, PGSemaphoreShmemSize(numSemas));
-	size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
-											 sizeof(ShmemIndexEnt)));
-	size = add_size(size, dsm_estimate_size());
-	size = add_size(size, DSMRegistryShmemSize());
-	size = add_size(size, BufferManagerShmemSize());
-	size = add_size(size, LockManagerShmemSize());
-	size = add_size(size, PredicateLockShmemSize());
-	size = add_size(size, ProcGlobalShmemSize());
-	size = add_size(size, XLogPrefetchShmemSize());
-	size = add_size(size, VarsupShmemSize());
-	size = add_size(size, XLOGShmemSize());
-	size = add_size(size, XLogRecoveryShmemSize());
-	size = add_size(size, CLOGShmemSize());
-	size = add_size(size, CommitTsShmemSize());
-	size = add_size(size, SUBTRANSShmemSize());
-	size = add_size(size, TwoPhaseShmemSize());
-	size = add_size(size, BackgroundWorkerShmemSize());
-	size = add_size(size, MultiXactShmemSize());
-	size = add_size(size, LWLockShmemSize());
-	size = add_size(size, ProcArrayShmemSize());
-	size = add_size(size, BackendStatusShmemSize());
-	size = add_size(size, SharedInvalShmemSize());
-	size = add_size(size, PMSignalShmemSize());
-	size = add_size(size, ProcSignalShmemSize());
-	size = add_size(size, CheckpointerShmemSize());
-	size = add_size(size, AutoVacuumShmemSize());
-	size = add_size(size, ReplicationSlotsShmemSize());
-	size = add_size(size, ReplicationOriginShmemSize());
-	size = add_size(size, WalSndShmemSize());
-	size = add_size(size, WalRcvShmemSize());
-	size = add_size(size, WalSummarizerShmemSize());
-	size = add_size(size, PgArchShmemSize());
-	size = add_size(size, ApplyLauncherShmemSize());
-	size = add_size(size, BTreeShmemSize());
-	size = add_size(size, SyncScanShmemSize());
-	size = add_size(size, AsyncShmemSize());
-	size = add_size(size, StatsShmemSize());
-	size = add_size(size, WaitEventCustomShmemSize());
-	size = add_size(size, InjectionPointShmemSize());
-	size = add_size(size, SlotSyncShmemSize());
-	size = add_size(size, AioShmemSize());
+	size = add_size(size, ShmemGetRequestedSize());
 
 	/* include additional requested shmem from preload libraries */
 	size = add_size(size, total_addin_request);
@@ -182,7 +101,8 @@ AttachSharedMemoryStructs(void)
 	 */
 	InitializeFastPathLocks();
 
-	CreateOrAttachShmemStructs();
+	/* Establish pointers to all shared memory areas in this backend */
+	ShmemAttachRequested();
 
 	/*
 	 * Now give loadable modules a chance to set up their shmem allocations
@@ -202,12 +122,11 @@ CreateSharedMemoryAndSemaphores(void)
 	PGShmemHeader *shim;
 	PGShmemHeader *seghdr;
 	Size		size;
-	int			numSemas;
 
 	Assert(!IsUnderPostmaster);
 
 	/* Compute the size of the shared-memory block */
-	size = CalculateShmemSize(&numSemas);
+	size = CalculateShmemSize();
 	elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
 
 	/*
@@ -222,20 +141,13 @@ CreateSharedMemoryAndSemaphores(void)
 	Assert(strcmp("unknown",
 				  GetConfigOption("huge_pages_status", false, false)) != 0);
 
-	InitShmemAccess(seghdr);
-
-	/*
-	 * Create semaphores
-	 */
-	PGReserveSemaphores(numSemas);
-
 	/*
 	 * Set up shared memory allocation mechanism
 	 */
-	InitShmemAllocation();
+	InitShmemAllocator(seghdr);
 
-	/* Initialize subsystems */
-	CreateOrAttachShmemStructs();
+	/* Initialize all shmem areas */
+	ShmemInitRequested();
 
 	/* Initialize dynamic shared memory facilities. */
 	dsm_postmaster_startup(shim);
@@ -248,101 +160,23 @@ CreateSharedMemoryAndSemaphores(void)
 }
 
 /*
- * Initialize various subsystems, setting up their data structures in
- * shared memory.
- *
- * This is called by the postmaster or by a standalone backend.
- * It is also called by a backend forked from the postmaster in the
- * EXEC_BACKEND case.  In the latter case, the shared memory segment
- * already exists and has been physically attached to, but we have to
- * initialize pointers in local memory that reference the shared structures,
- * because we didn't inherit the correct pointer values from the postmaster
- * as we do in the fork() scenario.  The easiest way to do that is to run
- * through the same code as before.  (Note that the called routines mostly
- * check IsUnderPostmaster, rather than EXEC_BACKEND, to detect this case.
- * This is a bit code-wasteful and could be cleaned up.)
+ * Early initialization of various subsystems, giving them a chance to
+ * register their shared memory needs before the shared memory segment is
+ * allocated.
  */
-static void
-CreateOrAttachShmemStructs(void)
+void
+RegisterBuiltinShmemCallbacks(void)
 {
 	/*
-	 * Now initialize LWLocks, which do shared memory allocation and are
-	 * needed for InitShmemIndex.
+	 * Call RegisterShmemCallbacks(...) on each subsystem listed in
+	 * subsystemlist.h
 	 */
-	CreateLWLocks();
+#define PG_SHMEM_SUBSYSTEM(subsystem_callbacks) \
+	RegisterShmemCallbacks(&(subsystem_callbacks));
 
-	/*
-	 * Set up shmem.c index hashtable
-	 */
-	InitShmemIndex();
+#include "storage/subsystemlist.h"
 
-	dsm_shmem_init();
-	DSMRegistryShmemInit();
-
-	/*
-	 * Set up xlog, clog, and buffers
-	 */
-	VarsupShmemInit();
-	XLOGShmemInit();
-	XLogPrefetchShmemInit();
-	XLogRecoveryShmemInit();
-	CLOGShmemInit();
-	CommitTsShmemInit();
-	SUBTRANSShmemInit();
-	MultiXactShmemInit();
-	BufferManagerShmemInit();
-
-	/*
-	 * Set up lock manager
-	 */
-	LockManagerShmemInit();
-
-	/*
-	 * Set up predicate lock manager
-	 */
-	PredicateLockShmemInit();
-
-	/*
-	 * Set up process table
-	 */
-	if (!IsUnderPostmaster)
-		InitProcGlobal();
-	ProcArrayShmemInit();
-	BackendStatusShmemInit();
-	TwoPhaseShmemInit();
-	BackgroundWorkerShmemInit();
-
-	/*
-	 * Set up shared-inval messaging
-	 */
-	SharedInvalShmemInit();
-
-	/*
-	 * Set up interprocess signaling mechanisms
-	 */
-	PMSignalShmemInit();
-	ProcSignalShmemInit();
-	CheckpointerShmemInit();
-	AutoVacuumShmemInit();
-	ReplicationSlotsShmemInit();
-	ReplicationOriginShmemInit();
-	WalSndShmemInit();
-	WalRcvShmemInit();
-	WalSummarizerShmemInit();
-	PgArchShmemInit();
-	ApplyLauncherShmemInit();
-	SlotSyncShmemInit();
-
-	/*
-	 * Set up other modules that need some shared memory space
-	 */
-	BTreeShmemInit();
-	SyncScanShmemInit();
-	AsyncShmemInit();
-	StatsShmemInit();
-	WaitEventCustomShmemInit();
-	InjectionPointShmemInit();
-	AioShmemInit();
+#undef PG_SHMEM_SUBSYSTEM
 }
 
 /*
@@ -358,12 +192,11 @@ InitializeShmemGUCs(void)
 	Size		size_b;
 	Size		size_mb;
 	Size		hp_size;
-	int			num_semas;
 
 	/*
 	 * Calculate the shared memory size and round up to the nearest megabyte.
 	 */
-	size_b = CalculateShmemSize(&num_semas);
+	size_b = CalculateShmemSize();
 	size_mb = add_size(size_b, (1024 * 1024) - 1) / (1024 * 1024);
 	sprintf(buf, "%zu", size_mb);
 	SetConfigOption("shared_memory_size", buf,
@@ -377,12 +210,14 @@ InitializeShmemGUCs(void)
 	{
 		Size		hp_required;
 
-		hp_required = add_size(size_b / hp_size, 1);
+		hp_required = size_b / hp_size;
+		if (size_b % hp_size != 0)
+			hp_required = add_size(hp_required, 1);
 		sprintf(buf, "%zu", hp_required);
 		SetConfigOption("shared_memory_size_in_huge_pages", buf,
 						PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 	}
 
-	sprintf(buf, "%d", num_semas);
+	sprintf(buf, "%d", ProcGlobalSemas());
 	SetConfigOption("num_os_semaphores", buf, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 }

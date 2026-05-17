@@ -316,6 +316,21 @@ SELECT * FROM rw_view15;
   3 | UNSPECIFIED
 (6 rows)
 
+INSERT INTO rw_view15 (a) VALUES (3)
+  ON CONFLICT (a) DO UPDATE SET a = excluded.a WHERE excluded.upper = 'UNSPECIFIED'
+  RETURNING old, new;
+       old       |       new       
+-----------------+-----------------
+ (3,UNSPECIFIED) | (3,UNSPECIFIED)
+(1 row)
+
+INSERT INTO rw_view15 (a) VALUES (3)
+  ON CONFLICT (a) DO SELECT WHERE excluded.upper = 'UNSPECIFIED' RETURNING old, new;
+       old       |       new       
+-----------------+-----------------
+ (3,UNSPECIFIED) | (3,UNSPECIFIED)
+(1 row)
+
 SELECT * FROM rw_view15;
  a  |    upper    
 ----+-------------
@@ -2750,7 +2765,7 @@ EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (5);
 ---------------------------------------------------------
  Insert on base_tbl b
    ->  Result
-   SubPlan 1
+   SubPlan exists_1
      ->  Index Only Scan using ref_tbl_pkey on ref_tbl r
            Index Cond: (a = b.a)
 (5 rows)
@@ -2764,7 +2779,7 @@ EXPLAIN (costs off) UPDATE rw_view1 SET a = a + 5;
          ->  Seq Scan on base_tbl b
          ->  Hash
                ->  Seq Scan on ref_tbl r
-   SubPlan 1
+   SubPlan exists_1
      ->  Index Only Scan using ref_tbl_pkey on ref_tbl r_1
            Index Cond: (a = b.a)
 (9 rows)
@@ -3167,21 +3182,21 @@ EXPLAIN (costs off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
 DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
 NOTICE:  snooped value: Row 1
 EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (2, 'New row 2');
-                        QUERY PLAN                         
------------------------------------------------------------
+                           QUERY PLAN                            
+-----------------------------------------------------------------
  Insert on base_tbl
-   InitPlan 1
+   InitPlan exists_1
      ->  Index Only Scan using base_tbl_pkey on base_tbl t
            Index Cond: (id = 2)
    ->  Result
-         One-Time Filter: ((InitPlan 1).col1 IS NOT TRUE)
+         One-Time Filter: ((InitPlan exists_1).col1 IS NOT TRUE)
  
  Update on base_tbl
-   InitPlan 1
+   InitPlan exists_1
      ->  Index Only Scan using base_tbl_pkey on base_tbl t
            Index Cond: (id = 2)
    ->  Result
-         One-Time Filter: (InitPlan 1).col1
+         One-Time Filter: (InitPlan exists_1).col1
          ->  Index Scan using base_tbl_pkey on base_tbl
                Index Cond: (id = 2)
 (15 rows)
@@ -3240,8 +3255,8 @@ SELECT * FROM v1 WHERE a=8;
 
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
  Update on public.t1
    Update on public.t1 t1_1
    Update on public.t11 t1_2
@@ -3253,8 +3268,8 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
                ->  Index Scan using t1_a_idx on public.t1 t1_1
                      Output: t1_1.tableoid, t1_1.ctid
                      Index Cond: ((t1_1.a > 5) AND (t1_1.a < 7))
-                     Filter: ((t1_1.a <> 6) AND EXISTS(SubPlan 1) AND snoop(t1_1.a) AND leakproof(t1_1.a))
-                     SubPlan 1
+                     Filter: ((t1_1.a <> 6) AND EXISTS(SubPlan exists_1) AND snoop(t1_1.a) AND leakproof(t1_1.a))
+                     SubPlan exists_1
                        ->  Append
                              ->  Seq Scan on public.t12 t12_1
                                    Filter: (t12_1.a = t1_1.a)
@@ -3263,15 +3278,15 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
                ->  Index Scan using t11_a_idx on public.t11 t1_2
                      Output: t1_2.tableoid, t1_2.ctid
                      Index Cond: ((t1_2.a > 5) AND (t1_2.a < 7))
-                     Filter: ((t1_2.a <> 6) AND EXISTS(SubPlan 1) AND snoop(t1_2.a) AND leakproof(t1_2.a))
+                     Filter: ((t1_2.a <> 6) AND EXISTS(SubPlan exists_1) AND snoop(t1_2.a) AND leakproof(t1_2.a))
                ->  Index Scan using t12_a_idx on public.t12 t1_3
                      Output: t1_3.tableoid, t1_3.ctid
                      Index Cond: ((t1_3.a > 5) AND (t1_3.a < 7))
-                     Filter: ((t1_3.a <> 6) AND EXISTS(SubPlan 1) AND snoop(t1_3.a) AND leakproof(t1_3.a))
+                     Filter: ((t1_3.a <> 6) AND EXISTS(SubPlan exists_1) AND snoop(t1_3.a) AND leakproof(t1_3.a))
                ->  Index Scan using t111_a_idx on public.t111 t1_4
                      Output: t1_4.tableoid, t1_4.ctid
                      Index Cond: ((t1_4.a > 5) AND (t1_4.a < 7))
-                     Filter: ((t1_4.a <> 6) AND EXISTS(SubPlan 1) AND snoop(t1_4.a) AND leakproof(t1_4.a))
+                     Filter: ((t1_4.a <> 6) AND EXISTS(SubPlan exists_1) AND snoop(t1_4.a) AND leakproof(t1_4.a))
 (30 rows)
 
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
@@ -3287,8 +3302,8 @@ SELECT * FROM t1 WHERE a=100; -- Nothing should have been changed to 100
 
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  Update on public.t1
    Update on public.t1 t1_1
    Update on public.t11 t1_2
@@ -3300,8 +3315,8 @@ UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
                ->  Index Scan using t1_a_idx on public.t1 t1_1
                      Output: t1_1.a, t1_1.tableoid, t1_1.ctid
                      Index Cond: ((t1_1.a > 5) AND (t1_1.a = 8))
-                     Filter: (EXISTS(SubPlan 1) AND snoop(t1_1.a) AND leakproof(t1_1.a))
-                     SubPlan 1
+                     Filter: (EXISTS(SubPlan exists_1) AND snoop(t1_1.a) AND leakproof(t1_1.a))
+                     SubPlan exists_1
                        ->  Append
                              ->  Seq Scan on public.t12 t12_1
                                    Filter: (t12_1.a = t1_1.a)
@@ -3310,15 +3325,15 @@ UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
                ->  Index Scan using t11_a_idx on public.t11 t1_2
                      Output: t1_2.a, t1_2.tableoid, t1_2.ctid
                      Index Cond: ((t1_2.a > 5) AND (t1_2.a = 8))
-                     Filter: (EXISTS(SubPlan 1) AND snoop(t1_2.a) AND leakproof(t1_2.a))
+                     Filter: (EXISTS(SubPlan exists_1) AND snoop(t1_2.a) AND leakproof(t1_2.a))
                ->  Index Scan using t12_a_idx on public.t12 t1_3
                      Output: t1_3.a, t1_3.tableoid, t1_3.ctid
                      Index Cond: ((t1_3.a > 5) AND (t1_3.a = 8))
-                     Filter: (EXISTS(SubPlan 1) AND snoop(t1_3.a) AND leakproof(t1_3.a))
+                     Filter: (EXISTS(SubPlan exists_1) AND snoop(t1_3.a) AND leakproof(t1_3.a))
                ->  Index Scan using t111_a_idx on public.t111 t1_4
                      Output: t1_4.a, t1_4.tableoid, t1_4.ctid
                      Index Cond: ((t1_4.a > 5) AND (t1_4.a = 8))
-                     Filter: (EXISTS(SubPlan 1) AND snoop(t1_4.a) AND leakproof(t1_4.a))
+                     Filter: (EXISTS(SubPlan exists_1) AND snoop(t1_4.a) AND leakproof(t1_4.a))
 (30 rows)
 
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
@@ -3502,10 +3517,10 @@ CREATE RULE v1_upd_rule AS ON UPDATE TO v1 DO INSTEAD
 CREATE VIEW v2 WITH (security_barrier = true) AS
   SELECT * FROM v1 WHERE EXISTS (SELECT 1);
 EXPLAIN (COSTS OFF) UPDATE v2 SET a = 1;
-                          QUERY PLAN                          
---------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Update on t1
-   InitPlan 1
+   InitPlan exists_1
      ->  Result
    ->  Merge Join
          Merge Cond: (t1.a = v1.a)
@@ -3516,7 +3531,7 @@ EXPLAIN (COSTS OFF) UPDATE v2 SET a = 1;
                Sort Key: v1.a
                ->  Subquery Scan on v1
                      ->  Result
-                           One-Time Filter: (InitPlan 1).col1
+                           One-Time Filter: (InitPlan exists_1).col1
                            ->  Seq Scan on t1 t1_1
 (14 rows)
 
@@ -3646,7 +3661,7 @@ ERROR:  new row violates check option for view "wcowrtest_v2"
 DETAIL:  Failing row contains (2, no such row in sometable).
 drop view wcowrtest_v, wcowrtest_v2;
 drop table wcowrtest, sometable;
--- Check INSERT .. ON CONFLICT DO UPDATE works correctly when the view's
+-- Check INSERT .. ON CONFLICT DO SELECT/UPDATE works correctly when the view's
 -- columns are named and ordered differently than the underlying table's.
 create table uv_iocu_tab (a text unique, b float);
 insert into uv_iocu_tab values ('xyxyxy', 0);
@@ -3666,6 +3681,13 @@ select * from uv_iocu_tab;
    a    | b 
 --------+---
  xyxyxy | 1
+(1 row)
+
+insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
+   on conflict (a) do select where uv_iocu_view.c = 2 and excluded.c = 2 returning *;
+ b | c |   a    | two 
+---+---+--------+-----
+ 1 | 2 | xyxyxy | 2.0
 (1 row)
 
 -- OK to access view columns that are not present in underlying base
@@ -3700,6 +3722,38 @@ select * from uv_iocu_tab;
 
 drop view uv_iocu_view;
 drop table uv_iocu_tab;
+-- Check UPDATE FOR PORTION OF works correctly
+create table uv_fpo_tab (id int4range, valid_at tsrange, b float,
+    constraint pk_uv_fpo_tab primary key (id, valid_at without overlaps));
+insert into uv_fpo_tab values ('[1,1]', '[2020-01-01, 2030-01-01)', 0);
+create view uv_fpo_view as
+    select b, b+1 as c, valid_at, id, '2.0'::text as two from uv_fpo_tab;
+insert into uv_fpo_view (id, valid_at, b) values ('[1,1]', '[2010-01-01, 2020-01-01)', 1);
+select * from uv_fpo_view order by id, valid_at;
+ b | c |                        valid_at                         |  id   | two 
+---+---+---------------------------------------------------------+-------+-----
+ 1 | 2 | ["Fri Jan 01 00:00:00 2010","Wed Jan 01 00:00:00 2020") | [1,2) | 2.0
+ 0 | 1 | ["Wed Jan 01 00:00:00 2020","Tue Jan 01 00:00:00 2030") | [1,2) | 2.0
+(2 rows)
+
+update uv_fpo_view for portion of valid_at from '2015-01-01' to '2020-01-01' set b = 2 where id = '[1,1]';
+select * from uv_fpo_view order by id, valid_at;
+ b | c |                        valid_at                         |  id   | two 
+---+---+---------------------------------------------------------+-------+-----
+ 1 | 2 | ["Fri Jan 01 00:00:00 2010","Thu Jan 01 00:00:00 2015") | [1,2) | 2.0
+ 2 | 3 | ["Thu Jan 01 00:00:00 2015","Wed Jan 01 00:00:00 2020") | [1,2) | 2.0
+ 0 | 1 | ["Wed Jan 01 00:00:00 2020","Tue Jan 01 00:00:00 2030") | [1,2) | 2.0
+(3 rows)
+
+delete from uv_fpo_view for portion of valid_at from '2017-01-01' to '2022-01-01' where id = '[1,1]';
+select * from uv_fpo_view order by id, valid_at;
+ b | c |                        valid_at                         |  id   | two 
+---+---+---------------------------------------------------------+-------+-----
+ 1 | 2 | ["Fri Jan 01 00:00:00 2010","Thu Jan 01 00:00:00 2015") | [1,2) | 2.0
+ 2 | 3 | ["Thu Jan 01 00:00:00 2015","Sun Jan 01 00:00:00 2017") | [1,2) | 2.0
+ 0 | 1 | ["Sat Jan 01 00:00:00 2022","Tue Jan 01 00:00:00 2030") | [1,2) | 2.0
+(3 rows)
+
 -- Test whole-row references to the view
 create table uv_iocu_tab (a int unique, b text);
 create view uv_iocu_view as
@@ -3731,6 +3785,25 @@ select * from uv_iocu_view;
  Rejected: (y,1,"(1,y)") |  1 | (1,"Rejected: (y,1,""(1,y)"")")
 (1 row)
 
+explain (costs off)
+insert into uv_iocu_view (aa,bb) values (1,'Rejected: (y,1,"(1,y)")')
+   on conflict (aa) do select where uv_iocu_view.* = excluded.* returning *;
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Insert on uv_iocu_tab
+   Conflict Resolution: SELECT
+   Conflict Arbiter Indexes: uv_iocu_tab_a_key
+   Conflict Filter: (ROW(uv_iocu_tab.b, uv_iocu_tab.a, (uv_iocu_tab.*)::text) = ROW(excluded.b, excluded.a, (excluded.*)::text))
+   ->  Result
+(5 rows)
+
+insert into uv_iocu_view (aa,bb) values (1,'Rejected: (y,1,"(1,y)")')
+   on conflict (aa) do select where uv_iocu_view.* = excluded.* returning *;
+           bb            | aa |               cc                
+-------------------------+----+---------------------------------
+ Rejected: (y,1,"(1,y)") |  1 | (1,"Rejected: (y,1,""(1,y)"")")
+(1 row)
+
 -- Test omitting a column of the base relation
 delete from uv_iocu_view;
 insert into uv_iocu_view (aa,bb) values (1,'x');
@@ -3751,10 +3824,24 @@ select * from uv_iocu_view;
  Rejected: ("table default",1,"(1,""table default"")") |  1 | (1,"Rejected: (""table default"",1,""(1,""""table default"""")"")")
 (1 row)
 
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do select returning *;
+                          bb                           | aa |                                 cc                                  
+-------------------------------------------------------+----+---------------------------------------------------------------------
+ Rejected: ("table default",1,"(1,""table default"")") |  1 | (1,"Rejected: (""table default"",1,""(1,""""table default"""")"")")
+(1 row)
+
 alter view uv_iocu_view alter column bb set default 'view default';
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*;
 select * from uv_iocu_view;
+                         bb                          | aa |                                cc                                 
+-----------------------------------------------------+----+-------------------------------------------------------------------
+ Rejected: ("view default",1,"(1,""view default"")") |  1 | (1,"Rejected: (""view default"",1,""(1,""""view default"""")"")")
+(1 row)
+
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do select returning *;
                          bb                          | aa |                                cc                                 
 -----------------------------------------------------+----+-------------------------------------------------------------------
  Rejected: ("view default",1,"(1,""view default"")") |  1 | (1,"Rejected: (""view default"",1,""(1,""""view default"""")"")")
@@ -3767,7 +3854,7 @@ ERROR:  cannot insert into column "cc" of view "uv_iocu_view"
 DETAIL:  View columns that are not columns of their base relation are not updatable.
 drop view uv_iocu_view;
 drop table uv_iocu_tab;
--- ON CONFLICT DO UPDATE permissions checks
+-- ON CONFLICT DO SELECT/UPDATE permissions checks
 create user regress_view_user1;
 create user regress_view_user2;
 set session authorization regress_view_user1;
@@ -3791,6 +3878,16 @@ insert into rw_view1 values ('zzz',2.0,1)
 insert into rw_view1 values ('zzz',2.0,1)
   on conflict (aa) do update set cc = 3.0; -- Not allowed
 ERROR:  permission denied for view rw_view1
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do select for update returning cc; -- Not allowed
+ERROR:  permission denied for view rw_view1
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do select for update returning aa, bb;
+ aa |   bb   
+----+--------
+  1 | yyyxxx
+(1 row)
+
 reset session authorization;
 select * from base_tbl;
  a |   b    | c 
@@ -3807,9 +3904,19 @@ create view rw_view2 as select b as bb, c as cc, a as aa from base_tbl;
 insert into rw_view2 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb; -- Not allowed
 ERROR:  permission denied for table base_tbl
+insert into rw_view2 (aa,bb) values (1,'xxx')
+  on conflict (aa) do select returning 1;          -- Not allowed
+ERROR:  permission denied for table base_tbl
 create view rw_view3 as select b as bb, a as aa from base_tbl;
 insert into rw_view3 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb; -- OK
+insert into rw_view3 (aa,bb) values (1,'xxx')
+  on conflict (aa) do select returning aa, bb;     -- OK
+ aa | bb  
+----+-----
+  1 | xxx
+(1 row)
+
 reset session authorization;
 select * from base_tbl;
  a |  b  | c 
@@ -3821,6 +3928,9 @@ set session authorization regress_view_user2;
 create view rw_view4 as select aa, bb, cc FROM rw_view1;
 insert into rw_view4 (aa,bb) values (1,'yyy')
   on conflict (aa) do update set bb = excluded.bb; -- Not allowed
+ERROR:  permission denied for view rw_view1
+insert into rw_view4 (aa,bb) values (1,'yyy')
+  on conflict (aa) do select returning 1; -- Not allowed
 ERROR:  permission denied for view rw_view1
 create view rw_view5 as select aa, bb FROM rw_view1;
 insert into rw_view5 (aa,bb) values (1,'yyy')

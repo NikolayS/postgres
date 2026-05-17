@@ -4,7 +4,7 @@
  *	  Helper functions for table AMs implementing compressed or
  *    out-of-line storage of varlena attributes.
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * src/include/access/toast_helper.h
  *
@@ -29,7 +29,7 @@
  */
 typedef struct
 {
-	struct varlena *tai_oldexternal;
+	varlena    *tai_oldexternal;
 	int32		tai_size;
 	uint8		tai_colflags;
 	char		tai_compression;
@@ -107,7 +107,7 @@ extern int	toast_tuple_find_biggest_attribute(ToastTupleContext *ttc,
 											   bool check_main);
 extern void toast_tuple_try_compression(ToastTupleContext *ttc, int attribute);
 extern void toast_tuple_externalize(ToastTupleContext *ttc, int attribute,
-									int options);
+									uint32 options);
 extern void toast_tuple_cleanup(ToastTupleContext *ttc);
 
 extern void toast_delete_external(Relation rel, const Datum *values, const bool *isnull,

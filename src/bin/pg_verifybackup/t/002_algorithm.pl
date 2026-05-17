@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Verify that we can take and verify backups with various checksum types.
 
@@ -30,10 +30,6 @@ sub test_checksums
 	{
 		# Add switch to get a tar-format backup
 		push @backup, ('--format' => 'tar');
-
-		# Add switch to skip WAL verification, which is not yet supported for
-		# tar-format backups
-		push @verify, ('--no-parse-wal');
 	}
 
 	# A backup with a bogus algorithm should fail.

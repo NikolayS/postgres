@@ -80,7 +80,7 @@
  * general, after logging in, but let's do what we can here.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/libpq/auth-scram.c
@@ -133,8 +133,6 @@ typedef enum
 typedef struct
 {
 	scram_state_enum state;
-
-	const char *username;		/* username from startup packet */
 
 	Port	   *port;
 	bool		channel_binding_in_use;
@@ -242,7 +240,7 @@ scram_init(Port *port, const char *selected_mech, const char *shadow_pass)
 	scram_state *state;
 	bool		got_secret;
 
-	state = (scram_state *) palloc0(sizeof(scram_state));
+	state = palloc0_object(scram_state);
 	state->port = port;
 	state->state = SCRAM_AUTH_INIT;
 
@@ -1492,8 +1490,8 @@ scram_mock_salt(const char *username, pg_cryptohash_type hash_type,
 
 	ctx = pg_cryptohash_create(hash_type);
 	if (pg_cryptohash_init(ctx) < 0 ||
-		pg_cryptohash_update(ctx, (uint8 *) username, strlen(username)) < 0 ||
-		pg_cryptohash_update(ctx, (uint8 *) mock_auth_nonce, MOCK_AUTH_NONCE_LEN) < 0 ||
+		pg_cryptohash_update(ctx, (const uint8 *) username, strlen(username)) < 0 ||
+		pg_cryptohash_update(ctx, (const uint8 *) mock_auth_nonce, MOCK_AUTH_NONCE_LEN) < 0 ||
 		pg_cryptohash_final(ctx, sha_digest, key_length) < 0)
 	{
 		pg_cryptohash_free(ctx);

@@ -12,7 +12,7 @@
  * the metapage.  When the revmap needs to be expanded, all tuples on the
  * regular BRIN page at that block (if any) are moved out of the way.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -79,7 +79,7 @@ brinRevmapInitialize(Relation idxrel, BlockNumber *pagesPerRange)
 	page = BufferGetPage(meta);
 	metadata = (BrinMetaPageData *) PageGetContents(page);
 
-	revmap = palloc(sizeof(BrinRevmap));
+	revmap = palloc_object(BrinRevmap);
 	revmap->rm_irel = idxrel;
 	revmap->rm_pagesPerRange = metadata->pagesPerRange;
 	revmap->rm_lastRevmapPage = metadata->lastRevmapPage;

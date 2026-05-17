@@ -7,7 +7,7 @@
  *	  and join trees.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/primnodes.h
@@ -20,6 +20,7 @@
 #include "access/attnum.h"
 #include "access/cmptype.h"
 #include "nodes/bitmapset.h"
+#include "nodes/lockoptions.h"
 #include "nodes/pg_list.h"
 
 
@@ -389,14 +390,16 @@ typedef enum ParamKind
 
 typedef struct Param
 {
+	pg_node_attr(custom_query_jumble)
+
 	Expr		xpr;
 	ParamKind	paramkind;		/* kind of parameter. See above */
 	int			paramid;		/* numeric ID for parameter */
 	Oid			paramtype;		/* pg_type OID of parameter's datatype */
 	/* typmod value, if known */
-	int32		paramtypmod pg_node_attr(query_jumble_ignore);
+	int32		paramtypmod;
 	/* OID of collation, or InvalidOid if none */
-	Oid			paramcollid pg_node_attr(query_jumble_ignore);
+	Oid			paramcollid;
 	/* token location, or -1 if unknown */
 	ParseLoc	location;
 } Param;
@@ -577,6 +580,17 @@ typedef struct GroupingFunc
  * Collation information is irrelevant for the query jumbling, as is the
  * internal state information of the node like "winstar" and "winagg".
  */
+
+/*
+ * Null Treatment options. If specified, initially set to PARSER_IGNORE_NULLS
+ * which is then converted to IGNORE_NULLS if the window function allows the
+ * null treatment clause.
+ */
+#define NO_NULLTREATMENT 0
+#define PARSER_IGNORE_NULLS 1
+#define PARSER_RESPECT_NULLS 2
+#define IGNORE_NULLS 3
+
 typedef struct WindowFunc
 {
 	Expr		xpr;
@@ -600,6 +614,8 @@ typedef struct WindowFunc
 	bool		winstar pg_node_attr(query_jumble_ignore);
 	/* is function a simple aggregate? */
 	bool		winagg pg_node_attr(query_jumble_ignore);
+	/* ignore nulls. One of the Null Treatment options */
+	int			ignore_nulls;
 	/* token location, or -1 if unknown */
 	ParseLoc	location;
 } WindowFunc;
@@ -1093,6 +1109,7 @@ typedef struct SubPlan
 	Oid			firstColCollation;	/* Collation of first column of subplan
 									 * result */
 	/* Information about execution strategy: */
+	bool		isInitPlan;		/* true if it's an InitPlan */
 	bool		useHashTable;	/* true to store subselect output in a hash
 								 * table (implies we are doing "IN") */
 	bool		unknownEqFalse; /* true if it's okay to return FALSE when the
@@ -1107,6 +1124,7 @@ typedef struct SubPlan
 	List	   *parParam;		/* indices of input Params from parent plan */
 	List	   *args;			/* exprs to pass as parParam values */
 	/* Estimated execution costs: */
+	int			disabled_nodes; /* count of disabled nodes in the plan */
 	Cost		startup_cost;	/* one-time setup cost */
 	Cost		per_call_cost;	/* cost for each subplan evaluation */
 } SubPlan;
@@ -1397,6 +1415,10 @@ typedef struct ArrayExpr
 	List	   *elements pg_node_attr(query_jumble_squash);
 	/* true if elements are sub-arrays */
 	bool		multidims pg_node_attr(query_jumble_ignore);
+	/* location of the start of the elements list */
+	ParseLoc	list_start;
+	/* location of the end of the elements list */
+	ParseLoc	list_end;
 	/* token location, or -1 if unknown */
 	ParseLoc	location;
 } ArrayExpr;
@@ -1741,6 +1763,7 @@ typedef struct JsonIsPredicate
 	JsonFormat *format;			/* FORMAT clause, if specified */
 	JsonValueType item_type;	/* JSON item type */
 	bool		unique_keys;	/* check key uniqueness? */
+	Oid			exprBaseType;	/* base type of the subject expression */
 	ParseLoc	location;		/* token location, or -1 if unknown */
 } JsonIsPredicate;
 
@@ -2157,6 +2180,30 @@ typedef struct ReturningExpr
 	Expr	   *retexpr;		/* expression to be returned */
 } ReturningExpr;
 
+/*
+ * GraphLabelRef - label reference in label expression inside GRAPH_TABLE clause
+ */
+typedef struct GraphLabelRef
+{
+	NodeTag		type;
+	Oid			labelid;
+	ParseLoc	location;
+} GraphLabelRef;
+
+/*
+ * GraphPropertyRef - property reference inside GRAPH_TABLE clause
+ */
+typedef struct GraphPropertyRef
+{
+	Expr		xpr;
+	const char *elvarname;
+	Oid			propid;
+	Oid			typeId;
+	int32		typmod;
+	Oid			collation;
+	ParseLoc	location;
+} GraphPropertyRef;
+
 /*--------------------
  * TargetEntry -
  *	   a target entry (used in query target lists)
@@ -2350,7 +2397,7 @@ typedef struct FromExpr
 typedef struct OnConflictExpr
 {
 	NodeTag		type;
-	OnConflictAction action;	/* DO NOTHING or UPDATE? */
+	OnConflictAction action;	/* DO NOTHING, SELECT, or UPDATE */
 
 	/* Arbiter */
 	List	   *arbiterElems;	/* unique index arbiter list (of
@@ -2358,11 +2405,51 @@ typedef struct OnConflictExpr
 	Node	   *arbiterWhere;	/* unique index arbiter WHERE clause */
 	Oid			constraint;		/* pg_constraint OID for arbiter */
 
-	/* ON CONFLICT UPDATE */
+	/* ON CONFLICT DO SELECT */
+	LockClauseStrength lockStrength;	/* strength of lock for DO SELECT */
+
+	/* ON CONFLICT DO UPDATE */
 	List	   *onConflictSet;	/* List of ON CONFLICT SET TargetEntrys */
-	Node	   *onConflictWhere;	/* qualifiers to restrict UPDATE to */
+
+	/* both ON CONFLICT DO SELECT and UPDATE */
+	Node	   *onConflictWhere;	/* qualifiers to restrict SELECT/UPDATE */
 	int			exclRelIndex;	/* RT index of 'excluded' relation */
 	List	   *exclRelTlist;	/* tlist of the EXCLUDED pseudo relation */
 } OnConflictExpr;
+
+/*----------
+ * ForPortionOfExpr - represents a FOR PORTION OF ... expression
+ *
+ * We set up an expression to make a range from the FROM/TO bounds,
+ * so that we can use range operators with it.
+ *
+ * Then we set up an overlaps expression between that and the range column,
+ * so that we can find the rows we need to update/delete.
+ *
+ * If the user used the FROM ... TO ... syntax, we save the individual
+ * expressions so that we can deparse them.
+ *
+ * In the executor we'll also build an intersect expression between the
+ * targeted range and the range column, so that we can update the start/end
+ * bounds of the UPDATE'd record.
+ *----------
+ */
+typedef struct ForPortionOfExpr
+{
+	NodeTag		type;
+	Var		   *rangeVar;		/* Range column */
+	char	   *range_name;		/* Range name */
+	Node	   *targetFrom;		/* FOR PORTION OF FROM bound, if given */
+	Node	   *targetTo;		/* FOR PORTION OF TO bound, if given */
+	Node	   *targetRange;	/* FOR PORTION OF bounds as a range/multirange */
+	Oid			rangeType;		/* (base)type of targetRange */
+	bool		isDomain;		/* Is rangeVar a domain? */
+	Node	   *overlapsExpr;	/* range && targetRange */
+	List	   *rangeTargetList;	/* List of TargetEntrys to set the time
+									 * column(s) */
+	Oid			withoutPortionProc; /* SRF proc for old_range - target_range */
+	ParseLoc	location;		/* token location, or -1 if unknown */
+	ParseLoc	targetLocation; /* token location, or -1 if unknown */
+} ForPortionOfExpr;
 
 #endif							/* PRIMNODES_H */

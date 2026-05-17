@@ -3,10 +3,10 @@
  * astreamer_zstd.c
  *
  * Archive streamers that deal with data compressed using zstd.
- * astreamer_zstd_compressor applies lz4 compression to the input stream,
+ * astreamer_zstd_compressor applies zstd compression to the input stream,
  * and astreamer_zstd_decompressor does the reverse.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/fe_utils/astreamer_zstd.c
@@ -75,14 +75,14 @@ astreamer_zstd_compressor_new(astreamer *next, pg_compress_specification *compre
 
 	Assert(next != NULL);
 
-	streamer = palloc0(sizeof(astreamer_zstd_frame));
+	streamer = palloc0_object(astreamer_zstd_frame);
 
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_zstd_compressor_ops;
 
 	streamer->base.bbs_next = next;
 	initStringInfo(&streamer->base.bbs_buffer);
-	enlargeStringInfo(&streamer->base.bbs_buffer, ZSTD_DStreamOutSize());
+	enlargeStringInfo(&streamer->base.bbs_buffer, ZSTD_CStreamOutSize());
 
 	streamer->cctx = ZSTD_createCCtx();
 	if (!streamer->cctx)
@@ -116,11 +116,8 @@ astreamer_zstd_compressor_new(astreamer *next, pg_compress_specification *compre
 									 ZSTD_c_enableLongDistanceMatching,
 									 compress->long_distance);
 		if (ZSTD_isError(ret))
-		{
-			pg_log_error("could not enable long-distance mode: %s",
-						 ZSTD_getErrorName(ret));
-			exit(1);
-		}
+			pg_fatal("could not enable long-distance mode: %s",
+					 ZSTD_getErrorName(ret));
 	}
 
 	/* Initialize the ZSTD output buffer. */
@@ -182,8 +179,8 @@ astreamer_zstd_compressor_content(astreamer *streamer,
 								 &inBuf, ZSTD_e_continue);
 
 		if (ZSTD_isError(yet_to_flush))
-			pg_log_error("could not compress data: %s",
-						 ZSTD_getErrorName(yet_to_flush));
+			pg_fatal("could not compress data: %s",
+					 ZSTD_getErrorName(yet_to_flush));
 	}
 }
 
@@ -224,8 +221,8 @@ astreamer_zstd_compressor_finalize(astreamer *streamer)
 											&in, ZSTD_e_end);
 
 		if (ZSTD_isError(yet_to_flush))
-			pg_log_error("could not compress data: %s",
-						 ZSTD_getErrorName(yet_to_flush));
+			pg_fatal("could not compress data: %s",
+					 ZSTD_getErrorName(yet_to_flush));
 
 	} while (yet_to_flush > 0);
 
@@ -266,7 +263,7 @@ astreamer_zstd_decompressor_new(astreamer *next)
 
 	Assert(next != NULL);
 
-	streamer = palloc0(sizeof(astreamer_zstd_frame));
+	streamer = palloc0_object(astreamer_zstd_frame);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_zstd_decompressor_ops;
 
@@ -330,8 +327,8 @@ astreamer_zstd_decompressor_content(astreamer *streamer,
 									&mystreamer->zstd_outBuf, &inBuf);
 
 		if (ZSTD_isError(ret))
-			pg_log_error("could not decompress data: %s",
-						 ZSTD_getErrorName(ret));
+			pg_fatal("could not decompress data: %s",
+					 ZSTD_getErrorName(ret));
 	}
 }
 
@@ -350,7 +347,7 @@ astreamer_zstd_decompressor_finalize(astreamer *streamer)
 	if (mystreamer->zstd_outBuf.pos > 0)
 		astreamer_content(mystreamer->base.bbs_next, NULL,
 						  mystreamer->base.bbs_buffer.data,
-						  mystreamer->base.bbs_buffer.maxlen,
+						  mystreamer->zstd_outBuf.pos,
 						  ASTREAMER_UNKNOWN);
 
 	astreamer_finalize(mystreamer->base.bbs_next);

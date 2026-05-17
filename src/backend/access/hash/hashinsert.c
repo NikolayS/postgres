@@ -3,7 +3,7 @@
  * hashinsert.c
  *	  Item insertion in hash tables for Postgres.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -50,6 +50,7 @@ _hash_doinsert(Relation rel, IndexTuple itup, Relation heapRel, bool sorted)
 	uint32		hashkey;
 	Bucket		bucket;
 	OffsetNumber itup_off;
+	XLogRecPtr	recptr;
 
 	/*
 	 * Get the hash key for the item (it's stored in the index tuple itself).
@@ -216,7 +217,6 @@ restart_insert:
 	if (RelationNeedsWAL(rel))
 	{
 		xl_hash_insert xlrec;
-		XLogRecPtr	recptr;
 
 		xlrec.offnum = itup_off;
 
@@ -229,10 +229,12 @@ restart_insert:
 		XLogRegisterBufData(0, itup, IndexTupleSize(itup));
 
 		recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_INSERT);
-
-		PageSetLSN(BufferGetPage(buf), recptr);
-		PageSetLSN(BufferGetPage(metabuf), recptr);
 	}
+	else
+		recptr = XLogGetFakeLSN(rel);
+
+	PageSetLSN(BufferGetPage(buf), recptr);
+	PageSetLSN(BufferGetPage(metabuf), recptr);
 
 	END_CRIT_SECTION();
 
@@ -310,10 +312,8 @@ _hash_pgaddtup(Relation rel, Buffer buf, Size itemsize, IndexTuple itup,
 		itup_off = _hash_binsearch(page, hashkey);
 	}
 
-	if (PageAddItem(page, (Item) itup, itemsize, itup_off, false, false)
-		== InvalidOffsetNumber)
-		elog(ERROR, "failed to add index item to \"%s\"",
-			 RelationGetRelationName(rel));
+	if (PageAddItem(page, itup, itemsize, itup_off, false, false) == InvalidOffsetNumber)
+		elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(rel));
 
 	return itup_off;
 }
@@ -352,10 +352,8 @@ _hash_pgaddmultitup(Relation rel, Buffer buf, IndexTuple *itups,
 
 		itup_offsets[i] = itup_off;
 
-		if (PageAddItem(page, (Item) itups[i], itemsize, itup_off, false, false)
-			== InvalidOffsetNumber)
-			elog(ERROR, "failed to add index item to \"%s\"",
-				 RelationGetRelationName(rel));
+		if (PageAddItem(page, itups[i], itemsize, itup_off, false, false) == InvalidOffsetNumber)
+			elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(rel));
 	}
 }
 
@@ -376,6 +374,7 @@ _hash_vacuum_one_page(Relation rel, Relation hrel, Buffer metabuf, Buffer buf)
 	Page		page = BufferGetPage(buf);
 	HashPageOpaque pageopaque;
 	HashMetaPage metap;
+	XLogRecPtr	recptr;
 
 	/* Scan each tuple in page to see if it is marked as LP_DEAD */
 	maxoff = PageGetMaxOffsetNumber(page);
@@ -428,7 +427,6 @@ _hash_vacuum_one_page(Relation rel, Relation hrel, Buffer metabuf, Buffer buf)
 		if (RelationNeedsWAL(rel))
 		{
 			xl_hash_vacuum_one_page xlrec;
-			XLogRecPtr	recptr;
 
 			xlrec.isCatalogRel = RelationIsAccessibleInLogicalDecoding(hrel);
 			xlrec.snapshotConflictHorizon = snapshotConflictHorizon;
@@ -449,10 +447,12 @@ _hash_vacuum_one_page(Relation rel, Relation hrel, Buffer metabuf, Buffer buf)
 			XLogRegisterBuffer(1, metabuf, REGBUF_STANDARD);
 
 			recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_VACUUM_ONE_PAGE);
-
-			PageSetLSN(BufferGetPage(buf), recptr);
-			PageSetLSN(BufferGetPage(metabuf), recptr);
 		}
+		else
+			recptr = XLogGetFakeLSN(rel);
+
+		PageSetLSN(BufferGetPage(buf), recptr);
+		PageSetLSN(BufferGetPage(metabuf), recptr);
 
 		END_CRIT_SECTION();
 

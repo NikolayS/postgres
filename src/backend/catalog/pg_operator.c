@@ -3,7 +3,7 @@
  * pg_operator.c
  *	  routines to support manipulation of the pg_operator relation
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -225,7 +225,7 @@ OperatorShellMake(const char *operatorName,
 	for (i = 0; i < Natts_pg_operator; ++i)
 	{
 		nulls[i] = false;
-		values[i] = (Datum) NULL;	/* redundant, but safe */
+		values[i] = (Datum) 0;	/* redundant, but safe */
 	}
 
 	/*
@@ -453,7 +453,7 @@ OperatorCreate(const char *operatorName,
 
 	for (i = 0; i < Natts_pg_operator; ++i)
 	{
-		values[i] = (Datum) NULL;
+		values[i] = (Datum) 0;
 		replaces[i] = true;
 		nulls[i] = false;
 	}

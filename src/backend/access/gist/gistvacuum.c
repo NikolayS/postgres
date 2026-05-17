@@ -4,7 +4,7 @@
  *	  vacuuming routines for the postgres GiST index access method.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -16,7 +16,7 @@
 
 #include "access/genam.h"
 #include "access/gist_private.h"
-#include "access/transam.h"
+#include "access/xloginsert.h"
 #include "commands/vacuum.h"
 #include "lib/integerset.h"
 #include "miscadmin.h"
@@ -61,7 +61,7 @@ gistbulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 {
 	/* allocate stats if first time through, else re-use existing struct */
 	if (stats == NULL)
-		stats = (IndexBulkDeleteResult *) palloc0(sizeof(IndexBulkDeleteResult));
+		stats = palloc0_object(IndexBulkDeleteResult);
 
 	gistvacuumscan(info, stats, callback, callback_state);
 
@@ -85,7 +85,7 @@ gistvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 	 */
 	if (stats == NULL)
 	{
-		stats = (IndexBulkDeleteResult *) palloc0(sizeof(IndexBulkDeleteResult));
+		stats = palloc0_object(IndexBulkDeleteResult);
 		gistvacuumscan(info, stats, NULL, NULL);
 	}
 
@@ -182,7 +182,7 @@ gistvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 	if (RelationNeedsWAL(rel))
 		vstate.startNSN = GetInsertRecPtr();
 	else
-		vstate.startNSN = gistGetFakeLSN(rel);
+		vstate.startNSN = XLogGetFakeLSN(rel);
 
 	/*
 	 * The outer loop iterates over all index pages, in physical order (we
@@ -330,7 +330,7 @@ restart:
 	 * exclusive lock.
 	 */
 	LockBuffer(buffer, GIST_EXCLUSIVE);
-	page = (Page) BufferGetPage(buffer);
+	page = BufferGetPage(buffer);
 
 	if (gistPageRecyclable(page))
 	{
@@ -413,7 +413,7 @@ restart:
 				PageSetLSN(page, recptr);
 			}
 			else
-				PageSetLSN(page, gistGetFakeLSN(rel));
+				PageSetLSN(page, XLogGetFakeLSN(rel));
 
 			END_CRIT_SECTION();
 
@@ -528,7 +528,7 @@ gistvacuum_delete_empty_pages(IndexVacuumInfo *info, GistVacState *vstate)
 									RBM_NORMAL, info->strategy);
 
 		LockBuffer(buffer, GIST_SHARE);
-		page = (Page) BufferGetPage(buffer);
+		page = BufferGetPage(buffer);
 
 		if (PageIsNew(page) || GistPageIsDeleted(page) || GistPageIsLeaf(page))
 		{
@@ -707,7 +707,7 @@ gistdeletepage(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 	if (RelationNeedsWAL(info->index))
 		recptr = gistXLogPageDelete(leafBuffer, txid, parentBuffer, downlink);
 	else
-		recptr = gistGetFakeLSN(info->index);
+		recptr = XLogGetFakeLSN(info->index);
 	PageSetLSN(parentPage, recptr);
 	PageSetLSN(leafPage, recptr);
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pg_trgm_sources = files(
   'trgm_gin.c',
@@ -39,6 +39,7 @@ tests += {
   'regress': {
     'sql': [
       'pg_trgm',
+      'pg_utf8_trgm',
       'pg_word_trgm',
       'pg_strict_word_trgm',
     ],

@@ -4,7 +4,7 @@
  *	  routines for signaling between the postmaster and its child processes
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/pmsignal.h
@@ -38,6 +38,7 @@ typedef enum
 	PMSIGNAL_ROTATE_LOGFILE,	/* send SIGUSR1 to syslogger to rotate logfile */
 	PMSIGNAL_START_AUTOVAC_LAUNCHER,	/* start an autovacuum launcher */
 	PMSIGNAL_START_AUTOVAC_WORKER,	/* start an autovacuum worker */
+	PMSIGNAL_IO_WORKER_GROW,	/* I/O worker pool wants to grow */
 	PMSIGNAL_BACKGROUND_WORKER_CHANGE,	/* background worker state change */
 	PMSIGNAL_START_WALRECEIVER, /* start a walreceiver */
 	PMSIGNAL_ADVANCE_STATE_MACHINE, /* advance postmaster's state machine */
@@ -66,8 +67,6 @@ extern PGDLLIMPORT volatile PMSignalData *PMSignalState;
 /*
  * prototypes for functions in pmsignal.c
  */
-extern Size PMSignalShmemSize(void);
-extern void PMSignalShmemInit(void);
 extern void SendPostmasterSignal(PMSignalReason reason);
 extern bool CheckPostmasterSignal(PMSignalReason reason);
 extern void SetQuitSignalReason(QuitSignalReason reason);

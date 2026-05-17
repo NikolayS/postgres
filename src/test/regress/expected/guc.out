@@ -31,6 +31,28 @@ SELECT '2006-08-13 12:34:56'::timestamptz;
  2006-08-13 12:34:56-07
 (1 row)
 
+-- Check handling of list GUCs
+SET search_path = 'pg_catalog', Foo, 'Bar', '';
+SHOW search_path;
+        search_path         
+----------------------------
+ pg_catalog, foo, "Bar", ""
+(1 row)
+
+SET search_path = null;  -- means empty list
+SHOW search_path;
+ search_path 
+-------------
+ 
+(1 row)
+
+SET search_path = null, null;  -- syntax error
+ERROR:  syntax error at or near ","
+LINE 1: SET search_path = null, null;
+                              ^
+SET enable_seqscan = null;  -- error
+ERROR:  NULL is an invalid value for enable_seqscan
+RESET search_path;
 -- SET LOCAL has no effect outside of a transaction
 SET LOCAL vacuum_cost_delay TO 50;
 WARNING:  SET LOCAL can only be used in transaction blocks
@@ -688,6 +710,63 @@ select current_schemas(false);
 (1 row)
 
 reset search_path;
+--
+-- Test parsing of log_min_messages
+--
+SET log_min_messages TO foo;  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "foo"
+DETAIL:  Unrecognized log level: "foo".
+SET log_min_messages TO fatal;
+SHOW log_min_messages;
+ log_min_messages 
+------------------
+ fatal
+(1 row)
+
+SET log_min_messages TO 'fatal';
+SHOW log_min_messages;
+ log_min_messages 
+------------------
+ fatal
+(1 row)
+
+SET log_min_messages TO 'checkpointer:debug2, autovacuum:debug1';  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "checkpointer:debug2, autovacuum:debug1"
+DETAIL:  Default log level was not defined.
+SET log_min_messages TO 'debug1, backend:error, fatal';  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "debug1, backend:error, fatal"
+DETAIL:  Redundant specification of default log level.
+SET log_min_messages TO 'backend:error, debug1, backend:warning';  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "backend:error, debug1, backend:warning"
+DETAIL:  Redundant log level specification for process type "backend".
+SET log_min_messages TO 'backend:error, foo:fatal, archiver:debug1';  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "backend:error, foo:fatal, archiver:debug1"
+DETAIL:  Unrecognized process type "foo".
+SET log_min_messages TO 'backend:error, checkpointer:bar, archiver:debug1';  -- fail
+ERROR:  invalid value for parameter "log_min_messages": "backend:error, checkpointer:bar, archiver:debug1"
+DETAIL:  Unrecognized log level for process type "checkpointer": "bar".
+SET log_min_messages TO 'backend:error, checkpointer:debug3, fatal, archiver:debug2, autovacuum:debug1, walsender:debug3';
+SHOW log_min_messages;
+                                        log_min_messages                                         
+-------------------------------------------------------------------------------------------------
+ fatal, archiver:debug2, autovacuum:debug1, backend:error, checkpointer:debug3, walsender:debug3
+(1 row)
+
+SET log_min_messages TO 'warning, autovacuum:debug1';
+SHOW log_min_messages;
+      log_min_messages      
+----------------------------
+ warning, autovacuum:debug1
+(1 row)
+
+SET log_min_messages TO 'autovacuum:debug1, warning';
+SHOW log_min_messages;
+      log_min_messages      
+----------------------------
+ warning, autovacuum:debug1
+(1 row)
+
+RESET log_min_messages;
 --
 -- Tests for function-local GUC settings
 --

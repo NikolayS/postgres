@@ -92,7 +92,7 @@
  * heap's TOAST table will go through the normal bufmgr.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  * IDENTIFICATION
@@ -122,6 +122,7 @@
 #include "storage/procarray.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/wait_event.h"
 
 /*
  * State associated with a rewrite operation. This is opaque to the user
@@ -150,7 +151,7 @@ typedef struct RewriteStateData
 	HTAB	   *rs_old_new_tid_map; /* unmatched B tuples */
 	HTAB	   *rs_logical_mappings;	/* logical remapping files */
 	uint32		rs_num_rewrite_mappings;	/* # in memory mappings */
-}			RewriteStateData;
+} RewriteStateData;
 
 /*
  * The lookup keys for the hash tables are tuple TID and xmin (we must check
@@ -249,7 +250,7 @@ begin_heap_rewrite(Relation old_heap, Relation new_heap, TransactionId oldest_xm
 	old_cxt = MemoryContextSwitchTo(rw_cxt);
 
 	/* Create and fill in the state struct */
-	state = palloc0(sizeof(RewriteStateData));
+	state = palloc0_object(RewriteStateData);
 
 	state->rs_old_rel = old_heap;
 	state->rs_new_rel = new_heap;
@@ -382,6 +383,9 @@ rewrite_heap_tuple(RewriteState state,
 
 	/*
 	 * If the tuple has been updated, check the old-to-new mapping hash table.
+	 *
+	 * Note that this check relies on the HeapTupleSatisfiesVacuum() in
+	 * heapam_relation_copy_for_cluster() to have set hint bits.
 	 */
 	if (!((old_tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
 		  HeapTupleHeaderIsOnlyLocked(old_tuple->t_data)) &&
@@ -614,12 +618,12 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 	}
 	else if (HeapTupleHasExternal(tup) || tup->t_len > TOAST_TUPLE_THRESHOLD)
 	{
-		int			options = HEAP_INSERT_SKIP_FSM;
+		uint32		options = HEAP_INSERT_SKIP_FSM;
 
 		/*
-		 * While rewriting the heap for VACUUM FULL / CLUSTER, make sure data
-		 * for the TOAST table are not logically decoded.  The main heap is
-		 * WAL-logged as XLOG FPI records, which are not logically decoded.
+		 * While rewriting the heap for REPACK, make sure data for the TOAST
+		 * table are not logically decoded.  The main heap is WAL-logged as
+		 * XLOG FPI records, which are not logically decoded.
 		 */
 		options |= HEAP_INSERT_NO_LOGICAL;
 
@@ -673,8 +677,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 	}
 
 	/* And now we can insert the tuple into the page */
-	newoff = PageAddItem(page, (Item) heaptup->t_data, heaptup->t_len,
-						 InvalidOffsetNumber, false, true);
+	newoff = PageAddItem(page, heaptup->t_data, heaptup->t_len, InvalidOffsetNumber, false, true);
 	if (newoff == InvalidOffsetNumber)
 		elog(ERROR, "failed to add tuple");
 
@@ -1170,7 +1173,7 @@ CheckPointLogicalRewriteHeap(void)
 	cutoff = ReplicationSlotsComputeLogicalRestartLSN();
 
 	/* don't start earlier than the restart lsn */
-	if (cutoff != InvalidXLogRecPtr && redo < cutoff)
+	if (XLogRecPtrIsValid(cutoff) && redo < cutoff)
 		cutoff = redo;
 
 	mappings_dir = AllocateDir(PG_LOGICAL_MAPPINGS_DIR);
@@ -1205,7 +1208,7 @@ CheckPointLogicalRewriteHeap(void)
 
 		lsn = ((uint64) hi) << 32 | lo;
 
-		if (lsn < cutoff || cutoff == InvalidXLogRecPtr)
+		if (lsn < cutoff || !XLogRecPtrIsValid(cutoff))
 		{
 			elog(DEBUG1, "removing logical rewrite file \"%s\"", path);
 			if (unlink(path) < 0)

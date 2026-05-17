@@ -4,7 +4,7 @@
  *	  routines to manage scans on GiST index relations
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -90,7 +90,7 @@ gistbeginscan(Relation r, int nkeys, int norderbys)
 	oldCxt = MemoryContextSwitchTo(giststate->scanCxt);
 
 	/* initialize opaque data */
-	so = (GISTScanOpaque) palloc0(sizeof(GISTScanOpaqueData));
+	so = palloc0_object(GISTScanOpaqueData);
 	so->giststate = giststate;
 	giststate->tempCxt = createTempGistContext();
 	so->queue = NULL;
@@ -101,8 +101,8 @@ gistbeginscan(Relation r, int nkeys, int norderbys)
 	so->qual_ok = true;			/* in case there are zero keys */
 	if (scan->numberOfOrderBys > 0)
 	{
-		scan->xs_orderbyvals = palloc0(sizeof(Datum) * scan->numberOfOrderBys);
-		scan->xs_orderbynulls = palloc(sizeof(bool) * scan->numberOfOrderBys);
+		scan->xs_orderbyvals = palloc0_array(Datum, scan->numberOfOrderBys);
+		scan->xs_orderbynulls = palloc_array(bool, scan->numberOfOrderBys);
 		memset(scan->xs_orderbynulls, true, sizeof(bool) * scan->numberOfOrderBys);
 	}
 
@@ -201,6 +201,7 @@ gistrescan(IndexScanDesc scan, ScanKey key, int nkeys,
 											 attno - 1)->atttypid,
 							   -1, 0);
 		}
+		TupleDescFinalize(so->giststate->fetchTupdesc);
 		scan->xs_hitupdesc = so->giststate->fetchTupdesc;
 
 		/* Also create a memory context that will hold the returned tuples */

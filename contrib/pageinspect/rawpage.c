@@ -5,7 +5,7 @@
  *
  * Access-method specific inspection functions are in separate files.
  *
- * Copyright (c) 2007-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2007-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/pageinspect/rawpage.c
@@ -193,8 +193,7 @@ get_raw_page_internal(text *relname, ForkNumber forknum, BlockNumber blkno)
 
 	memcpy(raw_page_data, BufferGetPage(buf), BLCKSZ);
 
-	LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-	ReleaseBuffer(buf);
+	UnlockReleaseBuffer(buf);
 
 	relation_close(rel, AccessShareLock);
 
@@ -208,11 +207,9 @@ get_raw_page_internal(text *relname, ForkNumber forknum, BlockNumber blkno)
  * Get a palloc'd, maxalign'ed page image from the result of get_raw_page()
  *
  * On machines with MAXALIGN = 8, the payload of a bytea is not maxaligned,
- * since it will start 4 bytes into a palloc'd value.  On alignment-picky
- * machines, this will cause failures in accesses to 8-byte-wide values
- * within the page.  We don't need to worry if accessing only 4-byte or
- * smaller fields, but when examining a struct that contains 8-byte fields,
- * use this function for safety.
+ * since it will start 4 bytes into a palloc'd value.  PageHeaderData requires
+ * 8 byte alignment, so always use this function when accessing page header
+ * fields from a raw page bytea.
  */
 Page
 get_page_from_raw(bytea *raw_page)
@@ -282,7 +279,7 @@ page_header(PG_FUNCTION_ARGS)
 	{
 		char		lsnchar[64];
 
-		snprintf(lsnchar, sizeof(lsnchar), "%X/%X", LSN_FORMAT_ARGS(lsn));
+		snprintf(lsnchar, sizeof(lsnchar), "%X/%08X", LSN_FORMAT_ARGS(lsn));
 		values[0] = CStringGetTextDatum(lsnchar);
 	}
 	else

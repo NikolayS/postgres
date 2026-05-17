@@ -7,7 +7,7 @@
  * Splits jsonpath string into tokens represented as JsonPathString structs.
  * Decodes unicode and hex escaped strings.
  *
- * Copyright (c) 2019-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2019-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	src/backend/utils/adt/jsonpath_scan.l
@@ -413,8 +413,13 @@ static const JsonPathKeyword keywords[] = {
 	{4, true, TRUE_P, "true"},
 	{4, false, TYPE_P, "type"},
 	{4, false, WITH_P, "with"},
+	{5, false, STR_BTRIM_P, "btrim"},
 	{5, true, FALSE_P, "false"},
 	{5, false, FLOOR_P, "floor"},
+	{5, false, STR_LOWER_P, "lower"},
+	{5, false, STR_LTRIM_P, "ltrim"},
+	{5, false, STR_RTRIM_P, "rtrim"},
+	{5, false, STR_UPPER_P, "upper"},
 	{6, false, BIGINT_P, "bigint"},
 	{6, false, DOUBLE_P, "double"},
 	{6, false, EXISTS_P, "exists"},
@@ -425,13 +430,16 @@ static const JsonPathKeyword keywords[] = {
 	{7, false, BOOLEAN_P, "boolean"},
 	{7, false, CEILING_P, "ceiling"},
 	{7, false, DECIMAL_P, "decimal"},
+	{7, false, STR_INITCAP_P, "initcap"},
 	{7, false, INTEGER_P, "integer"},
+	{7, false, STR_REPLACE_P, "replace"},
 	{7, false, TIME_TZ_P, "time_tz"},
 	{7, false, UNKNOWN_P, "unknown"},
 	{8, false, DATETIME_P, "datetime"},
 	{8, false, KEYVALUE_P, "keyvalue"},
 	{9, false, TIMESTAMP_P, "timestamp"},
 	{10, false, LIKE_REGEX_P, "like_regex"},
+	{10, false, STR_SPLIT_PART_P, "split_part"},
 	{12, false, TIMESTAMP_TZ_P, "timestamp_tz"},
 };
 
@@ -574,7 +582,7 @@ hexval(char c, int *result, struct Node *escontext, yyscan_t yyscanner)
 
 /* Add given unicode character to scanstring */
 static bool
-addUnicodeChar(int ch, struct Node *escontext, yyscan_t yyscanner)
+addUnicodeChar(char32_t ch, struct Node *escontext, yyscan_t yyscanner)
 {
 	if (ch == 0)
 	{
@@ -607,7 +615,7 @@ addUnicodeChar(int ch, struct Node *escontext, yyscan_t yyscanner)
 
 /* Add unicode character, processing any surrogate pairs */
 static bool
-addUnicode(int ch, int *hi_surrogate, struct Node *escontext, yyscan_t yyscanner)
+addUnicode(char32_t ch, int *hi_surrogate, struct Node *escontext, yyscan_t yyscanner)
 {
 	if (is_utf16_surrogate_first(ch))
 	{
@@ -655,7 +663,7 @@ parseUnicode(char *s, int l, struct Node *escontext, yyscan_t yyscanner)
 
 	for (i = 2; i < l; i += 2)	/* skip '\u' */
 	{
-		int			ch = 0;
+		char32_t		ch = 0;
 		int			j,
 					si;
 

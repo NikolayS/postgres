@@ -3,7 +3,7 @@
  * blutils.c
  *		Bloom index utilities.
  *
- * Portions Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2016-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1990-1993, Regents of the University of California
  *
  * IDENTIFICATION
@@ -86,7 +86,7 @@ makeDefaultBloomOptions(void)
 	BloomOptions *opts;
 	int			i;
 
-	opts = (BloomOptions *) palloc0(sizeof(BloomOptions));
+	opts = palloc0_object(BloomOptions);
 	/* Convert DEFAULT_BLOOM_LENGTH from # of bits to # of words */
 	opts->bloomLength = (DEFAULT_BLOOM_LENGTH + SIGNWORDBITS - 1) / SIGNWORDBITS;
 	for (i = 0; i < INDEX_MAX_KEYS; i++)
@@ -102,61 +102,62 @@ makeDefaultBloomOptions(void)
 Datum
 blhandler(PG_FUNCTION_ARGS)
 {
-	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+	static const IndexAmRoutine amroutine = {
+		.type = T_IndexAmRoutine,
+		.amstrategies = BLOOM_NSTRATEGIES,
+		.amsupport = BLOOM_NPROC,
+		.amoptsprocnum = BLOOM_OPTIONS_PROC,
+		.amcanorder = false,
+		.amcanorderbyop = false,
+		.amcanhash = false,
+		.amconsistentequality = false,
+		.amconsistentordering = false,
+		.amcanbackward = false,
+		.amcanunique = false,
+		.amcanmulticol = true,
+		.amoptionalkey = true,
+		.amsearcharray = false,
+		.amsearchnulls = false,
+		.amstorage = false,
+		.amclusterable = false,
+		.ampredlocks = false,
+		.amcanparallel = false,
+		.amcanbuildparallel = false,
+		.amcaninclude = false,
+		.amusemaintenanceworkmem = false,
+		.amparallelvacuumoptions =
+		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_CLEANUP,
+		.amkeytype = InvalidOid,
 
-	amroutine->amstrategies = BLOOM_NSTRATEGIES;
-	amroutine->amsupport = BLOOM_NPROC;
-	amroutine->amoptsprocnum = BLOOM_OPTIONS_PROC;
-	amroutine->amcanorder = false;
-	amroutine->amcanorderbyop = false;
-	amroutine->amcanhash = false;
-	amroutine->amconsistentequality = false;
-	amroutine->amconsistentordering = false;
-	amroutine->amcanbackward = false;
-	amroutine->amcanunique = false;
-	amroutine->amcanmulticol = true;
-	amroutine->amoptionalkey = true;
-	amroutine->amsearcharray = false;
-	amroutine->amsearchnulls = false;
-	amroutine->amstorage = false;
-	amroutine->amclusterable = false;
-	amroutine->ampredlocks = false;
-	amroutine->amcanparallel = false;
-	amroutine->amcanbuildparallel = false;
-	amroutine->amcaninclude = false;
-	amroutine->amusemaintenanceworkmem = false;
-	amroutine->amparallelvacuumoptions =
-		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_CLEANUP;
-	amroutine->amkeytype = InvalidOid;
+		.ambuild = blbuild,
+		.ambuildempty = blbuildempty,
+		.aminsert = blinsert,
+		.aminsertcleanup = NULL,
+		.ambulkdelete = blbulkdelete,
+		.amvacuumcleanup = blvacuumcleanup,
+		.amcanreturn = NULL,
+		.amcostestimate = blcostestimate,
+		.amgettreeheight = NULL,
+		.amoptions = bloptions,
+		.amproperty = NULL,
+		.ambuildphasename = NULL,
+		.amvalidate = blvalidate,
+		.amadjustmembers = NULL,
+		.ambeginscan = blbeginscan,
+		.amrescan = blrescan,
+		.amgettuple = NULL,
+		.amgetbitmap = blgetbitmap,
+		.amendscan = blendscan,
+		.ammarkpos = NULL,
+		.amrestrpos = NULL,
+		.amestimateparallelscan = NULL,
+		.aminitparallelscan = NULL,
+		.amparallelrescan = NULL,
+		.amtranslatestrategy = NULL,
+		.amtranslatecmptype = NULL,
+	};
 
-	amroutine->ambuild = blbuild;
-	amroutine->ambuildempty = blbuildempty;
-	amroutine->aminsert = blinsert;
-	amroutine->aminsertcleanup = NULL;
-	amroutine->ambulkdelete = blbulkdelete;
-	amroutine->amvacuumcleanup = blvacuumcleanup;
-	amroutine->amcanreturn = NULL;
-	amroutine->amcostestimate = blcostestimate;
-	amroutine->amgettreeheight = NULL;
-	amroutine->amoptions = bloptions;
-	amroutine->amproperty = NULL;
-	amroutine->ambuildphasename = NULL;
-	amroutine->amvalidate = blvalidate;
-	amroutine->amadjustmembers = NULL;
-	amroutine->ambeginscan = blbeginscan;
-	amroutine->amrescan = blrescan;
-	amroutine->amgettuple = NULL;
-	amroutine->amgetbitmap = blgetbitmap;
-	amroutine->amendscan = blendscan;
-	amroutine->ammarkpos = NULL;
-	amroutine->amrestrpos = NULL;
-	amroutine->amestimateparallelscan = NULL;
-	amroutine->aminitparallelscan = NULL;
-	amroutine->amparallelrescan = NULL;
-	amroutine->amtranslatestrategy = NULL;
-	amroutine->amtranslatecmptype = NULL;
-
-	PG_RETURN_POINTER(amroutine);
+	PG_RETURN_POINTER(&amroutine);
 }
 
 /*
@@ -324,7 +325,7 @@ BloomPageAddItem(BloomState *state, Page page, BloomTuple *tuple)
 {
 	BloomTuple *itup;
 	BloomPageOpaque opaque;
-	Pointer		ptr;
+	char	   *ptr;
 
 	/* We shouldn't be pointed to an invalid page */
 	Assert(!PageIsNew(page) && !BloomPageIsDeleted(page));
@@ -336,11 +337,11 @@ BloomPageAddItem(BloomState *state, Page page, BloomTuple *tuple)
 	/* Copy new tuple to the end of page */
 	opaque = BloomPageGetOpaque(page);
 	itup = BloomPageGetTuple(state, page, opaque->maxoff + 1);
-	memcpy((Pointer) itup, (Pointer) tuple, state->sizeOfBloomTuple);
+	memcpy(itup, tuple, state->sizeOfBloomTuple);
 
 	/* Adjust maxoff and pd_lower */
 	opaque->maxoff++;
-	ptr = (Pointer) BloomPageGetTuple(state, page, opaque->maxoff + 1);
+	ptr = (char *) BloomPageGetTuple(state, page, opaque->maxoff + 1);
 	((PageHeader) page)->pd_lower = ptr - page;
 
 	/* Assert we didn't overrun available space */
