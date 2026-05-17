@@ -4,7 +4,7 @@
  *	  rmgr descriptor routines for access/transam/generic_xlog.c
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/rmgrdesc/genericdesc.c
@@ -23,8 +23,8 @@
 void
 generic_desc(StringInfo buf, XLogReaderState *record)
 {
-	Pointer		ptr = XLogRecGetData(record),
-				end = ptr + XLogRecGetDataLen(record);
+	const char *ptr = XLogRecGetData(record);
+	const char *end = ptr + XLogRecGetDataLen(record);
 
 	while (ptr < end)
 	{

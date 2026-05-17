@@ -107,7 +107,7 @@ Datum
 seg_in(PG_FUNCTION_ARGS)
 {
 	char	   *str = PG_GETARG_CSTRING(0);
-	SEG		   *result = palloc(sizeof(SEG));
+	SEG		   *result = palloc_object(SEG);
 	yyscan_t	scanner;
 
 	seg_scanner_init(str, &scanner);
@@ -202,8 +202,9 @@ gseg_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	Datum		query = PG_GETARG_DATUM(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 
 	/* All cases served by this function are exact */
@@ -370,7 +371,7 @@ gseg_picksplit(PG_FUNCTION_ARGS)
 	/*
 	 * Emit segments to the left output page, and compute its bounding box.
 	 */
-	seg_l = (SEG *) palloc(sizeof(SEG));
+	seg_l = palloc_object(SEG);
 	memcpy(seg_l, sort_items[0].data, sizeof(SEG));
 	*left++ = sort_items[0].index;
 	v->spl_nleft++;
@@ -388,7 +389,7 @@ gseg_picksplit(PG_FUNCTION_ARGS)
 	/*
 	 * Likewise for the right page.
 	 */
-	seg_r = (SEG *) palloc(sizeof(SEG));
+	seg_r = palloc_object(SEG);
 	memcpy(seg_r, sort_items[firstright].data, sizeof(SEG));
 	*right++ = sort_items[firstright].index;
 	v->spl_nright++;
@@ -417,7 +418,7 @@ gseg_same(PG_FUNCTION_ARGS)
 {
 	bool	   *result = (bool *) PG_GETARG_POINTER(2);
 
-	if (DirectFunctionCall2(seg_same, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)))
+	if (DatumGetBool(DirectFunctionCall2(seg_same, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1))))
 		*result = true;
 	else
 		*result = false;
@@ -470,7 +471,7 @@ gseg_leaf_consistent(Datum key, Datum query, StrategyNumber strategy)
 			retval = DirectFunctionCall2(seg_contained, key, query);
 			break;
 		default:
-			retval = false;
+			retval = BoolGetDatum(false);
 	}
 
 	PG_RETURN_DATUM(retval);
@@ -632,7 +633,7 @@ seg_union(PG_FUNCTION_ARGS)
 	SEG		   *b = PG_GETARG_SEG_P(1);
 	SEG		   *n;
 
-	n = (SEG *) palloc(sizeof(*n));
+	n = palloc_object(SEG);
 
 	/* take max of upper endpoints */
 	if (a->upper > b->upper)
@@ -672,7 +673,7 @@ seg_inter(PG_FUNCTION_ARGS)
 	SEG		   *b = PG_GETARG_SEG_P(1);
 	SEG		   *n;
 
-	n = (SEG *) palloc(sizeof(*n));
+	n = palloc_object(SEG);
 
 	/* take min of upper endpoints */
 	if (a->upper < b->upper)

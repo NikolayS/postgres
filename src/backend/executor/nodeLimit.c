@@ -3,7 +3,7 @@
  * nodeLimit.c
  *	  Routines to handle limiting of query results where appropriate
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -68,7 +68,7 @@ ExecLimit(PlanState *pstate)
 			 */
 			recompute_limits(node);
 
-			/* FALL THRU */
+			pg_fallthrough;
 
 		case LIMIT_RESCAN:
 
@@ -215,7 +215,7 @@ ExecLimit(PlanState *pstate)
 			}
 
 			Assert(node->lstate == LIMIT_WINDOWEND_TIES);
-			/* FALL THRU */
+			pg_fallthrough;
 
 		case LIMIT_WINDOWEND_TIES:
 			if (ScanDirectionIsForward(direction))

@@ -3,7 +3,7 @@
  *
  *	Postgres-version-specific routines
  *
- *	Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/version.c
  */
 
@@ -26,6 +26,24 @@ jsonb_9_4_check_applicable(ClusterInfo *cluster)
 		return true;
 
 	return false;
+}
+
+/*
+ * Older servers can't support newer protocol versions, so their connection
+ * strings will need to lock max_protocol_version to 3.0.
+ */
+bool
+protocol_negotiation_supported(const ClusterInfo *cluster)
+{
+	/*
+	 * The February 2018 patch release (9.3.21, 9.4.16, 9.5.11, 9.6.7, and
+	 * 10.2) added support for NegotiateProtocolVersion. But ClusterInfo only
+	 * has information about the major version number. To ensure we can still
+	 * upgrade older unpatched servers, just assume anything prior to PG11
+	 * can't negotiate. It's not possible for those servers to make use of
+	 * newer protocols anyway, so nothing is lost.
+	 */
+	return (GET_MAJOR_VERSION(cluster->major_version) >= 1100);
 }
 
 /*
@@ -151,8 +169,6 @@ process_extension_updates(DbInfo *dbinfo, PGresult *res, void *arg)
 	int			i_name = PQfnumber(res, "name");
 	UpgradeTaskReport *report = (UpgradeTaskReport *) arg;
 	PQExpBufferData connectbuf;
-
-	AssertVariableIsOfType(&process_extension_updates, UpgradeTaskProcessCB);
 
 	if (ntups == 0)
 		return;

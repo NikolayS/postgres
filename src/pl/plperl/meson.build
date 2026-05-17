@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 if not perl_dep.found()
   subdir_done()
@@ -88,6 +88,7 @@ tests += {
       'plperl_trigger',
       'plperl_shared',
       'plperl_elog',
+      'plperl_unicode',
       'plperl_util',
       'plperl_init',
       'plperlu',
@@ -96,7 +97,7 @@ tests += {
       'plperl_transaction',
       'plperl_env',
     ],
-    'regress_args': ['--dlpath', meson.build_root() / 'src/test/regress'],
+    'regress_args': ['--dlpath', meson.project_build_root() / 'src/test/regress'],
   },
 }
 

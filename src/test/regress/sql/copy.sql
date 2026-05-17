@@ -82,6 +82,107 @@ this is just a line full of junk that would error out if parsed
 
 copy copytest3 to stdout csv header;
 
+--- test copying in JSON mode with various styles
+copy (select 1 union all select 2) to stdout with (format json);
+copy (select 1 as foo union all select 2) to stdout with (format json);
+copy (values (1), (2)) TO stdout with (format json);
+copy (select 1 union all select 2) to stdout with (format json, force_array true);
+copy (values (1), (2)) TO stdout with (format json, force_array true);
+copy copytest to stdout json;
+copy copytest to stdout (format json);
+copy (select * from copytest) to stdout (format json);
+
+-- all of the following should yield error
+copy copytest to stdout (format json, delimiter '|');
+copy copytest to stdout (format json, null '\N');
+copy copytest to stdout (format json, default '|');
+copy copytest to stdout (format json, header);
+copy copytest to stdout (format json, header 1);
+copy copytest to stdout (format json, quote '"');
+copy copytest to stdout (format json, escape '"');
+copy copytest to stdout (format json, force_quote *);
+copy copytest to stdout (format json, force_not_null *);
+copy copytest to stdout (format json, force_null *);
+copy copytest to stdout (format json, on_error ignore);
+copy copytest to stdout (format json, reject_limit 1);
+copy copytest from stdin(format json);
+-- all of the above should yield error
+
+-- column list with json format
+copy copytest (style, test, filler) to stdout (format json);
+
+-- should fail: force_array requires json format
+copy copytest to stdout (format csv, force_array true);
+
+-- force_array variants
+copy copytest to stdout (format json, force_array);
+copy copytest(style, test) to stdout (format json, force_array true);
+copy copytest to stdout (format json, force_array false);
+
+-- force_array with empty result set
+copy (select 1 where false) to stdout (format json, force_array);
+
+-- column list with diverse data types
+create temp table copyjsontest_types (
+    id int,
+    js json,
+    jsb jsonb,
+    arr int[],
+    n numeric(10,2),
+    b boolean,
+    ts timestamp,
+    t text);
+
+insert into copyjsontest_types values
+(1, '{"a":1}', '{"b":2}', '{1,2,3}', 3.14, true,
+ '2024-01-15 10:30:00', 'hello'),
+(2, '[1,null,"x"]', '{"nested":{"k":"v"}}', '{4,5}', -99.99, false,
+ '2024-06-30 23:59:59', 'world'),
+(3, 'null', 'null', '{}', null, null, null, null);
+
+-- full table
+copy copyjsontest_types to stdout (format json);
+
+-- column subsets exercising each type
+copy copyjsontest_types (id, js, jsb) to stdout (format json);
+copy copyjsontest_types (id, arr, n, b) to stdout (format json);
+copy copyjsontest_types (jsb, t) to stdout (format json);
+copy copyjsontest_types (id, ts) to stdout (format json);
+
+-- single column: json and jsonb
+copy copyjsontest_types (js) to stdout (format json);
+copy copyjsontest_types (jsb) to stdout (format json);
+
+drop table copyjsontest_types;
+
+-- embedded escaped characters
+create temp table copyjsontest (
+    id bigserial,
+    f1 text,
+    f2 timestamptz);
+
+insert into copyjsontest
+  select g.i,
+         CASE WHEN g.i % 2 = 0 THEN
+           'line with '' in it: ' || g.i::text
+         ELSE
+           'line with " in it: ' || g.i::text
+         END,
+         'Mon Feb 10 17:32:01 1997 PST'
+  from generate_series(1,5) as g(i);
+
+insert into copyjsontest (f1) values
+(E'aaa\"bbb'::text),
+(E'aaa\\bbb'::text),
+(E'aaa\/bbb'::text),
+(E'aaa\bbbb'::text),
+(E'aaa\fbbb'::text),
+(E'aaa\nbbb'::text),
+(E'aaa\rbbb'::text),
+(E'aaa\tbbb'::text);
+
+copy copyjsontest to stdout json;
+
 create temp table copytest4 (
 	c1 int,
 	"colname with tab: 	" text);
@@ -93,6 +194,51 @@ this is just a line full of junk that would error out if parsed
 \.
 
 copy copytest4 to stdout (header);
+
+-- test multi-line header line feature
+
+create temp table copytest5 (c1 int);
+
+copy copytest5 from stdin (format csv, header 2);
+this is a first header line.
+this is a second header line.
+1
+2
+\.
+copy copytest5 to stdout (header);
+
+truncate copytest5;
+copy copytest5 from stdin (format csv, header 4);
+this is a first header line.
+this is a second header line.
+1
+2
+\.
+select count(*) from copytest5;
+
+truncate copytest5;
+copy copytest5 from stdin (format csv, header 5);
+this is a first header line.
+this is a second header line.
+1
+2
+\.
+select count(*) from copytest5;
+
+-- test header line feature (given as strings)
+truncate copytest5;
+copy copytest5 from stdin (format csv, header '0');
+1
+2
+\.
+select * from copytest5 order by c1;
+
+truncate copytest5;
+copy copytest5 from stdin (format csv, header '1');
+1
+2
+\.
+select * from copytest5 order by c1;
 
 -- test copy from with a partitioned table
 create table parted_copytest (
@@ -375,3 +521,17 @@ COPY copytest_mv(id) TO stdout WITH (header);
 REFRESH MATERIALIZED VIEW copytest_mv;
 COPY copytest_mv(id) TO stdout WITH (header);
 DROP MATERIALIZED VIEW copytest_mv;
+
+-- Tests for COPY TO with partitioned tables.
+-- The child table pp_2 has a different column order than the root table pp.
+-- Check if COPY TO exports tuples as the root table's column order.
+CREATE TABLE pp (id int,val int) PARTITION BY RANGE (id);
+CREATE TABLE pp_1 (val int, id int) PARTITION BY RANGE (id);
+CREATE TABLE pp_2 (id int, val int) PARTITION BY RANGE (id);
+ALTER TABLE pp ATTACH PARTITION pp_1 FOR VALUES FROM (1) TO (5);
+ALTER TABLE pp ATTACH PARTITION pp_2 FOR VALUES FROM (5) TO (10);
+CREATE TABLE pp_15 PARTITION OF pp_1 FOR VALUES FROM (1) TO (5);
+CREATE TABLE pp_510 PARTITION OF pp_2 FOR VALUES FROM (5) TO (10);
+INSERT INTO pp SELECT g, 10 + g FROM generate_series(1,6) g;
+COPY pp TO stdout(header);
+DROP TABLE PP;

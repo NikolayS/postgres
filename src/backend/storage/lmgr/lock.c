@@ -3,7 +3,7 @@
  * lock.c
  *	  POSTGRES primary lock mechanism
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -39,11 +39,14 @@
 #include "access/xlogutils.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#include "pgstat.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/shmem.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
+#include "storage/subsystems.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
@@ -51,7 +54,7 @@
 
 /* GUC variables */
 int			max_locks_per_xact; /* used to set the lock table size */
-bool		log_lock_failure = false;
+bool		log_lock_failures = false;
 
 #define NLOCKENTS() \
 	mul_size(max_locks_per_xact, add_size(MaxBackends, max_prepared_xacts))
@@ -311,6 +314,14 @@ typedef struct
 
 static volatile FastPathStrongRelationLockData *FastPathStrongRelationLocks;
 
+static void LockManagerShmemRequest(void *arg);
+static void LockManagerShmemInit(void *arg);
+
+const ShmemCallbacks LockManagerShmemCallbacks = {
+	.request_fn = LockManagerShmemRequest,
+	.init_fn = LockManagerShmemInit,
+};
+
 
 /*
  * Pointers to hash tables containing lock state
@@ -415,6 +426,7 @@ static void GrantLockLocal(LOCALLOCK *locallock, ResourceOwner owner);
 static void BeginStrongLockAcquire(LOCALLOCK *locallock, uint32 fasthashcode);
 static void FinishStrongLockAcquire(void);
 static ProcWaitStatus WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner);
+static void waitonlock_error_callback(void *arg);
 static void ReleaseLockIfHeld(LOCALLOCK *locallock, bool sessionLock);
 static void LockReassignOwner(LOCALLOCK *locallock, ResourceOwner parent);
 static bool UnGrantLock(LOCK *lock, LOCKMODE lockmode,
@@ -430,71 +442,57 @@ static void GetSingleProcBlockerStatusData(PGPROC *blocked_proc,
 
 
 /*
- * Initialize the lock manager's shmem data structures.
+ * Register the lock manager's shmem data structures.
  *
- * This is called from CreateSharedMemoryAndSemaphores(), which see for more
- * comments.  In the normal postmaster case, the shared hash tables are
- * created here, and backends inherit pointers to them via fork().  In the
- * EXEC_BACKEND case, each backend re-executes this code to obtain pointers to
- * the already existing shared hash tables.  In either case, each backend must
- * also call InitLockManagerAccess() to create the locallock hash table.
+ * In addition to this, each backend must also call InitLockManagerAccess() to
+ * create the locallock hash table.
  */
-void
-LockManagerShmemInit(void)
+static void
+LockManagerShmemRequest(void *arg)
 {
-	HASHCTL		info;
-	long		init_table_size,
-				max_table_size;
-	bool		found;
+	int64		max_table_size;
 
 	/*
-	 * Compute init/max size to request for lock hashtables.  Note these
-	 * calculations must agree with LockManagerShmemSize!
+	 * Compute sizes for lock hashtables.
 	 */
 	max_table_size = NLOCKENTS();
-	init_table_size = max_table_size / 2;
 
 	/*
-	 * Allocate hash table for LOCK structs.  This stores per-locked-object
+	 * Hash table for LOCK structs.  This stores per-locked-object
 	 * information.
 	 */
-	info.keysize = sizeof(LOCKTAG);
-	info.entrysize = sizeof(LOCK);
-	info.num_partitions = NUM_LOCK_PARTITIONS;
-
-	LockMethodLockHash = ShmemInitHash("LOCK hash",
-									   init_table_size,
-									   max_table_size,
-									   &info,
-									   HASH_ELEM | HASH_BLOBS | HASH_PARTITION);
+	ShmemRequestHash(.name = "LOCK hash",
+					 .nelems = max_table_size,
+					 .ptr = &LockMethodLockHash,
+					 .hash_info.keysize = sizeof(LOCKTAG),
+					 .hash_info.entrysize = sizeof(LOCK),
+					 .hash_info.num_partitions = NUM_LOCK_PARTITIONS,
+					 .hash_flags = HASH_ELEM | HASH_BLOBS | HASH_PARTITION,
+		);
 
 	/* Assume an average of 2 holders per lock */
 	max_table_size *= 2;
-	init_table_size *= 2;
 
-	/*
-	 * Allocate hash table for PROCLOCK structs.  This stores
-	 * per-lock-per-holder information.
-	 */
-	info.keysize = sizeof(PROCLOCKTAG);
-	info.entrysize = sizeof(PROCLOCK);
-	info.hash = proclock_hash;
-	info.num_partitions = NUM_LOCK_PARTITIONS;
+	ShmemRequestHash(.name = "PROCLOCK hash",
+					 .nelems = max_table_size,
+					 .ptr = &LockMethodProcLockHash,
+					 .hash_info.keysize = sizeof(PROCLOCKTAG),
+					 .hash_info.entrysize = sizeof(PROCLOCK),
+					 .hash_info.hash = proclock_hash,
+					 .hash_info.num_partitions = NUM_LOCK_PARTITIONS,
+					 .hash_flags = HASH_ELEM | HASH_FUNCTION | HASH_PARTITION,
+		);
 
-	LockMethodProcLockHash = ShmemInitHash("PROCLOCK hash",
-										   init_table_size,
-										   max_table_size,
-										   &info,
-										   HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+	ShmemRequestStruct(.name = "Fast Path Strong Relation Lock Data",
+					   .size = sizeof(FastPathStrongRelationLockData),
+					   .ptr = (void **) (void *) &FastPathStrongRelationLocks,
+		);
+}
 
-	/*
-	 * Allocate fast-path structures.
-	 */
-	FastPathStrongRelationLocks =
-		ShmemInitStruct("Fast Path Strong Relation Lock Data",
-						sizeof(FastPathStrongRelationLockData), &found);
-	if (!found)
-		SpinLockInit(&FastPathStrongRelationLocks->mutex);
+static void
+LockManagerShmemInit(void *arg)
+{
+	SpinLockInit(&FastPathStrongRelationLocks->mutex);
 }
 
 /*
@@ -589,7 +587,7 @@ proclock_hash(const void *key, Size keysize)
 	 * intermediate variable to suppress cast-pointer-to-int warnings.
 	 */
 	procptr = PointerGetDatum(proclocktag->myProc);
-	lockhash ^= ((uint32) procptr) << LOG2_NUM_LOCK_PARTITIONS;
+	lockhash ^= DatumGetUInt32(procptr) << LOG2_NUM_LOCK_PARTITIONS;
 
 	return lockhash;
 }
@@ -610,7 +608,7 @@ ProcLockHashCode(const PROCLOCKTAG *proclocktag, uint32 hashcode)
 	 * This must match proclock_hash()!
 	 */
 	procptr = PointerGetDatum(proclocktag->myProc);
-	lockhash ^= ((uint32) procptr) << LOG2_NUM_LOCK_PARTITIONS;
+	lockhash ^= DatumGetUInt32(procptr) << LOG2_NUM_LOCK_PARTITIONS;
 
 	return lockhash;
 }
@@ -983,36 +981,47 @@ LockAcquireExtended(const LOCKTAG *locktag,
 	 * lock type on a relation we have already locked using the fast-path, but
 	 * for now we don't worry about that case either.
 	 */
-	if (EligibleForRelationFastPath(locktag, lockmode) &&
-		FastPathLocalUseCounts[FAST_PATH_REL_GROUP(locktag->locktag_field2)] < FP_LOCK_SLOTS_PER_GROUP)
+	if (EligibleForRelationFastPath(locktag, lockmode))
 	{
-		uint32		fasthashcode = FastPathStrongLockHashPartition(hashcode);
-		bool		acquired;
+		if (FastPathLocalUseCounts[FAST_PATH_REL_GROUP(locktag->locktag_field2)] <
+			FP_LOCK_SLOTS_PER_GROUP)
+		{
+			uint32		fasthashcode = FastPathStrongLockHashPartition(hashcode);
+			bool		acquired;
 
-		/*
-		 * LWLockAcquire acts as a memory sequencing point, so it's safe to
-		 * assume that any strong locker whose increment to
-		 * FastPathStrongRelationLocks->counts becomes visible after we test
-		 * it has yet to begin to transfer fast-path locks.
-		 */
-		LWLockAcquire(&MyProc->fpInfoLock, LW_EXCLUSIVE);
-		if (FastPathStrongRelationLocks->count[fasthashcode] != 0)
-			acquired = false;
+			/*
+			 * LWLockAcquire acts as a memory sequencing point, so it's safe
+			 * to assume that any strong locker whose increment to
+			 * FastPathStrongRelationLocks->counts becomes visible after we
+			 * test it has yet to begin to transfer fast-path locks.
+			 */
+			LWLockAcquire(&MyProc->fpInfoLock, LW_EXCLUSIVE);
+			if (FastPathStrongRelationLocks->count[fasthashcode] != 0)
+				acquired = false;
+			else
+				acquired = FastPathGrantRelationLock(locktag->locktag_field2,
+													 lockmode);
+			LWLockRelease(&MyProc->fpInfoLock);
+			if (acquired)
+			{
+				/*
+				 * The locallock might contain stale pointers to some old
+				 * shared objects; we MUST reset these to null before
+				 * considering the lock to be acquired via fast-path.
+				 */
+				locallock->lock = NULL;
+				locallock->proclock = NULL;
+				GrantLockLocal(locallock, owner);
+				return LOCKACQUIRE_OK;
+			}
+		}
 		else
-			acquired = FastPathGrantRelationLock(locktag->locktag_field2,
-												 lockmode);
-		LWLockRelease(&MyProc->fpInfoLock);
-		if (acquired)
 		{
 			/*
-			 * The locallock might contain stale pointers to some old shared
-			 * objects; we MUST reset these to null before considering the
-			 * lock to be acquired via fast-path.
+			 * Increment the lock statistics counter if lock could not be
+			 * acquired via the fast-path.
 			 */
-			locallock->lock = NULL;
-			locallock->proclock = NULL;
-			GrantLockLocal(locallock, owner);
-			return LOCKACQUIRE_OK;
+			pgstat_count_lock_fastpath_exceeded(locallock->tag.lock.locktag_type);
 		}
 	}
 
@@ -1931,6 +1940,7 @@ static ProcWaitStatus
 WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner)
 {
 	ProcWaitStatus result;
+	ErrorContextCallback waiterrcontext;
 
 	TRACE_POSTGRESQL_LOCK_WAIT_START(locallock->tag.lock.locktag_field1,
 									 locallock->tag.lock.locktag_field2,
@@ -1938,6 +1948,12 @@ WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner)
 									 locallock->tag.lock.locktag_field4,
 									 locallock->tag.lock.locktag_type,
 									 locallock->tag.mode);
+
+	/* Setup error traceback support for ereport() */
+	waiterrcontext.callback = waitonlock_error_callback;
+	waiterrcontext.arg = locallock;
+	waiterrcontext.previous = error_context_stack;
+	error_context_stack = &waiterrcontext;
 
 	/* adjust the process title to indicate that it's waiting */
 	set_ps_display_suffix("waiting");
@@ -1990,6 +2006,8 @@ WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner)
 	/* reset ps display to remove the suffix */
 	set_ps_display_remove_suffix();
 
+	error_context_stack = waiterrcontext.previous;
+
 	TRACE_POSTGRESQL_LOCK_WAIT_DONE(locallock->tag.lock.locktag_field1,
 									locallock->tag.lock.locktag_field2,
 									locallock->tag.lock.locktag_field3,
@@ -1998,6 +2016,28 @@ WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner)
 									locallock->tag.mode);
 
 	return result;
+}
+
+/*
+ * error context callback for failures in WaitOnLock
+ *
+ * We report which lock was being waited on, in the same style used in
+ * deadlock reports.  This helps with lock timeout errors in particular.
+ */
+static void
+waitonlock_error_callback(void *arg)
+{
+	LOCALLOCK  *locallock = (LOCALLOCK *) arg;
+	const LOCKTAG *tag = &locallock->tag.lock;
+	LOCKMODE	mode = locallock->tag.mode;
+	StringInfoData locktagbuf;
+
+	initStringInfo(&locktagbuf);
+	DescribeLockTag(&locktagbuf, tag);
+
+	errcontext("waiting for %s on %s",
+			   GetLockmodeName(tag->locktag_lockmethodid, mode),
+			   locktagbuf.data);
 }
 
 /*
@@ -2020,13 +2060,13 @@ RemoveFromWaitQueue(PGPROC *proc, uint32 hashcode)
 
 	/* Make sure proc is waiting */
 	Assert(proc->waitStatus == PROC_WAIT_STATUS_WAITING);
-	Assert(proc->links.next != NULL);
+	Assert(!dlist_node_is_detached(&proc->waitLink));
 	Assert(waitLock);
 	Assert(!dclist_is_empty(&waitLock->waitProcs));
 	Assert(0 < lockmethodid && lockmethodid < lengthof(LockMethods));
 
 	/* Remove proc from lock's wait queue */
-	dclist_delete_from_thoroughly(&waitLock->waitProcs, &proc->links);
+	dclist_delete_from_thoroughly(&waitLock->waitProcs, &proc->waitLink);
 
 	/* Undo increments of request counts by waiting process */
 	Assert(waitLock->nRequested > 0);
@@ -2844,7 +2884,7 @@ FastPathTransferRelationLocks(LockMethod lockMethodTable, const LOCKTAG *locktag
 	 */
 	for (i = 0; i < ProcGlobal->allProcCount; i++)
 	{
-		PGPROC	   *proc = &ProcGlobal->allProcs[i];
+		PGPROC	   *proc = GetPGProcByNumber(i);
 		uint32		j;
 
 		LWLockAcquire(&proc->fpInfoLock, LW_EXCLUSIVE);
@@ -3068,9 +3108,7 @@ GetLockConflicts(const LOCKTAG *locktag, LOCKMODE lockmode, int *countp)
 								   (MaxBackends + max_prepared_xacts + 1));
 	}
 	else
-		vxids = (VirtualTransactionId *)
-			palloc0(sizeof(VirtualTransactionId) *
-					(MaxBackends + max_prepared_xacts + 1));
+		vxids = palloc0_array(VirtualTransactionId, (MaxBackends + max_prepared_xacts + 1));
 
 	/* Compute hash code and partition lock, and look up conflicting modes. */
 	hashcode = LockTagHashCode(locktag);
@@ -3103,7 +3141,7 @@ GetLockConflicts(const LOCKTAG *locktag, LOCKMODE lockmode, int *countp)
 		 */
 		for (i = 0; i < ProcGlobal->allProcCount; i++)
 		{
-			PGPROC	   *proc = &ProcGlobal->allProcs[i];
+			PGPROC	   *proc = GetPGProcByNumber(i);
 			uint32		j;
 
 			/* A backend never blocks itself */
@@ -3539,9 +3577,9 @@ AtPrepare_Locks(void)
  * but that probably costs more cycles.
  */
 void
-PostPrepare_Locks(TransactionId xid)
+PostPrepare_Locks(FullTransactionId fxid)
 {
-	PGPROC	   *newproc = TwoPhaseGetDummyProc(xid, false);
+	PGPROC	   *newproc = TwoPhaseGetDummyProc(fxid, false);
 	HASH_SEQ_STATUS status;
 	LOCALLOCK  *locallock;
 	LOCK	   *lock;
@@ -3720,31 +3758,6 @@ PostPrepare_Locks(TransactionId xid)
 
 
 /*
- * Estimate shared-memory space used for lock tables
- */
-Size
-LockManagerShmemSize(void)
-{
-	Size		size = 0;
-	long		max_table_size;
-
-	/* lock hash table */
-	max_table_size = NLOCKENTS();
-	size = add_size(size, hash_estimate_size(max_table_size, sizeof(LOCK)));
-
-	/* proclock hash table */
-	max_table_size *= 2;
-	size = add_size(size, hash_estimate_size(max_table_size, sizeof(PROCLOCK)));
-
-	/*
-	 * Since NLOCKENTS is only an estimate, add 10% safety margin.
-	 */
-	size = add_size(size, size / 10);
-
-	return size;
-}
-
-/*
  * GetLockStatusData - Return a summary of the lock manager's internal
  * status, for use in a user-level reporting function.
  *
@@ -3769,12 +3782,12 @@ GetLockStatusData(void)
 	int			el;
 	int			i;
 
-	data = (LockData *) palloc(sizeof(LockData));
+	data = palloc_object(LockData);
 
 	/* Guess how much space we'll need. */
 	els = MaxBackends;
 	el = 0;
-	data->locks = (LockInstanceData *) palloc(sizeof(LockInstanceData) * els);
+	data->locks = palloc_array(LockInstanceData, els);
 
 	/*
 	 * First, we iterate through the per-backend fast-path arrays, locking
@@ -3790,7 +3803,7 @@ GetLockStatusData(void)
 	 */
 	for (i = 0; i < ProcGlobal->allProcCount; ++i)
 	{
-		PGPROC	   *proc = &ProcGlobal->allProcs[i];
+		PGPROC	   *proc = GetPGProcByNumber(i);
 
 		/* Skip backends with pid=0, as they don't hold fast-path locks */
 		if (proc->pid == 0)
@@ -3969,7 +3982,7 @@ GetBlockerStatusData(int blocked_pid)
 	PGPROC	   *proc;
 	int			i;
 
-	data = (BlockedProcsData *) palloc(sizeof(BlockedProcsData));
+	data = palloc_object(BlockedProcsData);
 
 	/*
 	 * Guess how much space we'll need, and preallocate.  Most of the time
@@ -3979,9 +3992,9 @@ GetBlockerStatusData(int blocked_pid)
 	 */
 	data->nprocs = data->nlocks = data->npids = 0;
 	data->maxprocs = data->maxlocks = data->maxpids = MaxBackends;
-	data->procs = (BlockedProcData *) palloc(sizeof(BlockedProcData) * data->maxprocs);
-	data->locks = (LockInstanceData *) palloc(sizeof(LockInstanceData) * data->maxlocks);
-	data->waiter_pids = (int *) palloc(sizeof(int) * data->maxpids);
+	data->procs = palloc_array(BlockedProcData, data->maxprocs);
+	data->locks = palloc_array(LockInstanceData, data->maxlocks);
+	data->waiter_pids = palloc_array(int, data->maxpids);
 
 	/*
 	 * In order to search the ProcArray for blocked_pid and assume that that
@@ -4113,12 +4126,11 @@ GetSingleProcBlockerStatusData(PGPROC *blocked_proc, BlockedProcsData *data)
 	/* Collect PIDs from the lock's wait queue, stopping at blocked_proc */
 	dclist_foreach(proc_iter, waitQueue)
 	{
-		PGPROC	   *queued_proc = dlist_container(PGPROC, links, proc_iter.cur);
+		PGPROC	   *queued_proc = dlist_container(PGPROC, waitLink, proc_iter.cur);
 
 		if (queued_proc == blocked_proc)
 			break;
 		data->waiter_pids[data->npids++] = queued_proc->pid;
-		queued_proc = (PGPROC *) queued_proc->links.next;
 	}
 
 	bproc->num_locks = data->nlocks - bproc->first_lock;
@@ -4324,11 +4336,11 @@ DumpAllLocks(void)
  * and PANIC anyway.
  */
 void
-lock_twophase_recover(TransactionId xid, uint16 info,
+lock_twophase_recover(FullTransactionId fxid, uint16 info,
 					  void *recdata, uint32 len)
 {
 	TwoPhaseLockRecord *rec = (TwoPhaseLockRecord *) recdata;
-	PGPROC	   *proc = TwoPhaseGetDummyProc(xid, false);
+	PGPROC	   *proc = TwoPhaseGetDummyProc(fxid, false);
 	LOCKTAG    *locktag;
 	LOCKMODE	lockmode;
 	LOCKMETHODID lockmethodid;
@@ -4505,7 +4517,7 @@ lock_twophase_recover(TransactionId xid, uint16 info,
  * starting up into hot standby mode.
  */
 void
-lock_twophase_standby_recover(TransactionId xid, uint16 info,
+lock_twophase_standby_recover(FullTransactionId fxid, uint16 info,
 							  void *recdata, uint32 len)
 {
 	TwoPhaseLockRecord *rec = (TwoPhaseLockRecord *) recdata;
@@ -4524,7 +4536,7 @@ lock_twophase_standby_recover(TransactionId xid, uint16 info,
 	if (lockmode == AccessExclusiveLock &&
 		locktag->locktag_type == LOCKTAG_RELATION)
 	{
-		StandbyAcquireAccessExclusiveLock(xid,
+		StandbyAcquireAccessExclusiveLock(XidFromFullTransactionId(fxid),
 										  locktag->locktag_field1 /* dboid */ ,
 										  locktag->locktag_field2 /* reloid */ );
 	}
@@ -4537,11 +4549,11 @@ lock_twophase_standby_recover(TransactionId xid, uint16 info,
  * Find and release the lock indicated by the 2PC record.
  */
 void
-lock_twophase_postcommit(TransactionId xid, uint16 info,
+lock_twophase_postcommit(FullTransactionId fxid, uint16 info,
 						 void *recdata, uint32 len)
 {
 	TwoPhaseLockRecord *rec = (TwoPhaseLockRecord *) recdata;
-	PGPROC	   *proc = TwoPhaseGetDummyProc(xid, true);
+	PGPROC	   *proc = TwoPhaseGetDummyProc(fxid, true);
 	LOCKTAG    *locktag;
 	LOCKMETHODID lockmethodid;
 	LockMethod	lockMethodTable;
@@ -4563,10 +4575,10 @@ lock_twophase_postcommit(TransactionId xid, uint16 info,
  * This is actually just the same as the COMMIT case.
  */
 void
-lock_twophase_postabort(TransactionId xid, uint16 info,
+lock_twophase_postabort(FullTransactionId fxid, uint16 info,
 						void *recdata, uint32 len)
 {
-	lock_twophase_postcommit(xid, info, recdata, len);
+	lock_twophase_postcommit(fxid, info, recdata, len);
 }
 
 /*

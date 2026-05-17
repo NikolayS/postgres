@@ -3,7 +3,7 @@
  * test_predtest.c
  *		Test correctness of optimizer's predicate proof logic.
  *
- * Copyright (c) 2018-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2018-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_predtest/test_predtest.c
@@ -230,6 +230,7 @@ test_predtest(PG_FUNCTION_ARGS)
 					   "s_r_holds", BOOLOID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 8,
 					   "w_r_holds", BOOLOID, -1, 0);
+	TupleDescFinalize(tupdesc);
 	tupdesc = BlessTupleDesc(tupdesc);
 
 	values[0] = BoolGetDatum(strong_implied_by);

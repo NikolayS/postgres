@@ -3,7 +3,7 @@
  * nbtsplitloc.c
  *	  Choose split point code for Postgres btree implementation.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "access/nbtree.h"
+#include "access/tableam.h"
 #include "common/int.h"
 
 typedef enum
@@ -68,7 +69,7 @@ static void _bt_deltasortsplits(FindSplitData *state, double fillfactormult,
 static int	_bt_splitcmp(const void *arg1, const void *arg2);
 static bool _bt_afternewitemoff(FindSplitData *state, OffsetNumber maxoff,
 								int leaffillfactor, bool *usemult);
-static bool _bt_adjacenthtid(ItemPointer lowhtid, ItemPointer highhtid);
+static bool _bt_adjacenthtid(const ItemPointerData *lowhtid, const ItemPointerData *highhtid);
 static OffsetNumber _bt_bestsplitloc(FindSplitData *state, int perfectpenalty,
 									 bool *newitemonleft, FindSplitStrat strategy);
 static int	_bt_defaultinterval(FindSplitData *state);
@@ -196,7 +197,7 @@ _bt_findsplitloc(Relation rel,
 	 * between tuples will be legal).
 	 */
 	state.maxsplits = maxoff;
-	state.splits = palloc(sizeof(SplitPoint) * state.maxsplits);
+	state.splits = palloc_array(SplitPoint, state.maxsplits);
 	state.nsplits = 0;
 
 	/*
@@ -593,8 +594,8 @@ _bt_deltasortsplits(FindSplitData *state, double fillfactormult,
 static int
 _bt_splitcmp(const void *arg1, const void *arg2)
 {
-	SplitPoint *split1 = (SplitPoint *) arg1;
-	SplitPoint *split2 = (SplitPoint *) arg2;
+	const SplitPoint *split1 = arg1;
+	const SplitPoint *split2 = arg2;
 
 	return pg_cmp_s16(split1->curdelta, split2->curdelta);
 }
@@ -746,7 +747,7 @@ _bt_afternewitemoff(FindSplitData *state, OffsetNumber maxoff,
  * transaction.
  */
 static bool
-_bt_adjacenthtid(ItemPointer lowhtid, ItemPointer highhtid)
+_bt_adjacenthtid(const ItemPointerData *lowhtid, const ItemPointerData *highhtid)
 {
 	BlockNumber lowblk,
 				highblk;

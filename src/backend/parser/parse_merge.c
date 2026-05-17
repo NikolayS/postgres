@@ -3,7 +3,7 @@
  * parse_merge.c
  *	  handle merge-statement in parser
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -307,8 +307,6 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 					List	   *icolumns;
 					List	   *attrnos;
 
-					pstate->p_is_insert = true;
-
 					icolumns = checkInsertTargets(pstate,
 												  mergeWhenClause->targetList,
 												  &attrnos);
@@ -381,12 +379,9 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 				}
 				break;
 			case CMD_UPDATE:
-				{
-					pstate->p_is_insert = false;
-					action->targetList =
-						transformUpdateTargetList(pstate,
-												  mergeWhenClause->targetList);
-				}
+				action->targetList =
+					transformUpdateTargetList(pstate,
+											  mergeWhenClause->targetList, NULL);
 				break;
 			case CMD_DELETE:
 				break;

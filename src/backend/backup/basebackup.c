@@ -3,7 +3,7 @@
  * basebackup.c
  *	  code for taking a base backup and streaming it to a standby
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/backup/basebackup.c
@@ -48,6 +48,7 @@
 #include "utils/ps_status.h"
 #include "utils/relcache.h"
 #include "utils/resowner.h"
+#include "utils/wait_event.h"
 
 /*
  * How much data do we want to send in one CopyData message? Note that
@@ -77,6 +78,11 @@ typedef struct
 	pg_compress_specification compression_specification;
 	pg_checksum_type manifest_checksum_type;
 } basebackup_options;
+
+#define TAR_NUM_TERMINATION_BLOCKS 2
+
+StaticAssertDecl(TAR_NUM_TERMINATION_BLOCKS * TAR_BLOCK_SIZE <= BLCKSZ,
+				 "BLCKSZ too small for " CppAsString2(TAR_NUM_TERMINATION_BLOCKS) " tar termination blocks");
 
 static int64 sendTablespace(bbsink *sink, char *path, Oid spcoid, bool sizeonly,
 							struct backup_manifest_info *manifest,
@@ -239,7 +245,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 	TimeLineID	endtli;
 	backup_manifest_info manifest;
 	BackupState *backup_state;
-	StringInfo	tablespace_map;
+	StringInfoData tablespace_map;
 
 	/* Initial backup state, insofar as we know it now. */
 	state.tablespaces = NIL;
@@ -262,12 +268,12 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 	total_checksum_failures = 0;
 
 	/* Allocate backup related variables. */
-	backup_state = (BackupState *) palloc0(sizeof(BackupState));
-	tablespace_map = makeStringInfo();
+	backup_state = palloc0_object(BackupState);
+	initStringInfo(&tablespace_map);
 
 	basebackup_progress_wait_checkpoint();
 	do_pg_backup_start(opt->label, opt->fastcheckpoint, &state.tablespaces,
-					   backup_state, tablespace_map);
+					   backup_state, &tablespace_map);
 
 	state.startptr = backup_state->startpoint;
 	state.starttli = backup_state->starttli;
@@ -289,7 +295,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 			PrepareForIncrementalBackup(ib, backup_state);
 
 		/* Add a node for the base directory at the end */
-		newti = palloc0(sizeof(tablespaceinfo));
+		newti = palloc0_object(tablespaceinfo);
 		newti->size = -1;
 		state.tablespaces = lappend(state.tablespaces, newti);
 
@@ -342,7 +348,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 				if (opt->sendtblspcmapfile)
 				{
 					sendFileWithContent(sink, TABLESPACE_MAP,
-										tablespace_map->data, -1, &manifest);
+										tablespace_map.data, -1, &manifest);
 					sendtblspclinks = false;
 				}
 
@@ -382,10 +388,8 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 			else
 			{
 				/* Properly terminate the tarfile. */
-				StaticAssertDecl(2 * TAR_BLOCK_SIZE <= BLCKSZ,
-								 "BLCKSZ too small for 2 tar blocks");
-				memset(sink->bbs_buffer, 0, 2 * TAR_BLOCK_SIZE);
-				bbsink_archive_contents(sink, 2 * TAR_BLOCK_SIZE);
+				memset(sink->bbs_buffer, 0, TAR_NUM_TERMINATION_BLOCKS * TAR_BLOCK_SIZE);
+				bbsink_archive_contents(sink, TAR_NUM_TERMINATION_BLOCKS * TAR_BLOCK_SIZE);
 
 				/* OK, that's the end of the archive. */
 				bbsink_end_archive(sink);
@@ -399,7 +403,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 		endtli = backup_state->stoptli;
 
 		/* Deallocate backup-related variables. */
-		destroyStringInfo(tablespace_map);
+		pfree(tablespace_map.data);
 		pfree(backup_state);
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, BoolGetDatum(false));
@@ -635,10 +639,8 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 		}
 
 		/* Properly terminate the tar file. */
-		StaticAssertStmt(2 * TAR_BLOCK_SIZE <= BLCKSZ,
-						 "BLCKSZ too small for 2 tar blocks");
-		memset(sink->bbs_buffer, 0, 2 * TAR_BLOCK_SIZE);
-		bbsink_archive_contents(sink, 2 * TAR_BLOCK_SIZE);
+		memset(sink->bbs_buffer, 0, TAR_NUM_TERMINATION_BLOCKS * TAR_BLOCK_SIZE);
+		bbsink_archive_contents(sink, TAR_NUM_TERMINATION_BLOCKS * TAR_BLOCK_SIZE);
 
 		/* OK, that's the end of the archive. */
 		bbsink_end_archive(sink);
@@ -808,8 +810,8 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 			if (maxrate < MAX_RATE_LOWER || maxrate > MAX_RATE_UPPER)
 				ereport(ERROR,
 						(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-						 errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
-								(int) maxrate, "MAX_RATE", MAX_RATE_LOWER, MAX_RATE_UPPER)));
+						 errmsg("%" PRId64 " is outside the valid range for parameter \"%s\" (%d .. %d)",
+								maxrate, "MAX_RATE", MAX_RATE_LOWER, MAX_RATE_UPPER)));
 
 			opt->maxrate = (uint32) maxrate;
 			o_maxrate = true;
@@ -1048,7 +1050,7 @@ SendBaseBackup(BaseBackupCmd *cmd, IncrementalBackupInfo *ib)
 		sink = bbsink_zstd_new(sink, &opt.compression_specification);
 
 	/* Set up progress reporting. */
-	sink = bbsink_progress_new(sink, opt.progress);
+	sink = bbsink_progress_new(sink, opt.progress, opt.incremental);
 
 	/*
 	 * Perform the base backup, but make sure we clean up the bbsink even if
@@ -1104,7 +1106,7 @@ sendFileWithContent(bbsink *sink, const char *filename, const char *content,
 
 	_tarWriteHeader(sink, filename, NULL, &statbuf, false);
 
-	if (pg_checksum_update(&checksum_ctx, (uint8 *) content, len) < 0)
+	if (pg_checksum_update(&checksum_ctx, (const uint8 *) content, len) < 0)
 		elog(ERROR, "could not update checksum of file \"%s\"",
 			 filename);
 
@@ -1206,7 +1208,7 @@ sendDir(bbsink *sink, const char *path, int basepathlen, bool sizeonly,
 	 * But we don't need it at all if this is not an incremental backup.
 	 */
 	if (ib != NULL)
-		relative_block_numbers = palloc(sizeof(BlockNumber) * RELSEG_SIZE);
+		relative_block_numbers = palloc_array(BlockNumber, RELSEG_SIZE);
 
 	/*
 	 * Determine if the current path is a database directory that can contain
@@ -1611,10 +1613,11 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	/*
 	 * If we weren't told not to verify checksums, and if checksums are
 	 * enabled for this cluster, and if this is a relation file, then verify
-	 * the checksum.
+	 * the checksum.  We cannot at this point check if checksums are enabled
+	 * or disabled as that might change, thus we check at each point where we
+	 * could be validating a checksum.
 	 */
-	if (!noverify_checksums && DataChecksumsEnabled() &&
-		RelFileNumberIsValid(relfilenumber))
+	if (!noverify_checksums && RelFileNumberIsValid(relfilenumber))
 		verify_checksum = true;
 
 	/*
@@ -1747,7 +1750,7 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 		 * If the amount of data we were able to read was not a multiple of
 		 * BLCKSZ, we cannot verify checksums, which are block-level.
 		 */
-		if (verify_checksum && (cnt % BLCKSZ != 0))
+		if (verify_checksum && DataChecksumsNeedVerify() && (cnt % BLCKSZ != 0))
 		{
 			ereport(WARNING,
 					(errmsg("could not verify checksum in file \"%s\", block "
@@ -1842,9 +1845,10 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
  * 'blkno' is the block number of the first page in the bbsink's buffer
  * relative to the start of the relation.
  *
- * 'verify_checksum' indicates whether we should try to verify checksums
- * for the blocks we read. If we do this, we'll update *checksum_failures
- * and issue warnings as appropriate.
+ * 'verify_checksum' determines if the user has asked to verify checksums, but
+ * since data checksums can be disabled, or become disabled, we need to check
+ * state before verifying individual pages.  If we do this, we'll update
+ * *checksum_failures and issue warnings as appropriate.
  */
 static off_t
 read_file_data_into_buffer(bbsink *sink, const char *readfilename, int fd,
@@ -1870,6 +1874,13 @@ read_file_data_into_buffer(bbsink *sink, const char *readfilename, int fd,
 		int			reread_cnt;
 		uint16		expected_checksum;
 
+		/*
+		 * The data checksum state can change at any point, so we need to
+		 * re-check before each page.
+		 */
+		if (!DataChecksumsNeedVerify())
+			return cnt;
+
 		page = sink->bbs_buffer + BLCKSZ * i;
 
 		/* If the page is OK, go on to the next one. */
@@ -1892,7 +1903,12 @@ read_file_data_into_buffer(bbsink *sink, const char *readfilename, int fd,
 		 * allows us to wait until we can be certain that no write to the
 		 * block is in progress. Since we don't have any such thing right now,
 		 * we just do this and hope for the best.
+		 *
+		 * The data checksum state may also have changed concurrently so check
+		 * again.
 		 */
+		if (!DataChecksumsNeedVerify())
+			return cnt;
 		reread_cnt =
 			basebackup_read_file(fd, sink->bbs_buffer + BLCKSZ * i,
 								 BLCKSZ, offset + BLCKSZ * i,
@@ -2005,6 +2021,9 @@ verify_page_checksum(Page page, XLogRecPtr start_lsn, BlockNumber blkno,
 	 * pages, since they don't have a checksum yet.
 	 */
 	if (PageIsNew(page) || PageGetLSN(page) >= start_lsn)
+		return true;
+
+	if (!DataChecksumsNeedVerify())
 		return true;
 
 	/* Perform the actual checksum calculation. */

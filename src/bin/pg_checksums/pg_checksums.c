@@ -4,7 +4,7 @@
  *	  Checks, enables or disables page level checksums for an offline
  *	  cluster
  *
- * Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/bin/pg_checksums/pg_checksums.c
@@ -25,6 +25,7 @@
 #include "common/logging.h"
 #include "common/relpath.h"
 #include "fe_utils/option_utils.h"
+#include "fe_utils/version.h"
 #include "getopt_long.h"
 #include "pg_getopt.h"
 #include "storage/bufpage.h"
@@ -448,6 +449,8 @@ main(int argc, char *argv[])
 	int			c;
 	int			option_index;
 	bool		crc_ok;
+	uint32		major_version;
+	char	   *version_str;
 
 	pg_logging_init(argv[0]);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
@@ -543,6 +546,20 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/*
+	 * Retrieve the contents of this cluster's PG_VERSION.  We require
+	 * compatibility with the same major version as the one this tool is
+	 * compiled with.
+	 */
+	major_version = GET_PG_MAJORVERSION_NUM(get_pg_version(DataDir, &version_str));
+	if (major_version != PG_MAJORVERSION_NUM)
+	{
+		pg_log_error("data directory is of wrong version");
+		pg_log_error_detail("File \"%s\" contains \"%s\", which is not compatible with this program's version \"%s\".",
+							"PG_VERSION", version_str, PG_MAJORVERSION);
+		exit(1);
+	}
+
 	/* Read the control file and check compatibility */
 	ControlFile = get_controlfile(DataDir, &crc_ok);
 	if (!crc_ok)
@@ -568,15 +585,15 @@ main(int argc, char *argv[])
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 		pg_fatal("cluster must be shut down");
 
-	if (ControlFile->data_checksum_version == 0 &&
+	if (ControlFile->data_checksum_version != PG_DATA_CHECKSUM_VERSION &&
 		mode == PG_MODE_CHECK)
 		pg_fatal("data checksums are not enabled in cluster");
 
-	if (ControlFile->data_checksum_version == 0 &&
+	if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_OFF &&
 		mode == PG_MODE_DISABLE)
 		pg_fatal("data checksums are already disabled in cluster");
 
-	if (ControlFile->data_checksum_version > 0 &&
+	if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION &&
 		mode == PG_MODE_ENABLE)
 		pg_fatal("data checksums are already enabled in cluster");
 
@@ -628,7 +645,7 @@ main(int argc, char *argv[])
 	if (mode == PG_MODE_ENABLE || mode == PG_MODE_DISABLE)
 	{
 		ControlFile->data_checksum_version =
-			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_VERSION : 0;
+			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_VERSION : PG_DATA_CHECKSUM_OFF;
 
 		if (do_sync)
 		{

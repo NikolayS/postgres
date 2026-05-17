@@ -32,7 +32,7 @@
  *	  clients.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -97,9 +97,9 @@
 #include "lib/ilist.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
-#include "pg_getopt.h"
 #include "pgstat.h"
 #include "port/pg_bswap.h"
+#include "port/pg_getopt_ctx.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgworker_internals.h"
 #include "postmaster/pgarch.h"
@@ -115,6 +115,7 @@
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
+#include "storage/shmem_internal.h"
 #include "tcop/backend_startup.h"
 #include "tcop/tcopprot.h"
 #include "utils/datetime.h"
@@ -303,12 +304,13 @@ static bool FatalError = false; /* T if recovering from backend crash */
  *
  * When the startup process is ready to start archive recovery, it signals the
  * postmaster, and we switch to PM_RECOVERY state. The background writer and
- * checkpointer are launched, while the startup process continues applying WAL.
- * If Hot Standby is enabled, then, after reaching a consistent point in WAL
- * redo, startup process signals us again, and we switch to PM_HOT_STANDBY
- * state and begin accepting connections to perform read-only queries.  When
- * archive recovery is finished, the startup process exits with exit code 0
- * and we switch to PM_RUN state.
+ * checkpointer are already running (as these are launched during PM_STARTUP),
+ * and the startup process continues applying WAL.  If Hot Standby is enabled,
+ * then, after reaching a consistent point in WAL redo, startup process
+ * signals us again, and we switch to PM_HOT_STANDBY state and begin accepting
+ * connections to perform read-only queries.  When archive recovery is
+ * finished, the startup process exits with exit code 0 and we switch to
+ * PM_RUN state.
  *
  * Normal child backends can only be launched when we are in PM_RUN or
  * PM_HOT_STANDBY state.  (connsAllowed can also restrict launching.)
@@ -408,6 +410,7 @@ static DNSServiceRef bonjour_sdref = NULL;
 #endif
 
 /* State for IO worker management. */
+static TimestampTz io_worker_launch_next_time = 0;
 static int	io_worker_count = 0;
 static PMChild *io_worker_children[MAX_IO_WORKERS];
 
@@ -446,7 +449,8 @@ static int	CountChildren(BackendTypeMask targetMask);
 static void LaunchMissingBackgroundProcesses(void);
 static void maybe_start_bgworkers(void);
 static bool maybe_reap_io_worker(int pid);
-static void maybe_adjust_io_workers(void);
+static void maybe_start_io_workers(void);
+static TimestampTz maybe_start_io_workers_scheduled_at(void);
 static bool CreateOptsFile(int argc, char *argv[], char *fullprogname);
 static PMChild *StartChildProcess(BackendType type);
 static void StartSysLogger(void);
@@ -492,6 +496,7 @@ HANDLE		PostmasterHandle;
 void
 PostmasterMain(int argc, char *argv[])
 {
+	pg_getopt_ctx optctx;
 	int			opt;
 	int			status;
 	char	   *userDoption = NULL;
@@ -551,8 +556,8 @@ PostmasterMain(int argc, char *argv[])
 	pqsignal(SIGINT, handle_pm_shutdown_request_signal);
 	pqsignal(SIGQUIT, handle_pm_shutdown_request_signal);
 	pqsignal(SIGTERM, handle_pm_shutdown_request_signal);
-	pqsignal(SIGALRM, SIG_IGN); /* ignored */
-	pqsignal(SIGPIPE, SIG_IGN); /* ignored */
+	pqsignal(SIGALRM, PG_SIG_IGN);	/* ignored */
+	pqsignal(SIGPIPE, PG_SIG_IGN);	/* ignored */
 	pqsignal(SIGUSR1, handle_pm_pmsignal_signal);
 	pqsignal(SIGUSR2, dummy_handler);	/* unused, reserve for children */
 	pqsignal(SIGCHLD, handle_pm_child_exit_signal);
@@ -569,15 +574,15 @@ PostmasterMain(int argc, char *argv[])
 	 * child processes should just allow the inherited settings to stand.
 	 */
 #ifdef SIGTTIN
-	pqsignal(SIGTTIN, SIG_IGN); /* ignored */
+	pqsignal(SIGTTIN, PG_SIG_IGN);	/* ignored */
 #endif
 #ifdef SIGTTOU
-	pqsignal(SIGTTOU, SIG_IGN); /* ignored */
+	pqsignal(SIGTTOU, PG_SIG_IGN);	/* ignored */
 #endif
 
 	/* ignore SIGXFSZ, so that ulimit violations work like disk full */
 #ifdef SIGXFSZ
-	pqsignal(SIGXFSZ, SIG_IGN); /* ignored */
+	pqsignal(SIGXFSZ, PG_SIG_IGN);	/* ignored */
 #endif
 
 	/* Begin accepting signals. */
@@ -588,19 +593,19 @@ PostmasterMain(int argc, char *argv[])
 	 */
 	InitializeGUCOptions();
 
-	opterr = 1;
-
 	/*
 	 * Parse command-line options.  CAUTION: keep this in sync with
 	 * tcop/postgres.c (the option sets should not conflict) and with the
 	 * common help() function in main/main.c.
 	 */
-	while ((opt = getopt(argc, argv, "B:bC:c:D:d:EeFf:h:ijk:lN:OPp:r:S:sTt:W:-:")) != -1)
+	pg_getopt_start(&optctx, argc, argv, "B:bC:c:D:d:EeFf:h:ijk:lN:OPp:r:S:sTt:W:-:");
+	optctx.opterr = 1;
+	while ((opt = pg_getopt_next(&optctx)) != -1)
 	{
 		switch (opt)
 		{
 			case 'B':
-				SetConfigOption("shared_buffers", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("shared_buffers", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'b':
@@ -609,7 +614,7 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'C':
-				output_config_variable = strdup(optarg);
+				output_config_variable = strdup(optctx.optarg);
 				break;
 
 			case '-':
@@ -620,30 +625,30 @@ PostmasterMain(int argc, char *argv[])
 				 * returns DISPATCH_POSTMASTER if it doesn't find a match, so
 				 * error for anything else.
 				 */
-				if (parse_dispatch_option(optarg) != DISPATCH_POSTMASTER)
+				if (parse_dispatch_option(optctx.optarg) != DISPATCH_POSTMASTER)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("--%s must be first argument", optarg)));
+							 errmsg("--%s must be first argument", optctx.optarg)));
 
-				/* FALLTHROUGH */
+				pg_fallthrough;
 			case 'c':
 				{
 					char	   *name,
 							   *value;
 
-					ParseLongOption(optarg, &name, &value);
+					ParseLongOption(optctx.optarg, &name, &value);
 					if (!value)
 					{
 						if (opt == '-')
 							ereport(ERROR,
 									(errcode(ERRCODE_SYNTAX_ERROR),
 									 errmsg("--%s requires a value",
-											optarg)));
+											optctx.optarg)));
 						else
 							ereport(ERROR,
 									(errcode(ERRCODE_SYNTAX_ERROR),
 									 errmsg("-c %s requires a value",
-											optarg)));
+											optctx.optarg)));
 					}
 
 					SetConfigOption(name, value, PGC_POSTMASTER, PGC_S_ARGV);
@@ -653,11 +658,11 @@ PostmasterMain(int argc, char *argv[])
 				}
 
 			case 'D':
-				userDoption = strdup(optarg);
+				userDoption = strdup(optctx.optarg);
 				break;
 
 			case 'd':
-				set_debug_options(atoi(optarg), PGC_POSTMASTER, PGC_S_ARGV);
+				set_debug_options(atoi(optctx.optarg), PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'E':
@@ -673,16 +678,16 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'f':
-				if (!set_plan_disabling_options(optarg, PGC_POSTMASTER, PGC_S_ARGV))
+				if (!set_plan_disabling_options(optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV))
 				{
 					write_stderr("%s: invalid argument for option -f: \"%s\"\n",
-								 progname, optarg);
+								 progname, optctx.optarg);
 					ExitPostmaster(1);
 				}
 				break;
 
 			case 'h':
-				SetConfigOption("listen_addresses", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("listen_addresses", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'i':
@@ -694,7 +699,7 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'k':
-				SetConfigOption("unix_socket_directories", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("unix_socket_directories", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'l':
@@ -702,7 +707,7 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'N':
-				SetConfigOption("max_connections", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("max_connections", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'O':
@@ -714,7 +719,7 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'p':
-				SetConfigOption("port", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("port", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 'r':
@@ -722,7 +727,7 @@ PostmasterMain(int argc, char *argv[])
 				break;
 
 			case 'S':
-				SetConfigOption("work_mem", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("work_mem", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			case 's':
@@ -740,7 +745,7 @@ PostmasterMain(int argc, char *argv[])
 
 			case 't':
 				{
-					const char *tmp = get_stats_option_name(optarg);
+					const char *tmp = get_stats_option_name(optctx.optarg);
 
 					if (tmp)
 					{
@@ -749,14 +754,14 @@ PostmasterMain(int argc, char *argv[])
 					else
 					{
 						write_stderr("%s: invalid argument for option -t: \"%s\"\n",
-									 progname, optarg);
+									 progname, optctx.optarg);
 						ExitPostmaster(1);
 					}
 					break;
 				}
 
 			case 'W':
-				SetConfigOption("post_auth_delay", optarg, PGC_POSTMASTER, PGC_S_ARGV);
+				SetConfigOption("post_auth_delay", optctx.optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 
 			default:
@@ -769,10 +774,10 @@ PostmasterMain(int argc, char *argv[])
 	/*
 	 * Postmaster accepts no non-option switch arguments.
 	 */
-	if (optind < argc)
+	if (optctx.optind < argc)
 	{
 		write_stderr("%s: invalid argument: \"%s\"\n",
-					 progname, argv[optind]);
+					 progname, argv[optctx.optind]);
 		write_stderr("Try \"%s --help\" for more information.\n",
 					 progname);
 		ExitPostmaster(1);
@@ -854,6 +859,9 @@ PostmasterMain(int argc, char *argv[])
 	if (summarize_wal && wal_level == WAL_LEVEL_MINIMAL)
 		ereport(ERROR,
 				(errmsg("WAL cannot be summarized when \"wal_level\" is \"minimal\"")));
+	if (sync_replication_slots && wal_level == WAL_LEVEL_MINIMAL)
+		ereport(ERROR,
+				(errmsg("replication slot synchronization (\"sync_replication_slots\" = on) requires \"wal_level\" to be \"replica\" or \"logical\"")));
 
 	/*
 	 * Other one-time internal sanity checks can go here, if they are fast.
@@ -865,19 +873,10 @@ PostmasterMain(int argc, char *argv[])
 		ExitPostmaster(1);
 	}
 
-	/*
-	 * Now that we are done processing the postmaster arguments, reset
-	 * getopt(3) library so that it will work correctly in subprocesses.
-	 */
-	optind = 1;
-#ifdef HAVE_INT_OPTRESET
-	optreset = 1;				/* some systems need this too */
-#endif
-
 	/* For debugging: display postmaster environment */
 	if (message_level_is_interesting(DEBUG3))
 	{
-#if !defined(WIN32) || defined(_MSC_VER)
+#if !defined(WIN32)
 		extern char **environ;
 #endif
 		char	  **p;
@@ -927,6 +926,11 @@ PostmasterMain(int argc, char *argv[])
 	ApplyLauncherRegister();
 
 	/*
+	 * Register the shared memory needs of all core subsystems.
+	 */
+	RegisterBuiltinShmemCallbacks();
+
+	/*
 	 * process any libraries that should be preloaded at postmaster start
 	 */
 	process_shared_preload_libraries();
@@ -956,9 +960,20 @@ PostmasterMain(int argc, char *argv[])
 	InitializeFastPathLocks();
 
 	/*
-	 * Give preloaded libraries a chance to request additional shared memory.
+	 * Also call any legacy shmem request hooks that might've been installed
+	 * by preloaded libraries.
+	 *
+	 * Note: this must be done before ShmemCallRequestCallbacks(), because the
+	 * hooks may request LWLocks with RequestNamedLWLockTranche(), which in
+	 * turn affects the size of the LWLock array calculated in lwlock.c.
 	 */
 	process_shmem_requests();
+
+	/*
+	 * Ask all subsystems, including preloaded libraries, to register their
+	 * shared memory needs.
+	 */
+	ShmemCallRequestCallbacks();
 
 	/*
 	 * Now that loadable modules have had their chance to request additional
@@ -1379,7 +1394,7 @@ PostmasterMain(int argc, char *argv[])
 	UpdatePMState(PM_STARTUP);
 
 	/* Make sure we can perform I/O while starting up. */
-	maybe_adjust_io_workers();
+	maybe_start_io_workers();
 
 	/* Start bgwriter and checkpointer so they can help with recovery */
 	if (CheckpointerPMChild == NULL)
@@ -1543,33 +1558,44 @@ checkControlFile(void)
 static int
 DetermineSleepTime(void)
 {
-	TimestampTz next_wakeup = 0;
+	TimestampTz next_wakeup;
 
 	/*
-	 * Normal case: either there are no background workers at all, or we're in
-	 * a shutdown sequence (during which we ignore bgworkers altogether).
+	 * If in ImmediateShutdown with a SIGKILL timeout, ignore everything else
+	 * and wait for that.
+	 *
+	 * XXX Shouldn't this also test FatalError?
 	 */
-	if (Shutdown > NoShutdown ||
-		(!StartWorkerNeeded && !HaveCrashedWorker))
+	if (Shutdown >= ImmediateShutdown)
 	{
 		if (AbortStartTime != 0)
 		{
+			time_t		curtime = time(NULL);
 			int			seconds;
 
-			/* time left to abort; clamp to 0 in case it already expired */
-			seconds = SIGKILL_CHILDREN_AFTER_SECS -
-				(time(NULL) - AbortStartTime);
+			/*
+			 * time left to abort; clamp to 0 if it already expired, or if
+			 * time goes backwards
+			 */
+			if (curtime < AbortStartTime ||
+				curtime - AbortStartTime >= SIGKILL_CHILDREN_AFTER_SECS)
+				seconds = 0;
+			else
+				seconds = SIGKILL_CHILDREN_AFTER_SECS -
+					(curtime - AbortStartTime);
 
-			return Max(seconds * 1000, 0);
+			return seconds * 1000;
 		}
-		else
-			return 60 * 1000;
 	}
 
-	if (StartWorkerNeeded)
+	/* Time of next maybe_start_io_workers() call, or 0 for none. */
+	next_wakeup = maybe_start_io_workers_scheduled_at();
+
+	/* Ignore bgworkers during shutdown. */
+	if (StartWorkerNeeded && Shutdown == NoShutdown)
 		return 0;
 
-	if (HaveCrashedWorker)
+	if (HaveCrashedWorker && Shutdown == NoShutdown)
 	{
 		dlist_mutable_iter iter;
 
@@ -1934,6 +1960,9 @@ InitProcessGlobals(void)
 	MyStartTimestamp = GetCurrentTimestamp();
 	MyStartTime = timestamptz_to_time_t(MyStartTimestamp);
 
+	/* initialize timing infrastructure (required for INSTR_* calls) */
+	pg_initialize_timing();
+
 	/*
 	 * Set a different global seed in every process.  We want something
 	 * unpredictable, so if possible, use high-quality random bits for the
@@ -2277,29 +2306,13 @@ process_pm_child_exit(void)
 			}
 
 			/*
-			 * Unexpected exit of startup process (including FATAL exit)
-			 * during PM_STARTUP is treated as catastrophic. There are no
-			 * other processes running yet, so we can just exit.
-			 */
-			if (pmState == PM_STARTUP &&
-				StartupStatus != STARTUP_SIGNALED &&
-				!EXIT_STATUS_0(exitstatus))
-			{
-				LogChildExit(LOG, _("startup process"),
-							 pid, exitstatus);
-				ereport(LOG,
-						(errmsg("aborting startup due to startup process failure")));
-				ExitPostmaster(1);
-			}
-
-			/*
-			 * After PM_STARTUP, any unexpected exit (including FATAL exit) of
-			 * the startup process is catastrophic, so kill other children,
-			 * and set StartupStatus so we don't try to reinitialize after
-			 * they're gone.  Exception: if StartupStatus is STARTUP_SIGNALED,
-			 * then we previously sent the startup process a SIGQUIT; so
-			 * that's probably the reason it died, and we do want to try to
-			 * restart in that case.
+			 * Any unexpected exit (including FATAL exit) of the startup
+			 * process is catastrophic, so kill other children, and set
+			 * StartupStatus so we don't try to reinitialize after they're
+			 * gone.  Exception: if StartupStatus is STARTUP_SIGNALED, then we
+			 * previously sent the startup process a SIGQUIT; so that's
+			 * probably the reason it died, and we do want to try to restart
+			 * in that case.
 			 *
 			 * This stanza also handles the case where we sent a SIGQUIT
 			 * during PM_STARTUP due to some dead-end child crashing: in that
@@ -2522,7 +2535,17 @@ process_pm_child_exit(void)
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
 				HandleChildCrash(pid, exitstatus, _("io worker"));
 
-			maybe_adjust_io_workers();
+			/*
+			 * A worker that exited with an error might have brought the pool
+			 * size below io_min_workers, or allowed the queue to grow to the
+			 * point where another worker called for growth.
+			 *
+			 * In the common case that a worker timed out due to idleness, no
+			 * replacement needs to be started.  maybe_start_io_workers() will
+			 * figure that out.
+			 */
+			maybe_start_io_workers();
+
 			continue;
 		}
 
@@ -2630,6 +2653,13 @@ CleanupBackend(PMChild *bp,
 	}
 	bp = NULL;
 
+	/*
+	 * In a crash case, exit immediately without resetting background worker
+	 * state. However, if restart_after_crash is enabled, the background
+	 * worker state (e.g., rw_pid) still needs be reset so the worker can
+	 * restart after crash recovery. This reset is handled in
+	 * ResetBackgroundWorkerCrashTimes(), not here.
+	 */
 	if (crashed)
 	{
 		HandleChildCrash(bp_pid, exitstatus, procname);
@@ -2645,6 +2675,14 @@ CleanupBackend(PMChild *bp,
 	 */
 	if (bp_bgworker_notify)
 		BackgroundWorkerStopNotifications(bp_pid);
+
+	/*
+	 * If it was an autovacuum worker, wake up the launcher so that it can
+	 * immediately launch a new worker or rebalance to cost limit setting of
+	 * the remaining workers.
+	 */
+	if (bp_bkend_type == B_AUTOVAC_WORKER && AutoVacLauncherPMChild != NULL)
+		signal_child(AutoVacLauncherPMChild, SIGUSR2);
 
 	/*
 	 * If it was a background worker, also update its RegisteredBgWorker
@@ -2727,12 +2765,9 @@ HandleFatalError(QuitSignalReason reason, bool consider_sigabrt)
 			/* shouldn't have any children */
 			Assert(false);
 			break;
-		case PM_STARTUP:
-			/* should have been handled in process_pm_child_exit */
-			Assert(false);
-			break;
 
 			/* wait for children to die */
+		case PM_STARTUP:
 		case PM_RECOVERY:
 		case PM_HOT_STANDBY:
 		case PM_RUN:
@@ -2973,6 +3008,11 @@ PostmasterStateMachine(void)
 									B_INVALID,
 									B_STANDALONE_BACKEND);
 
+			/* also add data checksums processes */
+			remainMask = btmask_add(remainMask,
+									B_DATACHECKSUMSWORKER_LAUNCHER,
+									B_DATACHECKSUMSWORKER_WORKER);
+
 			/* All types should be included in targetMask or remainMask */
 			Assert((remainMask.mask | targetMask.mask) == BTYPE_MASK_ALL.mask);
 		}
@@ -3209,13 +3249,20 @@ PostmasterStateMachine(void)
 		/* re-read control file into local memory */
 		LocalProcessControlFile(true);
 
-		/* re-create shared memory and semaphores */
+		/*
+		 * Re-initialize shared memory and semaphores.  Note: We don't call
+		 * RegisterBuiltinShmemCallbacks(), we keep the old registrations.  In
+		 * order to re-register structs in extensions, we'd need to reload
+		 * shared preload libraries, and we don't want to do that.
+		 */
+		ResetShmemAllocator();
+		ShmemCallRequestCallbacks();
 		CreateSharedMemoryAndSemaphores();
 
 		UpdatePMState(PM_STARTUP);
 
 		/* Make sure we can perform I/O while starting up. */
-		maybe_adjust_io_workers();
+		maybe_start_io_workers();
 
 		StartupPMChild = StartChildProcess(B_STARTUP);
 		Assert(StartupPMChild != NULL);
@@ -3289,7 +3336,7 @@ LaunchMissingBackgroundProcesses(void)
 	 * A config file change will always lead to this function being called, so
 	 * we always will process the config change in a timely manner.
 	 */
-	maybe_adjust_io_workers();
+	maybe_start_io_workers();
 
 	/*
 	 * The checkpointer and the background writer are active from the start,
@@ -3373,7 +3420,7 @@ LaunchMissingBackgroundProcesses(void)
 			Shutdown <= SmartShutdown)
 		{
 			WalReceiverPMChild = StartChildProcess(B_WAL_RECEIVER);
-			if (WalReceiverPMChild != 0)
+			if (WalReceiverPMChild != NULL)
 				WalReceiverRequested = false;
 			/* else leave the flag set, so we'll try again later */
 		}
@@ -3750,6 +3797,16 @@ process_pm_pmsignal(void)
 		StartWorkerNeeded = true;
 	}
 
+	/* Process IO worker start requests. */
+	if (CheckPostmasterSignal(PMSIGNAL_IO_WORKER_GROW))
+	{
+		/*
+		 * No local flag, as the state is exposed through pgaio_worker_*()
+		 * functions.  This signal is received on potentially actionable level
+		 * changes, so that maybe_start_io_workers() will run.
+		 */
+	}
+
 	/* Process background worker state changes. */
 	if (CheckPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE))
 	{
@@ -3892,7 +3949,7 @@ process_pm_pmsignal(void)
  * Dummy signal handler
  *
  * We use this for signals that we don't actually use in the postmaster,
- * but we do use in backends.  If we were to SIG_IGN such signals in the
+ * but we do use in backends.  If we were to PG_SIG_IGN such signals in the
  * postmaster, then a newly started backend might drop a signal that arrives
  * before it's able to reconfigure its signal processing.  (See notes in
  * tcop/postgres.c.)
@@ -4191,19 +4248,18 @@ bgworker_should_start_now(BgWorkerStartTime start_time)
 		case PM_RUN:
 			if (start_time == BgWorkerStart_RecoveryFinished)
 				return true;
-			/* fall through */
+			pg_fallthrough;
 
 		case PM_HOT_STANDBY:
 			if (start_time == BgWorkerStart_ConsistentState)
 				return true;
-			/* fall through */
+			pg_fallthrough;
 
 		case PM_RECOVERY:
 		case PM_STARTUP:
 		case PM_INIT:
 			if (start_time == BgWorkerStart_PostmasterStart)
 				return true;
-			/* fall through */
 	}
 
 	return false;
@@ -4337,15 +4393,15 @@ maybe_start_bgworkers(void)
 static bool
 maybe_reap_io_worker(int pid)
 {
-	for (int id = 0; id < MAX_IO_WORKERS; ++id)
+	for (int i = 0; i < MAX_IO_WORKERS; ++i)
 	{
-		if (io_worker_children[id] &&
-			io_worker_children[id]->pid == pid)
+		if (io_worker_children[i] &&
+			io_worker_children[i]->pid == pid)
 		{
-			ReleasePostmasterChildSlot(io_worker_children[id]);
+			ReleasePostmasterChildSlot(io_worker_children[i]);
 
 			--io_worker_count;
-			io_worker_children[id] = NULL;
+			io_worker_children[i] = NULL;
 			return true;
 		}
 	}
@@ -4353,77 +4409,145 @@ maybe_reap_io_worker(int pid)
 }
 
 /*
- * Start or stop IO workers, to close the gap between the number of running
- * workers and the number of configured workers.  Used to respond to change of
- * the io_workers GUC (by increasing and decreasing the number of workers), as
- * well as workers terminating in response to errors (by starting
- * "replacement" workers).
+ * Returns the next time at which maybe_start_io_workers() would start one or
+ * more I/O workers.  Any time in the past means ASAP, and 0 means no worker
+ * is currently scheduled.
+ *
+ * This is called by DetermineSleepTime() and also maybe_start_io_workers()
+ * itself, to make sure that they agree.
  */
-static void
-maybe_adjust_io_workers(void)
+static TimestampTz
+maybe_start_io_workers_scheduled_at(void)
 {
 	if (!pgaio_workers_enabled())
-		return;
+		return 0;
 
 	/*
 	 * If we're in final shutting down state, then we're just waiting for all
 	 * processes to exit.
 	 */
 	if (pmState >= PM_WAIT_IO_WORKERS)
-		return;
+		return 0;
 
 	/* Don't start new workers during an immediate shutdown either. */
 	if (Shutdown >= ImmediateShutdown)
-		return;
+		return 0;
 
 	/*
 	 * Don't start new workers if we're in the shutdown phase of a crash
 	 * restart. But we *do* need to start if we're already starting up again.
 	 */
 	if (FatalError && pmState >= PM_STOP_BACKENDS)
-		return;
+		return 0;
 
-	Assert(pmState < PM_WAIT_IO_WORKERS);
+	/*
+	 * Don't start a worker if we're at or above the maximum.  (Excess workers
+	 * exit when the GUC is lowered, but the count can be temporarily too high
+	 * until they are reaped.)
+	 */
+	if (io_worker_count >= io_max_workers)
+		return 0;
 
-	/* Not enough running? */
-	while (io_worker_count < io_workers)
+	/* If we're under the minimum, start a worker as soon as possible. */
+	if (io_worker_count < io_min_workers)
+		return TIMESTAMP_MINUS_INFINITY;	/* start worker ASAP */
+
+	/* Only proceed if a "grow" signal has been received from a worker. */
+	if (!pgaio_worker_pm_test_grow_signal_sent())
+		return 0;
+
+	/*
+	 * maybe_start_io_workers() should start a new I/O worker after this time,
+	 * or as soon as possible if is already in the past.
+	 */
+	return io_worker_launch_next_time;
+}
+
+/*
+ * Start I/O workers if required.  Used at startup, to respond to change of
+ * the io_min_workers GUC, when asked to start a new one due to submission
+ * queue backlog, and after workers terminate in response to errors (by
+ * starting "replacement" workers).
+ */
+static void
+maybe_start_io_workers(void)
+{
+	TimestampTz scheduled_at;
+
+	while ((scheduled_at = maybe_start_io_workers_scheduled_at()) != 0)
 	{
+		TimestampTz now = GetCurrentTimestamp();
 		PMChild    *child;
-		int			id;
+		int			i;
+
+		Assert(pmState < PM_WAIT_IO_WORKERS);
+
+		/* Still waiting for the scheduled time? */
+		if (scheduled_at > now)
+			break;
+
+		/*
+		 * Compute next launch time relative to the previous value, so that
+		 * time spent on the postmaster's other duties don't result in an
+		 * inaccurate launch interval.
+		 */
+		io_worker_launch_next_time =
+			TimestampTzPlusMilliseconds(io_worker_launch_next_time,
+										io_worker_launch_interval);
+
+		/*
+		 * If that's already in the past, the interval is either impossibly
+		 * short or we received no requests for new workers for a period.
+		 * Compute a new future time relative to now instead.
+		 */
+		if (io_worker_launch_next_time <= now)
+			io_worker_launch_next_time =
+				TimestampTzPlusMilliseconds(now, io_worker_launch_interval);
+
+		/*
+		 * Check if a grow signal has been received, but the grow request has
+		 * been canceled since then because work ran out.  We've still
+		 * advanced the next launch time, to suppress repeat signals from
+		 * workers until then.
+		 */
+		if (io_worker_count >= io_min_workers && !pgaio_worker_pm_test_grow())
+		{
+			pgaio_worker_pm_clear_grow_signal_sent();
+			break;
+		}
 
 		/* find unused entry in io_worker_children array */
-		for (id = 0; id < MAX_IO_WORKERS; ++id)
+		for (i = 0; i < MAX_IO_WORKERS; ++i)
 		{
-			if (io_worker_children[id] == NULL)
+			if (io_worker_children[i] == NULL)
 				break;
 		}
-		if (id == MAX_IO_WORKERS)
-			elog(ERROR, "could not find a free IO worker ID");
+		if (i == MAX_IO_WORKERS)
+			elog(ERROR, "could not find a free IO worker slot");
 
 		/* Try to launch one. */
 		child = StartChildProcess(B_IO_WORKER);
 		if (child != NULL)
 		{
-			io_worker_children[id] = child;
+			io_worker_children[i] = child;
 			++io_worker_count;
 		}
 		else
-			break;				/* try again next time */
-	}
-
-	/* Too many running? */
-	if (io_worker_count > io_workers)
-	{
-		/* ask the IO worker in the highest slot to exit */
-		for (int id = MAX_IO_WORKERS - 1; id >= 0; --id)
 		{
-			if (io_worker_children[id] != NULL)
-			{
-				kill(io_worker_children[id]->pid, SIGUSR2);
-				break;
-			}
+			/*
+			 * Fork failure: we'll try again after the launch interval
+			 * expires, or be called again without delay if we don't yet have
+			 * io_min_workers.  Don't loop here though, the postmaster has
+			 * other duties.
+			 */
+			break;
 		}
 	}
+
+	/*
+	 * Workers decide when to shut down by themselves, according to the
+	 * io_max_workers and io_worker_idle_timeout GUCs.
+	 */
 }
 
 
@@ -4544,7 +4668,7 @@ pgwin32_register_deadchild_callback(HANDLE procHandle, DWORD procId)
 {
 	win32_deadchild_waitinfo *childinfo;
 
-	childinfo = palloc(sizeof(win32_deadchild_waitinfo));
+	childinfo = palloc_object(win32_deadchild_waitinfo);
 	childinfo->procHandle = procHandle;
 	childinfo->procId = procId;
 

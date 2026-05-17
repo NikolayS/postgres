@@ -4,7 +4,7 @@
  *	  definition of the "text search template" system catalog (pg_ts_template)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_ts_template.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_ts_template
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_ts_template,3764,TSTemplateRelationId)
 {
 	Oid			oid;			/* oid */
@@ -42,6 +44,8 @@ CATALOG(pg_ts_template,3764,TSTemplateRelationId)
 	/* base method of dictionary */
 	regproc		tmpllexize BKI_LOOKUP(pg_proc);
 } FormData_pg_ts_template;
+
+END_CATALOG_STRUCT
 
 typedef FormData_pg_ts_template *Form_pg_ts_template;
 

@@ -3,7 +3,7 @@
  * tsvector.c
  *	  I/O functions for tsvector
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -202,17 +202,17 @@ tsvectorin(PG_FUNCTION_ARGS)
 	state = init_tsvector_parser(buf, 0, escontext);
 
 	arrlen = 64;
-	arr = (WordEntryIN *) palloc(sizeof(WordEntryIN) * arrlen);
-	cur = tmpbuf = (char *) palloc(buflen);
+	arr = palloc_array(WordEntryIN, arrlen);
+	cur = tmpbuf = palloc_array(char, buflen);
 
 	while (gettoken_tsvector(state, &token, &toklen, &pos, &poslen, NULL))
 	{
 		if (toklen >= MAXSTRLEN)
 			ereturn(escontext, (Datum) 0,
 					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-					 errmsg("word is too long (%ld bytes, max %ld bytes)",
-							(long) toklen,
-							(long) (MAXSTRLEN - 1))));
+					 errmsg("word is too long (%d bytes, max %d bytes)",
+							toklen,
+							MAXSTRLEN - 1)));
 
 		if (cur - tmpbuf > MAXSTRPOS)
 			ereturn(escontext, (Datum) 0,
@@ -319,9 +319,9 @@ tsvectorout(PG_FUNCTION_ARGS)
 				lenbuf = 0,
 				pp;
 	WordEntry  *ptr = ARRPTR(out);
-	char	   *curbegin,
-			   *curin,
+	char	   *curin,
 			   *curout;
+	const char *curend;
 
 	lenbuf = out->size * 2 /* '' */ + out->size - 1 /* space */ + 2 /* \0 */ ;
 	for (i = 0; i < out->size; i++)
@@ -334,13 +334,14 @@ tsvectorout(PG_FUNCTION_ARGS)
 	curout = outbuf = (char *) palloc(lenbuf);
 	for (i = 0; i < out->size; i++)
 	{
-		curbegin = curin = STRPTR(out) + ptr->pos;
+		curin = STRPTR(out) + ptr->pos;
+		curend = curin + ptr->len;
 		if (i != 0)
 			*curout++ = ' ';
 		*curout++ = '\'';
-		while (curin - curbegin < ptr->len)
+		while (curin < curend)
 		{
-			int			len = pg_mblen(curin);
+			int			len = pg_mblen_range(curin, curend);
 
 			if (t_iseq(curin, '\''))
 				*curout++ = '\'';

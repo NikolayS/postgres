@@ -248,7 +248,7 @@ alter index idxpart_a_b_idx attach partition idxpart1_a_b_idx; -- quiet
 create index idxpart1_2_a_b on idxpart1 (a, b);
 alter index idxpart_a_b_idx attach partition idxpart1_2_a_b;
 ERROR:  cannot attach index "idxpart1_2_a_b" as a partition of index "idxpart_a_b_idx"
-DETAIL:  Another index is already attached for partition "idxpart1".
+DETAIL:  Another index "idxpart1_a_b_idx" is already attached for partition "idxpart1".
 drop table idxpart;
 -- make sure everything's gone
 select indexrelid::regclass, indrelid::regclass
@@ -538,6 +538,111 @@ select relname, indisvalid from pg_class join pg_index on indexrelid = oid
  idxpart11_a_idx | t
  idxpart1_a_idx  | t
  idxpart_a_idx   | t
+(3 rows)
+
+drop table idxpart;
+-- Verify that re-attaching an already-attached partition index can
+-- validate the parent index if it was still invalid, including
+-- indirect ancestors in subpartitions.
+create table idxpart (a int, b int) partition by range (a);
+create table idxpart1 partition of idxpart for values from (0) to (1000) partition by range (a);
+create table idxpart11 partition of idxpart1 for values from (0) to (500);
+-- Partitioned table with no partitions
+create table idxpart2 partition of idxpart for values from (1000) to (2000) partition by range (a);
+-- create parent indexes
+create index on only idxpart ((a/b));
+create index on only idxpart1 ((a/b));
+create index on only idxpart2 ((a/b));
+-- fail, leaves behind an invalid index on the leaf partition
+insert into idxpart11 values (1, 0);
+create index concurrently on idxpart11 ((a/b));
+ERROR:  division by zero
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname       | indisvalid 
+--------------------+------------
+ idxpart11_expr_idx | f
+ idxpart1_expr_idx  | f
+ idxpart2_expr_idx  | t
+ idxpart_expr_idx   | f
+(4 rows)
+
+-- attach the indexes; parents stay invalid
+alter index idxpart1_expr_idx attach partition idxpart11_expr_idx;
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx;
+alter index idxpart_expr_idx attach partition idxpart2_expr_idx;
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname       | indisvalid 
+--------------------+------------
+ idxpart11_expr_idx | f
+ idxpart1_expr_idx  | f
+ idxpart2_expr_idx  | t
+ idxpart_expr_idx   | f
+(4 rows)
+
+-- fix the index on the leaf partition
+delete from idxpart11 where b = 0;
+reindex index concurrently idxpart11_expr_idx;
+-- reattach the leaf partition index; parents should now be valid
+alter index idxpart1_expr_idx attach partition idxpart11_expr_idx;
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname       | indisvalid 
+--------------------+------------
+ idxpart11_expr_idx | t
+ idxpart1_expr_idx  | t
+ idxpart2_expr_idx  | t
+ idxpart_expr_idx   | t
+(4 rows)
+
+drop table idxpart;
+-- Verify that re-attaching does not validate the parent when another
+-- child index is still invalid.
+create table idxpart (a int, b int) partition by range (a);
+create table idxpart1 partition of idxpart for values from (0) to (500);
+create table idxpart2 partition of idxpart for values from (500) to (1000);
+create index on only idxpart ((a/b));
+-- create invalid indexes on both children
+insert into idxpart1 values (1, 0);
+insert into idxpart2 values (501, 0);
+create index concurrently on idxpart1 ((a/b));
+ERROR:  division by zero
+create index concurrently on idxpart2 ((a/b));
+ERROR:  division by zero
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname      | indisvalid 
+-------------------+------------
+ idxpart1_expr_idx | f
+ idxpart2_expr_idx | f
+ idxpart_expr_idx  | f
+(3 rows)
+
+-- attach both; parent stays invalid
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx;
+alter index idxpart_expr_idx attach partition idxpart2_expr_idx;
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname      | indisvalid 
+-------------------+------------
+ idxpart1_expr_idx | f
+ idxpart2_expr_idx | f
+ idxpart_expr_idx  | f
+(3 rows)
+
+-- fix only idxpart1's index, leave idxpart2's still invalid
+delete from idxpart1 where b = 0;
+reindex index concurrently idxpart1_expr_idx;
+-- re-attach the fixed child; parent should stay invalid
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx;
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname;
+      relname      | indisvalid 
+-------------------+------------
+ idxpart1_expr_idx | t
+ idxpart2_expr_idx | f
+ idxpart_expr_idx  | f
 (3 rows)
 
 drop table idxpart;
@@ -972,16 +1077,16 @@ Indexes:
 drop table idxpart;
 -- Failing to use the full partition key is not allowed
 create table idxpart (a int unique, b int) partition by range (a, b);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  UNIQUE constraint on partitioned table must include all partitioning columns
 DETAIL:  UNIQUE constraint on table "idxpart" lacks column "b" which is part of the partition key.
 create table idxpart (a int, b int unique) partition by range (a, b);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  UNIQUE constraint on partitioned table must include all partitioning columns
 DETAIL:  UNIQUE constraint on table "idxpart" lacks column "a" which is part of the partition key.
 create table idxpart (a int primary key, b int) partition by range (b, a);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  PRIMARY KEY constraint on partitioned table must include all partitioning columns
 DETAIL:  PRIMARY KEY constraint on table "idxpart" lacks column "b" which is part of the partition key.
 create table idxpart (a int, b int primary key) partition by range (b, a);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  PRIMARY KEY constraint on partitioned table must include all partitioning columns
 DETAIL:  PRIMARY KEY constraint on table "idxpart" lacks column "a" which is part of the partition key.
 -- OK if you use them in some other order
 create table idxpart (a int, b int, c text, primary key  (a, b, c)) partition by range (b, c, a);
@@ -997,7 +1102,7 @@ create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b 
 drop table idxpart;
 -- Not OK more than one equal column: partition keys are a proper superset of constraint
 create table idxpart (a int4range, b int4range, exclude USING GIST (a with = )) partition by range (a, b);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  EXCLUDE constraint on partitioned table must include all partitioning columns
 DETAIL:  EXCLUDE constraint on table "idxpart" lacks column "b" which is part of the partition key.
 -- Not OK with just -|-
 create table idxpart (a int4range, exclude USING GIST (a with -|- )) partition by range (a);
@@ -1007,7 +1112,7 @@ create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b 
 drop table idxpart;
 -- Not OK with equals and &&, and equals is not the partition key
 create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (b with =, c with &&)) partition by range (a);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  EXCLUDE constraint on partitioned table must include all partitioning columns
 DETAIL:  EXCLUDE constraint on table "idxpart" lacks column "a" which is part of the partition key.
 -- OK more than one equal column and a && column
 create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (a with =, b with =, c with &&)) partition by range (a, b);
@@ -1022,7 +1127,7 @@ DETAIL:  UNIQUE constraints cannot be used when partition keys include expressio
 -- use ALTER TABLE to add a primary key
 create table idxpart (a int, b int, c text) partition by range (a, b);
 alter table idxpart add primary key (a);	-- not an incomplete one though
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  PRIMARY KEY constraint on partitioned table must include all partitioning columns
 DETAIL:  PRIMARY KEY constraint on table "idxpart" lacks column "b" which is part of the partition key.
 alter table idxpart add primary key (a, b);	-- this works
 \d idxpart
@@ -1053,7 +1158,7 @@ drop table idxpart;
 -- use ALTER TABLE to add a unique constraint
 create table idxpart (a int, b int) partition by range (a, b);
 alter table idxpart add unique (a);			-- not an incomplete one though
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  UNIQUE constraint on partitioned table must include all partitioning columns
 DETAIL:  UNIQUE constraint on table "idxpart" lacks column "b" which is part of the partition key.
 alter table idxpart add unique (b, a);		-- this works
 \d idxpart
@@ -1083,7 +1188,7 @@ drop table idxpart;
 -- Not OK more than one equal column: partition keys are a proper superset of constraint
 create table idxpart (a int4range, b int4range) partition by range (a, b);
 alter table idxpart add exclude USING GIST (a with =);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  EXCLUDE constraint on partitioned table must include all partitioning columns
 DETAIL:  EXCLUDE constraint on table "idxpart" lacks column "b" which is part of the partition key.
 drop table idxpart;
 -- Not OK with just -|-
@@ -1098,7 +1203,7 @@ drop table idxpart;
 -- Not OK with equals and &&, and equals is not the partition key
 create table idxpart (a int4range, b int4range, c int4range) partition by range (a);
 alter table idxpart add exclude USING GIST (b with =, c with &&);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  EXCLUDE constraint on partitioned table must include all partitioning columns
 DETAIL:  EXCLUDE constraint on table "idxpart" lacks column "a" which is part of the partition key.
 drop table idxpart;
 -- OK more than one equal column and a && column
@@ -1145,7 +1250,7 @@ drop table idxpart;
 create table idxpart (a int, b int, primary key (a)) partition by range (a);
 create table idxpart2 partition of idxpart
 for values from (0) to (1000) partition by range (b); -- fail
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  PRIMARY KEY constraint on partitioned table must include all partitioning columns
 DETAIL:  PRIMARY KEY constraint on table "idxpart2" lacks column "b" which is part of the partition key.
 drop table idxpart;
 -- Ditto for the ATTACH PARTITION case
@@ -1153,7 +1258,7 @@ create table idxpart (a int unique, b int) partition by range (a);
 create table idxpart1 (a int not null, b int, unique (a, b))
   partition by range (a, b);
 alter table idxpart attach partition idxpart1 for values from (1) to (1000);
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  UNIQUE constraint on partitioned table must include all partitioning columns
 DETAIL:  UNIQUE constraint on table "idxpart1" lacks column "b" which is part of the partition key.
 DROP TABLE idxpart, idxpart1;
 -- Multi-layer partitioning works correctly in this case:
@@ -1448,7 +1553,7 @@ insert into covidxpart values (4, 1);
 ERROR:  duplicate key value violates unique constraint "covidxpart4_a_b_idx"
 DETAIL:  Key (a)=(4) already exists.
 create unique index on covidxpart (b) include (a); -- should fail
-ERROR:  unique constraint on partitioned table must include all partitioning columns
+ERROR:  UNIQUE constraint on partitioned table must include all partitioning columns
 DETAIL:  UNIQUE constraint on table "covidxpart" lacks column "a" which is part of the partition key.
 -- check that detaching a partition also detaches the primary key constraint
 create table parted_pk_detach_test (a int primary key) partition by list (a);
@@ -1669,3 +1774,14 @@ reindex index test_pg_index_toast_index;
 drop index test_pg_index_toast_index;
 drop function test_pg_index_toast_func;
 drop table test_pg_index_toast_table;
+-- test creation of an index involving a whole-row expression
+create table test_pg_wholerow_index (a int, b text, c numeric);
+create or replace function row_image(test_pg_wholerow_index)
+    returns test_pg_wholerow_index as $$select $1$$ language sql immutable;
+insert into test_pg_wholerow_index values (1, 'multiplication', 1.0);
+create index row_image_index
+    on test_pg_wholerow_index ((row_image(test_pg_wholerow_index)));
+insert into test_pg_wholerow_index values (2, 'addition', 0);
+drop index row_image_index;
+drop function row_image(test_pg_wholerow_index);
+drop table test_pg_wholerow_index;

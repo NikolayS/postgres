@@ -57,6 +57,7 @@ $$;
 -- estimated size.
 create table simple as
   select generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+insert into simple values (null, null);
 alter table simple set (parallel_workers = 2);
 analyze simple;
 
@@ -83,8 +84,8 @@ update pg_class
   set reltuples = 2, relpages = pg_relation_size('extremely_skewed') / 8192
   where relname = 'extremely_skewed';
 
--- Make a relation with a couple of enormous tuples.
-create table wide as select generate_series(1, 2) as id, rpad('', 320000, 'x') as t;
+-- Make a relation with several enormous tuples.
+create table wide as select generate_series(1, 3) as id, rpad('', 320000, 'x') as t;
 alter table wide set (parallel_workers = 2);
 
 -- The "optimal" case: the hash table fits in memory; we plan for 1
@@ -314,6 +315,7 @@ create table join_foo as select generate_series(1, 3) as id, 'xxxxx'::text as t;
 alter table join_foo set (parallel_workers = 0);
 create table join_bar as select generate_series(1, 10000) as id, 'xxxxx'::text as t;
 alter table join_bar set (parallel_workers = 2);
+analyze join_foo, join_bar;
 
 -- multi-batch with rescan, parallel-oblivious
 savepoint settings;
@@ -495,14 +497,14 @@ set work_mem = '128kB';
 set hash_mem_multiplier = 1.0;
 explain (costs off)
   select length(max(s.t))
-  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+  from wide left join (select id, coalesce(t, '') || '' as t from wide where id < 3) s using (id);
 select length(max(s.t))
-from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+from wide left join (select id, coalesce(t, '') || '' as t from wide where id < 3) s using (id);
 select final > 1 as multibatch
   from hash_join_batches(
 $$
   select length(max(s.t))
-  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+  from wide left join (select id, coalesce(t, '') || '' as t from wide where id < 3) s using (id);
 $$);
 rollback to settings;
 

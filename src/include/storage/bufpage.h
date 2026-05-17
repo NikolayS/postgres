@@ -4,7 +4,7 @@
  *	  Standard POSTGRES buffer page definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/bufpage.h
@@ -16,7 +16,6 @@
 
 #include "access/xlogdefs.h"
 #include "storage/block.h"
-#include "storage/item.h"
 #include "storage/off.h"
 
 /* GUC variable */
@@ -92,23 +91,49 @@ typedef uint16 LocationIndex;
 
 
 /*
- * For historical reasons, the 64-bit LSN value is stored as two 32-bit
- * values.
+ * Store the LSN as a single 64-bit value, to allow atomic loads/stores.
+ *
+ * For historical reasons, the storage of 64-bit LSN values depends on CPU
+ * endianness; PageXLogRecPtr used to be a struct consisting of two 32-bit
+ * values.  When reading (and writing) the pd_lsn field from page headers, the
+ * caller must convert from (and convert to) the platform's native endianness.
  */
 typedef struct
 {
-	uint32		xlogid;			/* high bits */
-	uint32		xrecoff;		/* low bits */
+	uint64		lsn;
 } PageXLogRecPtr;
 
+#ifdef WORDS_BIGENDIAN
+
 static inline XLogRecPtr
-PageXLogRecPtrGet(PageXLogRecPtr val)
+PageXLogRecPtrGet(const volatile PageXLogRecPtr *val)
 {
-	return (uint64) val.xlogid << 32 | val.xrecoff;
+	return val->lsn;
 }
 
-#define PageXLogRecPtrSet(ptr, lsn) \
-	((ptr).xlogid = (uint32) ((lsn) >> 32), (ptr).xrecoff = (uint32) (lsn))
+static inline void
+PageXLogRecPtrSet(volatile PageXLogRecPtr *ptr, XLogRecPtr lsn)
+{
+	ptr->lsn = lsn;
+}
+
+#else
+
+static inline XLogRecPtr
+PageXLogRecPtrGet(const volatile PageXLogRecPtr *val)
+{
+	PageXLogRecPtr tmp = {val->lsn};
+
+	return (tmp.lsn << 32) | (tmp.lsn >> 32);
+}
+
+static inline void
+PageXLogRecPtrSet(volatile PageXLogRecPtr *ptr, XLogRecPtr lsn)
+{
+	ptr->lsn = (lsn << 32) | (lsn >> 32);
+}
+
+#endif
 
 /*
  * disk page organization
@@ -205,7 +230,6 @@ typedef PageHeaderData *PageHeader;
  * handling pages.
  */
 #define PG_PAGE_LAYOUT_VERSION		4
-#define PG_DATA_CHECKSUM_VERSION	1
 
 /* ----------------------------------------------------------------
  *						page support functions
@@ -351,13 +375,13 @@ PageValidateSpecialPointer(const PageData *page)
  *		This does not change the status of any of the resources passed.
  *		The semantics may change in the future.
  */
-static inline Item
-PageGetItem(const PageData *page, const ItemIdData *itemId)
+static inline void *
+PageGetItem(PageData *page, const ItemIdData *itemId)
 {
 	Assert(page);
 	Assert(ItemIdHasStorage(itemId));
 
-	return (Item) (((const char *) page) + ItemIdGetOffset(itemId));
+	return (char *) page + ItemIdGetOffset(itemId);
 }
 
 /*
@@ -386,12 +410,13 @@ PageGetMaxOffsetNumber(const PageData *page)
 static inline XLogRecPtr
 PageGetLSN(const PageData *page)
 {
-	return PageXLogRecPtrGet(((const PageHeaderData *) page)->pd_lsn);
+	return PageXLogRecPtrGet(&((const PageHeaderData *) page)->pd_lsn);
 }
+
 static inline void
 PageSetLSN(Page page, XLogRecPtr lsn)
 {
-	PageXLogRecPtrSet(((PageHeader) page)->pd_lsn, lsn);
+	PageXLogRecPtrSet(&((PageHeader) page)->pd_lsn, lsn);
 }
 
 static inline bool
@@ -442,6 +467,12 @@ PageClearAllVisible(Page page)
 	((PageHeader) page)->pd_flags &= ~PD_ALL_VISIBLE;
 }
 
+static inline TransactionId
+PageGetPruneXid(const PageData *page)
+{
+	return ((const PageHeaderData *) page)->pd_prune_xid;
+}
+
 /*
  * These two require "access/transam.h", so left as macros.
  */
@@ -469,6 +500,7 @@ do { \
 #define PIV_LOG_WARNING			(1 << 0)
 #define PIV_LOG_LOG				(1 << 1)
 #define PIV_IGNORE_CHECKSUM_FAILURE (1 << 2)
+#define PIV_ZERO_BUFFERS_ON_ERROR (1 << 3)
 
 #define PageAddItem(page, item, size, offsetNumber, overwrite, is_heap) \
 	PageAddItemExtended(page, item, size, offsetNumber, \
@@ -488,7 +520,7 @@ StaticAssertDecl(BLCKSZ == ((BLCKSZ / sizeof(size_t)) * sizeof(size_t)),
 extern void PageInit(Page page, Size pageSize, Size specialSize);
 extern bool PageIsVerified(PageData *page, BlockNumber blkno, int flags,
 						   bool *checksum_failure_p);
-extern OffsetNumber PageAddItemExtended(Page page, Item item, Size size,
+extern OffsetNumber PageAddItemExtended(Page page, const void *item, Size size,
 										OffsetNumber offsetNumber, int flags);
 extern Page PageGetTempPage(const PageData *page);
 extern Page PageGetTempPageCopy(const PageData *page);
@@ -504,8 +536,7 @@ extern void PageIndexTupleDelete(Page page, OffsetNumber offnum);
 extern void PageIndexMultiDelete(Page page, OffsetNumber *itemnos, int nitems);
 extern void PageIndexTupleDeleteNoCompact(Page page, OffsetNumber offnum);
 extern bool PageIndexTupleOverwrite(Page page, OffsetNumber offnum,
-									Item newtup, Size newsize);
-extern char *PageSetChecksumCopy(Page page, BlockNumber blkno);
-extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
+									const void *newtup, Size newsize);
+extern void PageSetChecksum(Page page, BlockNumber blkno);
 
 #endif							/* BUFPAGE_H */

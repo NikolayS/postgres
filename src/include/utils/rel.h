@@ -4,7 +4,7 @@
  *	  POSTGRES relation descriptor (a/k/a relcache entry) definitions.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/rel.h
@@ -203,7 +203,7 @@ typedef struct RelationData
 	 */
 	MemoryContext rd_indexcxt;	/* private memory cxt for this stuff */
 	/* use "struct" here to avoid needing to include amapi.h: */
-	struct IndexAmRoutine *rd_indam;	/* index AM's API struct */
+	const struct IndexAmRoutine *rd_indam;	/* index AM's API struct */
 	Oid		   *rd_opfamily;	/* OIDs of op families for each index col */
 	Oid		   *rd_opcintype;	/* OIDs of opclass declared input data types */
 	RegProcedure *rd_support;	/* OIDs of support procedures */
@@ -311,6 +311,8 @@ typedef struct ForeignKeyCacheInfo
 typedef struct AutoVacOpts
 {
 	bool		enabled;
+
+	int			autovacuum_parallel_workers;
 	int			vacuum_threshold;
 	int			vacuum_max_threshold;
 	int			vacuum_ins_threshold;
@@ -322,7 +324,8 @@ typedef struct AutoVacOpts
 	int			multixact_freeze_min_age;
 	int			multixact_freeze_max_age;
 	int			multixact_freeze_table_age;
-	int			log_min_duration;
+	int			log_vacuum_min_duration;
+	int			log_analyze_min_duration;
 	float8		vacuum_cost_delay;
 	float8		vacuum_scale_factor;
 	float8		vacuum_ins_scale_factor;
@@ -346,8 +349,7 @@ typedef struct StdRdOptions
 	bool		user_catalog_table; /* use as an additional catalog relation */
 	int			parallel_workers;	/* max number of parallel workers */
 	StdRdOptIndexCleanup vacuum_index_cleanup;	/* controls index vacuuming */
-	bool		vacuum_truncate;	/* enables vacuum to truncate a relation */
-	bool		vacuum_truncate_set;	/* whether vacuum_truncate is set */
+	pg_ternary	vacuum_truncate;	/* enables vacuum to truncate a relation */
 
 	/*
 	 * Fraction of pages in a relation that vacuum can eagerly scan and fail
@@ -486,9 +488,7 @@ typedef struct ViewOptions
  * RelationIsValid
  *		True iff relation descriptor is valid.
  */
-#define RelationIsValid(relation) PointerIsValid(relation)
-
-#define InvalidRelation ((Relation) NULL)
+#define RelationIsValid(relation) ((relation) != NULL)
 
 /*
  * RelationHasReferenceCountZero

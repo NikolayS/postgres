@@ -24,7 +24,7 @@
  * See psqlscan_int.h for additional commentary.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -293,6 +293,8 @@ less_equals		"<="
 greater_equals	">="
 less_greater	"<>"
 not_equals		"!="
+/* Note there is no need for left_arrow, since "<-" is not a single operator. */
+right_arrow		"->"
 
 /*
  * "self" is the set of chars that should be returned as single-character
@@ -304,7 +306,7 @@ not_equals		"!="
  * If you change either set, adjust the character lists appearing in the
  * rule for "operator"!
  */
-self			[,()\[\].;\:\+\-\*\/\%\^\<\>\=]
+self			[,()\[\].;\:\|\+\-\*\/\%\^\<\>\=]
 op_chars		[\~\!\@\#\^\&\|\`\?\+\-\*\/\%\<\>\=]
 operator		{op_chars}+
 
@@ -652,6 +654,10 @@ other			.
 					ECHO;
 				}
 
+{right_arrow}	{
+					ECHO;
+				}
+
 	/*
 	 * These rules are specific to psql --- they implement parenthesis
 	 * counting and detection of command-ending semicolon.  These must
@@ -922,19 +928,24 @@ other			.
 					 * writing a full parser here, the following heuristic
 					 * should work.  First, we track whether the beginning of
 					 * the statement matches CREATE [OR REPLACE]
-					 * {FUNCTION|PROCEDURE}
+					 * {FUNCTION|PROCEDURE|SCHEMA}.  (Allowing this in
+					 * CREATE SCHEMA, without tracking whether we're within a
+					 * CREATE FUNCTION/PROCEDURE subcommand, is a bit shaky
+					 * but should be okay with the present set of valid
+					 * subcommands.)
 					 */
 
 					if (cur_state->identifier_count == 0)
 						memset(cur_state->identifiers, 0, sizeof(cur_state->identifiers));
 
-					if (pg_strcasecmp(yytext, "create") == 0 ||
-						pg_strcasecmp(yytext, "function") == 0 ||
-						pg_strcasecmp(yytext, "procedure") == 0 ||
-						pg_strcasecmp(yytext, "or") == 0 ||
-						pg_strcasecmp(yytext, "replace") == 0)
+					if (cur_state->identifier_count < sizeof(cur_state->identifiers))
 					{
-						if (cur_state->identifier_count < sizeof(cur_state->identifiers))
+						if (pg_strcasecmp(yytext, "create") == 0 ||
+							pg_strcasecmp(yytext, "function") == 0 ||
+							pg_strcasecmp(yytext, "procedure") == 0 ||
+							pg_strcasecmp(yytext, "or") == 0 ||
+							pg_strcasecmp(yytext, "replace") == 0 ||
+							pg_strcasecmp(yytext, "schema") == 0)
 							cur_state->identifiers[cur_state->identifier_count] = pg_tolower((unsigned char) yytext[0]);
 					}
 
@@ -943,7 +954,8 @@ other			.
 					if (cur_state->identifiers[0] == 'c' &&
 						(cur_state->identifiers[1] == 'f' || cur_state->identifiers[1] == 'p' ||
 						 (cur_state->identifiers[1] == 'o' && cur_state->identifiers[2] == 'r' &&
-						  (cur_state->identifiers[3] == 'f' || cur_state->identifiers[3] == 'p'))) &&
+						  (cur_state->identifiers[3] == 'f' || cur_state->identifiers[3] == 'p')) ||
+						 cur_state->identifiers[1] == 's') &&
 						cur_state->paren_depth == 0)
 					{
 						if (pg_strcasecmp(yytext, "begin") == 0)
@@ -1002,7 +1014,7 @@ psql_scan_create(const PsqlScanCallbacks *callbacks)
 {
 	PsqlScanState state;
 
-	state = (PsqlScanStateData *) pg_malloc0(sizeof(PsqlScanStateData));
+	state = pg_malloc0_object(PsqlScanStateData);
 
 	state->callbacks = callbacks;
 
@@ -1376,7 +1388,7 @@ psqlscan_push_new_buffer(PsqlScanState state, const char *newstr,
 {
 	StackElem  *stackelem;
 
-	stackelem = (StackElem *) pg_malloc(sizeof(StackElem));
+	stackelem = pg_malloc_object(StackElem);
 
 	/*
 	 * In current usage, the passed varname points at the current flex input
@@ -1479,7 +1491,7 @@ psqlscan_prepare_buffer(PsqlScanState state, const char *txt, int len,
 	char	   *newtxt;
 
 	/* Flex wants two \0 characters after the actual data */
-	newtxt = pg_malloc(len + 2);
+	newtxt = pg_malloc_array(char, (len + 2));
 	*txtcopy = newtxt;
 	newtxt[len] = newtxt[len + 1] = YY_END_OF_BUFFER_CHAR;
 
@@ -1548,7 +1560,7 @@ psqlscan_emit(PsqlScanState state, const char *txt, int len)
 char *
 psqlscan_extract_substring(PsqlScanState state, const char *txt, int len)
 {
-	char	   *result = (char *) pg_malloc(len + 1);
+	char	   *result = pg_malloc_array(char, (len + 1));
 
 	if (state->safe_encoding)
 		memcpy(result, txt, len);

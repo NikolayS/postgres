@@ -1,4 +1,4 @@
-# Copyright (c) 2025, PostgreSQL Global Development Group
+# Copyright (c) 2025-2026, PostgreSQL Global Development Group
 
 # Tests for handling the default char signedness during upgrade.
 
@@ -65,7 +65,7 @@ command_checks_all(
 		$mode
 	],
 	1,
-	[qr/--set-char-signedness option cannot be used/],
+	[qr/option --set-char-signedness cannot be used/],
 	[],
 	'--set-char-signedness option cannot be used for upgrading from v18 or later'
 );

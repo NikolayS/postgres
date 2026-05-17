@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 test_install_data += files(
   'test_ext1--1.0.sql',
@@ -44,6 +44,19 @@ test_install_data += files(
   'test_ext_req_schema3.control',
   'test_ext_set_schema--1.0.sql',
   'test_ext_set_schema.control',
+)
+
+test_ext_sources = files('test_ext.c')
+
+if host_system == 'windows'
+  test_ext_sources += rc_lib_gen.process(win32ver_rc, extra_args: [
+    '--NAME', 'test_ext',
+    '--FILEDESC', 'test_ext - test C extension for pg_upgrade',])
+endif
+
+test_ext = shared_module('test_ext',
+  test_ext_sources,
+  kwargs: pg_test_mod_args,
 )
 
 tests += {

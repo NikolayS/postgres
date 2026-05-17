@@ -38,7 +38,7 @@
  * words, it only ever initiates one connection to each database in the
  * cluster for a given run.
  *
- * Copyright (c) 2024-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2024-2026, PostgreSQL Global Development Group
  * src/bin/pg_upgrade/task.c
  */
 
@@ -116,7 +116,7 @@ typedef struct UpgradeTaskSlot
 UpgradeTask *
 upgrade_task_create(void)
 {
-	UpgradeTask *task = pg_malloc0(sizeof(UpgradeTask));
+	UpgradeTask *task = pg_malloc0_object(UpgradeTask);
 
 	task->queries = createPQExpBuffer();
 
@@ -154,8 +154,8 @@ upgrade_task_add_step(UpgradeTask *task, const char *query,
 {
 	UpgradeTaskStep *new_step;
 
-	task->steps = pg_realloc(task->steps,
-							 ++task->num_steps * sizeof(UpgradeTaskStep));
+	task->steps = pg_realloc_array(task->steps, UpgradeTaskStep,
+								   ++task->num_steps);
 
 	new_step = &task->steps[task->num_steps - 1];
 	new_step->process_cb = process_cb;
@@ -188,12 +188,13 @@ start_conn(const ClusterInfo *cluster, UpgradeTaskSlot *slot)
 		appendPQExpBufferStr(&conn_opts, " host=");
 		appendConnStrVal(&conn_opts, cluster->sockdir);
 	}
+	if (!protocol_negotiation_supported(cluster))
+		appendPQExpBufferStr(&conn_opts, " max_protocol_version=3.0");
 
 	slot->conn = PQconnectStart(conn_opts.data);
 
 	if (!slot->conn)
-		pg_fatal("failed to create connection with connection string: \"%s\"",
-				 conn_opts.data);
+		pg_fatal("out of memory");
 
 	termPQExpBuffer(&conn_opts);
 }
@@ -402,7 +403,7 @@ wait_on_slots(UpgradeTaskSlot *slots, int numslots)
 	 * If we found socket(s) to wait on, wait.
 	 */
 	if (select_loop(maxFd, &input, &output) == -1)
-		pg_fatal("select() failed: %m");
+		pg_fatal("%s() failed: %m", "select");
 
 	/*
 	 * Mark which sockets appear to be ready.
@@ -420,7 +421,7 @@ void
 upgrade_task_run(const UpgradeTask *task, const ClusterInfo *cluster)
 {
 	int			jobs = Max(1, user_opts.jobs);
-	UpgradeTaskSlot *slots = pg_malloc0(sizeof(UpgradeTaskSlot) * jobs);
+	UpgradeTaskSlot *slots = pg_malloc0_array(UpgradeTaskSlot, jobs);
 
 	dbs_complete = 0;
 	dbs_processing = 0;

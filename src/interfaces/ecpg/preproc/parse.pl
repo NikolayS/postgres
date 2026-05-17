@@ -9,7 +9,7 @@
 #   --parser: the backend gram.y file to read (required, no default)
 #   --output: where to write preproc.y (required, no default)
 #
-# Copyright (c) 2007-2025, PostgreSQL Global Development Group
+# Copyright (c) 2007-2026, PostgreSQL Global Development Group
 #
 # Written by Mike Aubury <mike.aubury@aubit.com>
 #            Michael Meskes <meskes@postgresql.org>
@@ -256,9 +256,9 @@ sub main
 			$has_if_command = 1 if /^\s*if/;
 		}
 
-		# Make sure any braces are split into separate fields
-		s/{/ { /g;
-		s/}/ } /g;
+		# Make sure any (unquoted) braces are split into separate fields
+		s/(?<!')\{(?!')/ { /g;
+		s/(?<!')\}(?!')/ } /g;
 
 		# Likewise for comment start/end markers
 		s|\/\*| /* |g;

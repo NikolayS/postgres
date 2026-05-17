@@ -3,7 +3,7 @@
  * numutils.c
  *	  utility functions for I/O of built-in numeric types.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,7 +14,6 @@
  */
 #include "postgres.h"
 
-#include <math.h>
 #include <limits.h>
 #include <ctype.h>
 
@@ -113,7 +112,7 @@ static const int8 hexlookup[128] = {
  * pg_strtoint16() will throw ereport() upon bad input format or overflow;
  * while pg_strtoint16_safe() instead returns such complaints in *escontext,
  * if it's an ErrorSaveContext.
-*
+ *
  * NB: Accumulate input as an unsigned number, to deal with two's complement
  * representation of the most negative number, which can't be represented as a
  * signed positive number.

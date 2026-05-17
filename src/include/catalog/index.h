@@ -4,7 +4,7 @@
  *	  prototypes for catalog/index.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/index.h
@@ -16,6 +16,12 @@
 
 #include "catalog/objectaddress.h"
 #include "nodes/execnodes.h"
+
+
+/*
+ * forward references in this file
+ */
+typedef struct AttrMap AttrMap;
 
 
 #define DEFAULT_INDEX_TYPE	"btree"
@@ -32,7 +38,7 @@ typedef enum
 /* options for REINDEX */
 typedef struct ReindexParams
 {
-	bits32		options;		/* bitmask of REINDEXOPT_* */
+	uint32		options;		/* bitmask of REINDEXOPT_* */
 	Oid			tablespaceOid;	/* New tablespace to move indexes to.
 								 * InvalidOid to do nothing. */
 } ReindexParams;
@@ -65,6 +71,7 @@ extern void index_check_primary_key(Relation heapRel,
 #define	INDEX_CREATE_IF_NOT_EXISTS			(1 << 4)
 #define	INDEX_CREATE_PARTITIONED			(1 << 5)
 #define INDEX_CREATE_INVALID				(1 << 6)
+#define INDEX_CREATE_SUPPRESS_PROGRESS		(1 << 7)
 
 extern Oid	index_create(Relation heapRelation,
 						 const char *indexRelationName,
@@ -82,8 +89,8 @@ extern Oid	index_create(Relation heapRelation,
 						 const int16 *coloptions,
 						 const NullableDatum *stattargets,
 						 Datum reloptions,
-						 bits16 flags,
-						 bits16 constr_flags,
+						 uint16 flags,
+						 uint16 constr_flags,
 						 bool allow_system_table_mods,
 						 bool is_internal,
 						 Oid *constraintId);
@@ -95,10 +102,9 @@ extern Oid	index_create(Relation heapRelation,
 #define	INDEX_CONSTR_CREATE_REMOVE_OLD_DEPS	(1 << 4)
 #define	INDEX_CONSTR_CREATE_WITHOUT_OVERLAPS (1 << 5)
 
-extern Oid	index_concurrently_create_copy(Relation heapRelation,
-										   Oid oldIndexId,
-										   Oid tablespaceOid,
-										   const char *newName);
+extern Oid	index_create_copy(Relation heapRelation, uint16 flags,
+							  Oid oldIndexId, Oid tablespaceOid,
+							  const char *newName);
 
 extern void index_concurrently_build(Oid heapRelationId,
 									 Oid indexRelationId);
@@ -116,7 +122,7 @@ extern ObjectAddress index_constraint_create(Relation heapRelation,
 											 const IndexInfo *indexInfo,
 											 const char *constraintName,
 											 char constraintType,
-											 bits16 constr_flags,
+											 uint16 constr_flags,
 											 bool allow_system_table_mods,
 											 bool is_internal);
 
@@ -143,7 +149,8 @@ extern void index_build(Relation heapRelation,
 						Relation indexRelation,
 						IndexInfo *indexInfo,
 						bool isreindex,
-						bool parallel);
+						bool parallel,
+						bool progress);
 
 extern void validate_index(Oid heapId, Oid indexId, Snapshot snapshot);
 
@@ -187,7 +194,7 @@ extern void IndexSetParentIndex(Relation partitionIdx, Oid parentOid);
  * As noted in validate_index(), this can be significantly faster.
  */
 static inline int64
-itemptr_encode(ItemPointer itemptr)
+itemptr_encode(const ItemPointerData *itemptr)
 {
 	BlockNumber block = ItemPointerGetBlockNumber(itemptr);
 	OffsetNumber offset = ItemPointerGetOffsetNumber(itemptr);

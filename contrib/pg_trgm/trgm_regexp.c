@@ -181,7 +181,7 @@
  * 7) Mark state 3 final because state 5 of source NFA is marked as final.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -483,7 +483,7 @@ static TRGM *createTrgmNFAInternal(regex_t *regex, TrgmPackedGraph **graph,
 static void RE_compile(regex_t *regex, text *text_re,
 					   int cflags, Oid collation);
 static void getColorInfo(regex_t *regex, TrgmNFA *trgmNFA);
-static bool convertPgWchar(pg_wchar c, trgm_mb_char *result);
+static int	convertPgWchar(pg_wchar c, trgm_mb_char *result);
 static void transformGraph(TrgmNFA *trgmNFA);
 static void processState(TrgmNFA *trgmNFA, TrgmState *state);
 static void addKey(TrgmNFA *trgmNFA, TrgmState *state, TrgmStateKey *key);
@@ -791,12 +791,11 @@ getColorInfo(regex_t *regex, TrgmNFA *trgmNFA)
 
 		colorInfo->expandable = true;
 		colorInfo->containsNonWord = false;
-		colorInfo->wordChars = (trgm_mb_char *)
-			palloc(sizeof(trgm_mb_char) * charsCount);
+		colorInfo->wordChars = palloc_array(trgm_mb_char, charsCount);
 		colorInfo->wordCharsCount = 0;
 
 		/* Extract all the chars in this color */
-		chars = (pg_wchar *) palloc(sizeof(pg_wchar) * charsCount);
+		chars = palloc_array(pg_wchar, charsCount);
 		pg_reg_getcharacters(regex, i, chars, charsCount);
 
 		/*
@@ -808,10 +807,11 @@ getColorInfo(regex_t *regex, TrgmNFA *trgmNFA)
 		for (j = 0; j < charsCount; j++)
 		{
 			trgm_mb_char c;
+			int			clen = convertPgWchar(chars[j], &c);
 
-			if (!convertPgWchar(chars[j], &c))
+			if (!clen)
 				continue;		/* ok to ignore it altogether */
-			if (ISWORDCHR(c.bytes))
+			if (ISWORDCHR(c.bytes, clen))
 				colorInfo->wordChars[colorInfo->wordCharsCount++] = c;
 			else
 				colorInfo->containsNonWord = true;
@@ -823,13 +823,15 @@ getColorInfo(regex_t *regex, TrgmNFA *trgmNFA)
 
 /*
  * Convert pg_wchar to multibyte format.
- * Returns false if the character should be ignored completely.
+ * Returns 0 if the character should be ignored completely, else returns its
+ * byte length.
  */
-static bool
+static int
 convertPgWchar(pg_wchar c, trgm_mb_char *result)
 {
 	/* "s" has enough space for a multibyte character and a trailing NUL */
 	char		s[MAX_MULTIBYTE_CHAR_LEN + 1];
+	int			clen;
 
 	/*
 	 * We can ignore the NUL character, since it can never appear in a PG text
@@ -837,11 +839,11 @@ convertPgWchar(pg_wchar c, trgm_mb_char *result)
 	 * reconstructing trigrams.
 	 */
 	if (c == 0)
-		return false;
+		return 0;
 
 	/* Do the conversion, making sure the result is NUL-terminated */
 	memset(s, 0, sizeof(s));
-	pg_wchar2mb_with_len(&c, s, 1);
+	clen = pg_wchar2mb_with_len(&c, s, 1);
 
 	/*
 	 * In IGNORECASE mode, we can ignore uppercase characters.  We assume that
@@ -858,12 +860,12 @@ convertPgWchar(pg_wchar c, trgm_mb_char *result)
 	 */
 #ifdef IGNORECASE
 	{
-		char	   *lowerCased = str_tolower(s, strlen(s), DEFAULT_COLLATION_OID);
+		char	   *lowerCased = str_tolower(s, clen, DEFAULT_COLLATION_OID);
 
 		if (strcmp(lowerCased, s) != 0)
 		{
 			pfree(lowerCased);
-			return false;
+			return 0;
 		}
 		pfree(lowerCased);
 	}
@@ -871,7 +873,7 @@ convertPgWchar(pg_wchar c, trgm_mb_char *result)
 
 	/* Fill result with exactly MAX_MULTIBYTE_CHAR_LEN bytes */
 	memcpy(result->bytes, s, MAX_MULTIBYTE_CHAR_LEN);
-	return true;
+	return clen;
 }
 
 
@@ -1063,7 +1065,7 @@ addKey(TrgmNFA *trgmNFA, TrgmState *state, TrgmStateKey *key)
 	 * original NFA.
 	 */
 	arcsCount = pg_reg_getnumoutarcs(trgmNFA->regex, key->nstate);
-	arcs = (regex_arc_t *) palloc(sizeof(regex_arc_t) * arcsCount);
+	arcs = palloc_array(regex_arc_t, arcsCount);
 	pg_reg_getoutarcs(trgmNFA->regex, key->nstate, arcs, arcsCount);
 
 	for (i = 0; i < arcsCount; i++)
@@ -1177,7 +1179,7 @@ addKey(TrgmNFA *trgmNFA, TrgmState *state, TrgmStateKey *key)
 static void
 addKeyToQueue(TrgmNFA *trgmNFA, TrgmStateKey *key)
 {
-	TrgmStateKey *keyCopy = (TrgmStateKey *) palloc(sizeof(TrgmStateKey));
+	TrgmStateKey *keyCopy = palloc_object(TrgmStateKey);
 
 	memcpy(keyCopy, key, sizeof(TrgmStateKey));
 	trgmNFA->keysQueue = lappend(trgmNFA->keysQueue, keyCopy);
@@ -1215,7 +1217,7 @@ addArcs(TrgmNFA *trgmNFA, TrgmState *state)
 		TrgmStateKey *key = (TrgmStateKey *) lfirst(cell);
 
 		arcsCount = pg_reg_getnumoutarcs(trgmNFA->regex, key->nstate);
-		arcs = (regex_arc_t *) palloc(sizeof(regex_arc_t) * arcsCount);
+		arcs = palloc_array(regex_arc_t, arcsCount);
 		pg_reg_getoutarcs(trgmNFA->regex, key->nstate, arcs, arcsCount);
 
 		for (i = 0; i < arcsCount; i++)
@@ -1311,7 +1313,7 @@ addArc(TrgmNFA *trgmNFA, TrgmState *state, TrgmStateKey *key,
 	}
 
 	/* Checks were successful, add new arc */
-	arc = (TrgmArc *) palloc(sizeof(TrgmArc));
+	arc = palloc_object(TrgmArc);
 	arc->target = getState(trgmNFA, destKey);
 	arc->ctrgm.colors[0] = key->prefix.colors[0];
 	arc->ctrgm.colors[1] = key->prefix.colors[1];
@@ -1467,7 +1469,7 @@ selectColorTrigrams(TrgmNFA *trgmNFA)
 	int			cnumber;
 
 	/* Collect color trigrams from all arcs */
-	colorTrgms = (ColorTrgmInfo *) palloc0(sizeof(ColorTrgmInfo) * arcsCount);
+	colorTrgms = palloc0_array(ColorTrgmInfo, arcsCount);
 	trgmNFA->colorTrgms = colorTrgms;
 
 	i = 0;
@@ -1479,7 +1481,7 @@ selectColorTrigrams(TrgmNFA *trgmNFA)
 		foreach(cell, state->arcs)
 		{
 			TrgmArc    *arc = (TrgmArc *) lfirst(cell);
-			TrgmArcInfo *arcInfo = (TrgmArcInfo *) palloc(sizeof(TrgmArcInfo));
+			TrgmArcInfo *arcInfo = palloc_object(TrgmArcInfo);
 			ColorTrgmInfo *trgmInfo = &colorTrgms[i];
 
 			arcInfo->source = state;
@@ -1964,8 +1966,7 @@ packGraph(TrgmNFA *trgmNFA, MemoryContext rcontext)
 	}
 
 	/* Collect array of all arcs */
-	arcs = (TrgmPackArcInfo *)
-		palloc(sizeof(TrgmPackArcInfo) * trgmNFA->arcsCount);
+	arcs = palloc_array(TrgmPackArcInfo, trgmNFA->arcsCount);
 	arcIndex = 0;
 	hash_seq_init(&scan_status, trgmNFA->states);
 	while ((state = (TrgmState *) hash_seq_search(&scan_status)) != NULL)
@@ -2128,18 +2129,15 @@ printSourceNFA(regex_t *regex, TrgmColorInfo *colors, int ncolors)
 {
 	StringInfoData buf;
 	int			nstates = pg_reg_getnumstates(regex);
-	int			state;
-	int			i;
 
 	initStringInfo(&buf);
 
 	appendStringInfoString(&buf, "\ndigraph sourceNFA {\n");
 
-	for (state = 0; state < nstates; state++)
+	for (int state = 0; state < nstates; state++)
 	{
 		regex_arc_t *arcs;
-		int			i,
-					arcsCount;
+		int			arcsCount;
 
 		appendStringInfo(&buf, "s%d", state);
 		if (pg_reg_getfinalstate(regex) == state)
@@ -2147,10 +2145,10 @@ printSourceNFA(regex_t *regex, TrgmColorInfo *colors, int ncolors)
 		appendStringInfoString(&buf, ";\n");
 
 		arcsCount = pg_reg_getnumoutarcs(regex, state);
-		arcs = (regex_arc_t *) palloc(sizeof(regex_arc_t) * arcsCount);
+		arcs = palloc_array(regex_arc_t, arcsCount);
 		pg_reg_getoutarcs(regex, state, arcs, arcsCount);
 
-		for (i = 0; i < arcsCount; i++)
+		for (int i = 0; i < arcsCount; i++)
 		{
 			appendStringInfo(&buf, "  s%d -> s%d [label = \"%d\"];\n",
 							 state, arcs[i].to, arcs[i].co);
@@ -2167,15 +2165,14 @@ printSourceNFA(regex_t *regex, TrgmColorInfo *colors, int ncolors)
 	appendStringInfoString(&buf, " { rank = sink;\n");
 	appendStringInfoString(&buf, "  Colors [shape = none, margin=0, label=<\n");
 
-	for (i = 0; i < ncolors; i++)
+	for (int i = 0; i < ncolors; i++)
 	{
 		TrgmColorInfo *color = &colors[i];
-		int			j;
 
 		appendStringInfo(&buf, "<br/>Color %d: ", i);
 		if (color->expandable)
 		{
-			for (j = 0; j < color->wordCharsCount; j++)
+			for (int j = 0; j < color->wordCharsCount; j++)
 			{
 				char		s[MAX_MULTIBYTE_CHAR_LEN + 1];
 

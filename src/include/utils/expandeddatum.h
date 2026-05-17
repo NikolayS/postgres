@@ -34,7 +34,7 @@
  * value if they fail partway through.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/expandeddatum.h
@@ -95,7 +95,7 @@ typedef struct ExpandedObjectMethods
  * But note that these pointers are just a convenience; a pointer object
  * appearing somewhere else would still be legal.
  *
- * The typedef declaration for this appears in postgres.h.
+ * The typedef declaration for this appears in varatt.h.
  */
 struct ExpandedObjectHeader
 {

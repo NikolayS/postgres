@@ -3,7 +3,7 @@
  * snapmgr.h
  *	  POSTGRES snapshot manager
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/snapmgr.h
@@ -51,10 +51,28 @@ extern PGDLLIMPORT SnapshotData SnapshotToastData;
 	((snapshotdata).snapshot_type = SNAPSHOT_NON_VACUUMABLE, \
 	 (snapshotdata).vistest = (vistestp))
 
-/* This macro encodes the knowledge of which snapshots are MVCC-safe */
+/*
+ * Is the snapshot implemented as an MVCC snapshot (i.e. it uses
+ * SNAPSHOT_MVCC)? If so, there will be at most one visible tuple in a chain
+ * of updated tuples, and each visible tuple will be seen exactly once.
+ */
 #define IsMVCCSnapshot(snapshot)  \
-	((snapshot)->snapshot_type == SNAPSHOT_MVCC || \
-	 (snapshot)->snapshot_type == SNAPSHOT_HISTORIC_MVCC)
+	((snapshot)->snapshot_type == SNAPSHOT_MVCC)
+
+/*
+ * Special kind of MVCC snapshot, used during logical decoding. The visibility
+ * is checked from the perspective of an already committed transaction that is
+ * being decoded.
+ */
+#define IsHistoricMVCCSnapshot(snapshot)  \
+	((snapshot)->snapshot_type == SNAPSHOT_HISTORIC_MVCC)
+
+/*
+ * Is the snapshot either an MVCC snapshot or has equivalent visibility
+ * semantics (see IsMVCCSnapshot())?
+ */
+#define IsMVCCLikeSnapshot(snapshot)  \
+	(IsMVCCSnapshot(snapshot) || IsHistoricMVCCSnapshot(snapshot))
 
 extern Snapshot GetTransactionSnapshot(void);
 extern Snapshot GetLatestSnapshot(void);
@@ -97,10 +115,17 @@ extern char *ExportSnapshot(Snapshot snapshot);
  */
 typedef struct GlobalVisState GlobalVisState;
 extern GlobalVisState *GlobalVisTestFor(Relation rel);
-extern bool GlobalVisTestIsRemovableXid(GlobalVisState *state, TransactionId xid);
-extern bool GlobalVisTestIsRemovableFullXid(GlobalVisState *state, FullTransactionId fxid);
+extern bool GlobalVisTestIsRemovableXid(GlobalVisState *state,
+										TransactionId xid,
+										bool allow_update);
+extern bool GlobalVisTestIsRemovableFullXid(GlobalVisState *state,
+											FullTransactionId fxid,
+											bool allow_update);
 extern bool GlobalVisCheckRemovableXid(Relation rel, TransactionId xid);
 extern bool GlobalVisCheckRemovableFullXid(Relation rel, FullTransactionId fxid);
+extern bool GlobalVisTestXidConsideredRunning(GlobalVisState *state,
+											  TransactionId xid,
+											  bool allow_update);
 
 /*
  * Utility functions for implementing visibility routines in table AMs.
@@ -117,6 +142,7 @@ extern bool HistoricSnapshotActive(void);
 extern Size EstimateSnapshotSpace(Snapshot snapshot);
 extern void SerializeSnapshot(Snapshot snapshot, char *start_address);
 extern Snapshot RestoreSnapshot(char *start_address);
-extern void RestoreTransactionSnapshot(Snapshot snapshot, void *source_pgproc);
+struct PGPROC;
+extern void RestoreTransactionSnapshot(Snapshot snapshot, struct PGPROC *source_pgproc);
 
 #endif							/* SNAPMGR_H */

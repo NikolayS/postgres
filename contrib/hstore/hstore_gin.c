@@ -127,7 +127,7 @@ gin_extract_hstore_query(PG_FUNCTION_ARGS)
 			/* Nulls in the array are ignored, cf hstoreArrayToPairs */
 			if (key_nulls[i])
 				continue;
-			item = makeitem(VARDATA(key_datums[i]), VARSIZE(key_datums[i]) - VARHDRSZ, KEYFLAG);
+			item = makeitem(VARDATA(DatumGetPointer(key_datums[i])), VARSIZE(DatumGetPointer(key_datums[i])) - VARHDRSZ, KEYFLAG);
 			entries[j++] = PointerGetDatum(item);
 		}
 
@@ -152,11 +152,13 @@ gin_consistent_hstore(PG_FUNCTION_ARGS)
 {
 	bool	   *check = (bool *) PG_GETARG_POINTER(0);
 	StrategyNumber strategy = PG_GETARG_UINT16(1);
-
-	/* HStore	   *query = PG_GETARG_HSTORE_P(2); */
+#ifdef NOT_USED
+	HStore	   *query = PG_GETARG_HSTORE_P(2);
+#endif
 	int32		nkeys = PG_GETARG_INT32(3);
-
-	/* Pointer	   *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
+#ifdef NOT_USED
+	Pointer    *extra_data = (Pointer *) PG_GETARG_POINTER(4);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(5);
 	bool		res = true;
 	int32		i;

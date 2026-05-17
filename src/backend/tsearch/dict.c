@@ -3,7 +3,7 @@
  * dict.c
  *		Standard interface to dictionary
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -61,7 +61,7 @@ ts_lexize(PG_FUNCTION_ARGS)
 	ptr = res;
 	while (ptr->lexeme)
 		ptr++;
-	da = (Datum *) palloc(sizeof(Datum) * (ptr - res));
+	da = (Datum *) palloc_array(Datum, ptr - res);
 	ptr = res;
 	while (ptr->lexeme)
 	{

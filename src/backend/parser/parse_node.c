@@ -3,7 +3,7 @@
  * parse_node.c
  *	  various routines that make nodes for querytrees
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -40,7 +40,7 @@ make_parsestate(ParseState *parentParseState)
 {
 	ParseState *pstate;
 
-	pstate = palloc0(sizeof(ParseState));
+	pstate = palloc0_object(ParseState);
 
 	pstate->parentParseState = parentParseState;
 
@@ -408,7 +408,7 @@ make_const(ParseState *pstate, A_Const *aconst)
 
 						typeid = INT8OID;
 						typelen = sizeof(int64);
-						typebyval = FLOAT8PASSBYVAL;	/* int8 and float8 alike */
+						typebyval = true;
 					}
 				}
 				else

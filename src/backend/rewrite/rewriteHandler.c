@@ -3,7 +3,7 @@
  * rewriteHandler.c
  *		Primary module of query rewriter.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -36,6 +36,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteDefine.h"
+#include "rewrite/rewriteGraphTable.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteSearchCycle.h"
@@ -96,8 +97,7 @@ static List *matchLocks(CmdType event, Relation relation,
 						int varno, Query *parsetree, bool *hasUpdate);
 static Query *fireRIRrules(Query *parsetree, List *activeRIRs);
 static Bitmapset *adjust_view_column_set(Bitmapset *cols, List *targetlist);
-static Node *expand_generated_columns_internal(Node *node, Relation rel, int rt_index,
-											   RangeTblEntry *rte, int result_relation);
+static List *get_generated_columns(Relation rel, int rt_index, bool include_stored);
 
 
 /*
@@ -173,6 +173,7 @@ AcquireRewriteLocks(Query *parsetree,
 		switch (rte->rtekind)
 		{
 			case RTE_RELATION:
+			case RTE_GRAPH_TABLE:
 
 				/*
 				 * Grab the appropriate lock type for the relation, and do not
@@ -195,7 +196,7 @@ AcquireRewriteLocks(Query *parsetree,
 				else
 					lockmode = rte->rellockmode;
 
-				rel = table_open(rte->relid, lockmode);
+				rel = relation_open(rte->relid, lockmode);
 
 				/*
 				 * While we have the relation open, update the RTE's relkind,
@@ -203,7 +204,7 @@ AcquireRewriteLocks(Query *parsetree,
 				 */
 				rte->relkind = rel->rd_rel->relkind;
 
-				table_close(rel, NoLock);
+				relation_close(rel, NoLock);
 				break;
 
 			case RTE_JOIN:
@@ -592,7 +593,10 @@ rewriteRuleAction(Query *parsetree,
 			}
 		}
 
-		/* OK, it's safe to combine the CTE lists */
+		/*
+		 * OK, it's safe to combine the CTE lists.  Beware that RewriteQuery
+		 * knows we concatenate the lists in this order.
+		 */
 		sub_action->cteList = list_concat(sub_action->cteList,
 										  copyObject(parsetree->cteList));
 		/* ... and don't forget about the associated flags */
@@ -637,12 +641,46 @@ rewriteRuleAction(Query *parsetree,
 	if ((event == CMD_INSERT || event == CMD_UPDATE) &&
 		sub_action->commandType != CMD_UTILITY)
 	{
+		RangeTblEntry *new_rte = rt_fetch(new_varno, sub_action->rtable);
+		Relation	new_rel;
+		List	   *gen_cols;
+
+		/*
+		 * The target list does not contain entries for generated columns
+		 * (they are removed by rewriteTargetListIU), so we must build entries
+		 * for them here, so that new.gen_col can be rewritten correctly.
+		 */
+		new_rel = relation_open(new_rte->relid, NoLock);
+		gen_cols = get_generated_columns(new_rel, new_varno, true);
+		relation_close(new_rel, NoLock);
+
+		/*
+		 * The generated column expressions refer to new.attribute, so they
+		 * must be rewritten before they can be used as replacements.
+		 */
+		gen_cols = (List *)
+			ReplaceVarsFromTargetList((Node *) gen_cols,
+									  new_varno,
+									  0,
+									  new_rte,
+									  parsetree->targetList,
+									  sub_action->resultRelation,
+									  (event == CMD_UPDATE) ?
+									  REPLACEVARS_CHANGE_VARNO :
+									  REPLACEVARS_SUBSTITUTE_NULL,
+									  current_varno,
+									  &sub_action->hasSubLinks);
+
+		/*
+		 * Now rewrite new.attribute in sub_action, using both the target list
+		 * and the rewritten generated column expressions.
+		 */
 		sub_action = (Query *)
 			ReplaceVarsFromTargetList((Node *) sub_action,
 									  new_varno,
 									  0,
-									  rt_fetch(new_varno, sub_action->rtable),
-									  parsetree->targetList,
+									  new_rte,
+									  list_concat(gen_cols, parsetree->targetList),
 									  sub_action->resultRelation,
 									  (event == CMD_UPDATE) ?
 									  REPLACEVARS_CHANGE_VARNO :
@@ -654,6 +692,19 @@ rewriteRuleAction(Query *parsetree,
 		else
 			rule_action = sub_action;
 	}
+
+	/*
+	 * If rule_action is INSERT .. ON CONFLICT DO SELECT, the parser should
+	 * have verified that it has a RETURNING clause, but we must also check
+	 * that the triggering query has a RETURNING clause.
+	 */
+	if (rule_action->onConflict &&
+		rule_action->onConflict->action == ONCONFLICT_SELECT &&
+		(!rule_action->returningList || !parsetree->returningList))
+		ereport(ERROR,
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("ON CONFLICT DO SELECT requires a RETURNING clause"),
+				errdetail("A rule action is INSERT ... ON CONFLICT DO SELECT, which requires a RETURNING clause."));
 
 	/*
 	 * If rule_action has a RETURNING clause, then either throw it away if the
@@ -923,8 +974,9 @@ rewriteTargetListIU(List *targetList,
 				apply_default = true;
 
 			/*
-			 * Can only insert DEFAULT into generated columns, regardless of
-			 * any OVERRIDING clauses.
+			 * Can only insert DEFAULT into generated columns.  (The
+			 * OVERRIDING clause does not apply to generated columns, so we
+			 * don't consider it here.)
 			 */
 			if (att_tup->attgenerated && !apply_default)
 			{
@@ -2029,6 +2081,16 @@ fireRIRrules(Query *parsetree, List *activeRIRs)
 		rte = rt_fetch(rt_index, parsetree->rtable);
 
 		/*
+		 * Convert GRAPH_TABLE clause into a subquery using relational
+		 * operators.  (This will change the rtekind to subquery, so it must
+		 * be done before the subquery handling below.)
+		 */
+		if (rte->rtekind == RTE_GRAPH_TABLE)
+		{
+			parsetree = rewriteGraphTable(parsetree, rt_index);
+		}
+
+		/*
 		 * A subquery RTE can't have associated rules, so there's nothing to
 		 * do to this level of the query, but we must recurse into the
 		 * subquery to expand any rule references in it.
@@ -2099,7 +2161,7 @@ fireRIRrules(Query *parsetree, List *activeRIRs)
 		 * We can use NoLock here since either the parser or
 		 * AcquireRewriteLocks should have locked the rel already.
 		 */
-		rel = table_open(rte->relid, NoLock);
+		rel = relation_open(rte->relid, NoLock);
 
 		/*
 		 * Collect the RIR rules that we must apply
@@ -2209,7 +2271,7 @@ fireRIRrules(Query *parsetree, List *activeRIRs)
 			 rte->relkind != RELKIND_PARTITIONED_TABLE))
 			continue;
 
-		rel = table_open(rte->relid, NoLock);
+		rel = relation_open(rte->relid, NoLock);
 
 		/*
 		 * Fetch any new security quals that must be applied to this RTE.
@@ -2339,18 +2401,50 @@ CopyAndAddInvertedQual(Query *parsetree,
 	ChangeVarNodes(new_qual, PRS2_OLD_VARNO, rt_index, 0);
 	/* Fix references to NEW */
 	if (event == CMD_INSERT || event == CMD_UPDATE)
+	{
+		RangeTblEntry *rte = rt_fetch(rt_index, parsetree->rtable);
+		Relation	rel;
+		List	   *gen_cols;
+
+		/*
+		 * As in rewriteRuleAction, build entries for generated columns so
+		 * that new.gen_col in the rule qualification can be rewritten
+		 * correctly.
+		 */
+		rel = relation_open(rte->relid, NoLock);
+		gen_cols = get_generated_columns(rel, PRS2_NEW_VARNO, true);
+		relation_close(rel, NoLock);
+
+		/*
+		 * The generated column expressions refer to new.attribute, so they
+		 * must be rewritten before they can be used as replacements.
+		 */
+		gen_cols = (List *)
+			ReplaceVarsFromTargetList((Node *) gen_cols,
+									  PRS2_NEW_VARNO,
+									  0,
+									  rte,
+									  parsetree->targetList,
+									  parsetree->resultRelation,
+									  (event == CMD_UPDATE) ?
+									  REPLACEVARS_CHANGE_VARNO :
+									  REPLACEVARS_SUBSTITUTE_NULL,
+									  rt_index,
+									  &parsetree->hasSubLinks);
+
 		new_qual = ReplaceVarsFromTargetList(new_qual,
 											 PRS2_NEW_VARNO,
 											 0,
-											 rt_fetch(rt_index,
-													  parsetree->rtable),
-											 parsetree->targetList,
+											 rte,
+											 list_concat(gen_cols,
+														 parsetree->targetList),
 											 parsetree->resultRelation,
 											 (event == CMD_UPDATE) ?
 											 REPLACEVARS_CHANGE_VARNO :
 											 REPLACEVARS_SUBSTITUTE_NULL,
 											 rt_index,
 											 &parsetree->hasSubLinks);
+	}
 	/* And attach the fixed qual */
 	AddInvertedQual(parsetree, new_qual);
 
@@ -2616,7 +2710,7 @@ view_col_is_auto_updatable(RangeTblRef *rtr, TargetEntry *tle)
  * view_query_is_auto_updatable - test whether the specified view definition
  * represents an auto-updatable view. Returns NULL (if the view can be updated)
  * or a message string giving the reason that it cannot be.
-
+ *
  * The returned string has not been translated; if it is shown as an error
  * message, the caller should apply _() to translate it.
  *
@@ -3428,7 +3522,7 @@ rewriteTargetView(Query *parsetree, Relation view)
 	 * already have the right lock!)  Since it will become the query target
 	 * relation, RowExclusiveLock is always the right thing.
 	 */
-	base_rel = table_open(base_rte->relid, RowExclusiveLock);
+	base_rel = relation_open(base_rte->relid, RowExclusiveLock);
 
 	/*
 	 * While we have the relation open, update the RTE's relkind, just in case
@@ -3639,11 +3733,12 @@ rewriteTargetView(Query *parsetree, Relation view)
 	}
 
 	/*
-	 * For INSERT .. ON CONFLICT .. DO UPDATE, we must also update assorted
-	 * stuff in the onConflict data structure.
+	 * For INSERT .. ON CONFLICT .. DO SELECT/UPDATE, we must also update
+	 * assorted stuff in the onConflict data structure.
 	 */
 	if (parsetree->onConflict &&
-		parsetree->onConflict->action == ONCONFLICT_UPDATE)
+		(parsetree->onConflict->action == ONCONFLICT_UPDATE ||
+		 parsetree->onConflict->action == ONCONFLICT_SELECT))
 	{
 		Index		old_exclRelIndex,
 					new_exclRelIndex;
@@ -3652,9 +3747,8 @@ rewriteTargetView(Query *parsetree, Relation view)
 		List	   *tmp_tlist;
 
 		/*
-		 * Like the INSERT/UPDATE code above, update the resnos in the
-		 * auxiliary UPDATE targetlist to refer to columns of the base
-		 * relation.
+		 * For ON CONFLICT DO UPDATE, update the resnos in the auxiliary
+		 * UPDATE targetlist to refer to columns of the base relation.
 		 */
 		foreach(lc, parsetree->onConflict->onConflictSet)
 		{
@@ -3673,7 +3767,7 @@ rewriteTargetView(Query *parsetree, Relation view)
 		}
 
 		/*
-		 * Also, create a new RTE for the EXCLUDED pseudo-relation, using the
+		 * Create a new RTE for the EXCLUDED pseudo-relation, using the
 		 * query's new base rel (which may well have a different column list
 		 * from the view, hence we need a new column alias list).  This should
 		 * match transformOnConflictClause.  In particular, note that the
@@ -3728,6 +3822,30 @@ rewriteTargetView(Query *parsetree, Relation view)
 									  &parsetree->hasSubLinks);
 	}
 
+	if (parsetree->forPortionOf && parsetree->commandType == CMD_UPDATE)
+	{
+		/*
+		 * Like the INSERT/UPDATE code above, update the resnos in the
+		 * auxiliary UPDATE targetlist to refer to columns of the base
+		 * relation.
+		 */
+		foreach(lc, parsetree->forPortionOf->rangeTargetList)
+		{
+			TargetEntry *tle = (TargetEntry *) lfirst(lc);
+			TargetEntry *view_tle;
+
+			if (tle->resjunk)
+				continue;
+
+			view_tle = get_tle_by_resno(view_targetlist, tle->resno);
+			if (view_tle != NULL && !view_tle->resjunk && IsA(view_tle->expr, Var))
+				tle->resno = ((Var *) view_tle->expr)->varattno;
+			else
+				elog(ERROR, "attribute number %d not found in view targetlist",
+					 tle->resno);
+		}
+	}
+
 	/*
 	 * For UPDATE/DELETE/MERGE, pull up any WHERE quals from the view.  We
 	 * know that any Vars in the quals must reference the one base relation,
@@ -3780,7 +3898,7 @@ rewriteTargetView(Query *parsetree, Relation view)
 				parsetree->hasSubLinks = checkExprHasSubLink(viewqual);
 		}
 		else
-			AddQual(parsetree, (Node *) viewqual);
+			AddQual(parsetree, viewqual);
 	}
 
 	/*
@@ -3871,9 +3989,13 @@ rewriteTargetView(Query *parsetree, Relation view)
  * orig_rt_length is the length of the originating query's rtable, for product
  * queries created by fireRules(), and 0 otherwise.  This is used to skip any
  * already-processed VALUES RTEs from the original query.
+ *
+ * num_ctes_processed is the number of CTEs at the end of the query's cteList
+ * that have already been rewritten, and must not be rewritten again.
  */
 static List *
-RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
+RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length,
+			 int num_ctes_processed)
 {
 	CmdType		event = parsetree->commandType;
 	bool		instead = false;
@@ -3887,17 +4009,29 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 	 * First, recursively process any insert/update/delete/merge statements in
 	 * WITH clauses.  (We have to do this first because the WITH clauses may
 	 * get copied into rule actions below.)
+	 *
+	 * Any new WITH clauses from rule actions are processed when we recurse
+	 * into product queries below.  However, when recursing, we must take care
+	 * to avoid rewriting a CTE query more than once (because expanding
+	 * generated columns in the targetlist more than once would fail).  Since
+	 * new CTEs from product queries are added to the start of the list (see
+	 * rewriteRuleAction), we just skip the last num_ctes_processed items.
 	 */
 	foreach(lc1, parsetree->cteList)
 	{
 		CommonTableExpr *cte = lfirst_node(CommonTableExpr, lc1);
 		Query	   *ctequery = castNode(Query, cte->ctequery);
+		int			i = foreach_current_index(lc1);
 		List	   *newstuff;
+
+		/* Skip already-processed CTEs at the end of the list */
+		if (i >= list_length(parsetree->cteList) - num_ctes_processed)
+			break;
 
 		if (ctequery->commandType == CMD_SELECT)
 			continue;
 
-		newstuff = RewriteQuery(ctequery, rewrite_events, 0);
+		newstuff = RewriteQuery(ctequery, rewrite_events, 0, 0);
 
 		/*
 		 * Currently we can only handle unconditional, single-statement DO
@@ -3957,6 +4091,7 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 					 errmsg("multi-statement DO INSTEAD rules are not supported for data-modifying statements in WITH")));
 		}
 	}
+	num_ctes_processed = list_length(parsetree->cteList);
 
 	/*
 	 * If the statement is an insert, update, delete, or merge, adjust its
@@ -3987,7 +4122,7 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 		 * We can use NoLock here since either the parser or
 		 * AcquireRewriteLocks should have locked the rel already.
 		 */
-		rt_entry_relation = table_open(rt_entry->relid, NoLock);
+		rt_entry_relation = relation_open(rt_entry->relid, NoLock);
 
 		/*
 		 * Rewrite the targetlist as needed for the command type.
@@ -4067,6 +4202,37 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 		else if (event == CMD_UPDATE)
 		{
 			Assert(parsetree->override == OVERRIDING_NOT_SET);
+
+			if (parsetree->forPortionOf)
+			{
+				/*
+				 * Don't add FOR PORTION OF details until we're done rewriting
+				 * a view update, so that we don't add the same qual and TLE
+				 * on the recursion.
+				 *
+				 * Views don't need to do anything special here to remap Vars;
+				 * that is handled by the tree walker.
+				 */
+				if (rt_entry_relation->rd_rel->relkind != RELKIND_VIEW)
+				{
+					ListCell   *tl;
+
+					/*
+					 * Add qual: UPDATE FOR PORTION OF should be limited to
+					 * rows that overlap the target range.
+					 */
+					AddQual(parsetree, parsetree->forPortionOf->overlapsExpr);
+
+					/* Update FOR PORTION OF column(s) automatically. */
+					foreach(tl, parsetree->forPortionOf->rangeTargetList)
+					{
+						TargetEntry *tle = (TargetEntry *) lfirst(tl);
+
+						parsetree->targetList = lappend(parsetree->targetList, tle);
+					}
+				}
+			}
+
 			parsetree->targetList =
 				rewriteTargetListIU(parsetree->targetList,
 									parsetree->commandType,
@@ -4112,7 +4278,25 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 		}
 		else if (event == CMD_DELETE)
 		{
-			/* Nothing to do here */
+			if (parsetree->forPortionOf)
+			{
+				/*
+				 * Don't add FOR PORTION OF details until we're done rewriting
+				 * a view delete, so that we don't add the same qual on the
+				 * recursion.
+				 *
+				 * Views don't need to do anything special here to remap Vars;
+				 * that is handled by the tree walker.
+				 */
+				if (rt_entry_relation->rd_rel->relkind != RELKIND_VIEW)
+				{
+					/*
+					 * Add qual: DELETE FOR PORTION OF should be limited to
+					 * rows that overlap the target range.
+					 */
+					AddQual(parsetree, parsetree->forPortionOf->overlapsExpr);
+				}
+			}
 		}
 		else
 			elog(ERROR, "unrecognized commandType: %d", (int) event);
@@ -4266,7 +4450,7 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 									RelationGetRelationName(rt_entry_relation))));
 			}
 
-			rev = (rewrite_event *) palloc(sizeof(rewrite_event));
+			rev = palloc_object(rewrite_event);
 			rev->relation = RelationGetRelid(rt_entry_relation);
 			rev->event = event;
 			rewrite_events = lappend(rewrite_events, rev);
@@ -4288,7 +4472,8 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 				newstuff = RewriteQuery(pt, rewrite_events,
 										pt == parsetree ?
 										orig_rt_length :
-										product_orig_rt_length);
+										product_orig_rt_length,
+										num_ctes_processed);
 				rewritten = list_concat(rewritten, newstuff);
 			}
 
@@ -4410,36 +4595,31 @@ RewriteQuery(Query *parsetree, List *rewrite_events, int orig_rt_length)
 
 
 /*
- * Expand virtual generated columns
+ * Get a table's generated columns
  *
- * If the table contains virtual generated columns, build a target list
- * containing the expanded expressions and use ReplaceVarsFromTargetList() to
- * do the replacements.
+ * If include_stored is true, both stored and virtual generated columns are
+ * returned.  Otherwise, only virtual generated columns are returned.
  *
- * Vars matching rt_index at the current query level are replaced by the
- * virtual generated column expressions from rel, if there are any.
- *
- * The caller must also provide rte, the RTE describing the target relation,
- * in order to handle any whole-row Vars referencing the target, and
- * result_relation, the index of the result relation, if this is part of an
- * INSERT/UPDATE/DELETE/MERGE query.
+ * Returns a list of TargetEntry, one for each generated column, containing
+ * the attribute numbers and generation expressions.
  */
-static Node *
-expand_generated_columns_internal(Node *node, Relation rel, int rt_index,
-								  RangeTblEntry *rte, int result_relation)
+static List *
+get_generated_columns(Relation rel, int rt_index, bool include_stored)
 {
+	List	   *gen_cols = NIL;
 	TupleDesc	tupdesc;
 
 	tupdesc = RelationGetDescr(rel);
-	if (tupdesc->constr && tupdesc->constr->has_generated_virtual)
+	if (tupdesc->constr &&
+		(tupdesc->constr->has_generated_virtual ||
+		 (include_stored && tupdesc->constr->has_generated_stored)))
 	{
-		List	   *tlist = NIL;
-
 		for (int i = 0; i < tupdesc->natts; i++)
 		{
 			Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
 
-			if (attr->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			if (attr->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL ||
+				(include_stored && attr->attgenerated == ATTRIBUTE_GENERATED_STORED))
 			{
 				Node	   *defexpr;
 				TargetEntry *te;
@@ -4448,19 +4628,12 @@ expand_generated_columns_internal(Node *node, Relation rel, int rt_index,
 				ChangeVarNodes(defexpr, 1, rt_index, 0);
 
 				te = makeTargetEntry((Expr *) defexpr, i + 1, 0, false);
-				tlist = lappend(tlist, te);
+				gen_cols = lappend(gen_cols, te);
 			}
 		}
-
-		Assert(list_length(tlist) > 0);
-
-		node = ReplaceVarsFromTargetList(node, rt_index, 0, rte, tlist,
-										 result_relation,
-										 REPLACEVARS_CHANGE_VARNO, rt_index,
-										 NULL);
 	}
 
-	return node;
+	return gen_cols;
 }
 
 /*
@@ -4477,6 +4650,7 @@ expand_generated_columns_in_expr(Node *node, Relation rel, int rt_index)
 	if (tupdesc->constr && tupdesc->constr->has_generated_virtual)
 	{
 		RangeTblEntry *rte;
+		List	   *vcols;
 
 		rte = makeNode(RangeTblEntry);
 		/* eref needs to be set, but the actual name doesn't matter */
@@ -4484,14 +4658,26 @@ expand_generated_columns_in_expr(Node *node, Relation rel, int rt_index)
 		rte->rtekind = RTE_RELATION;
 		rte->relid = RelationGetRelid(rel);
 
-		node = expand_generated_columns_internal(node, rel, rt_index, rte, 0);
+		vcols = get_generated_columns(rel, rt_index, false);
+
+		if (vcols)
+		{
+			/*
+			 * Passing NULL for outer_hasSubLinks is safe because generation
+			 * expressions cannot contain SubLinks, so the replacement cannot
+			 * introduce any.
+			 */
+			node = ReplaceVarsFromTargetList(node, rt_index, 0, rte, vcols, 0,
+											 REPLACEVARS_CHANGE_VARNO, rt_index,
+											 NULL);
+		}
 	}
 
 	return node;
 }
 
 /*
- * Build the generation expression for the virtual generated column.
+ * Build the generation expression for a generated column.
  *
  * Error out if there is no generation expression found for the given column.
  */
@@ -4503,8 +4689,11 @@ build_generation_expression(Relation rel, int attrno)
 	Node	   *defexpr;
 	Oid			attcollid;
 
-	Assert(rd_att->constr && rd_att->constr->has_generated_virtual);
-	Assert(att_tup->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL);
+	Assert(rd_att->constr &&
+		   (rd_att->constr->has_generated_virtual ||
+			rd_att->constr->has_generated_stored));
+	Assert(att_tup->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL ||
+		   att_tup->attgenerated == ATTRIBUTE_GENERATED_STORED);
 
 	defexpr = build_column_default(rel, attrno);
 	if (defexpr == NULL)
@@ -4544,7 +4733,7 @@ build_generation_expression(Relation rel, int attrno)
 List *
 QueryRewrite(Query *parsetree)
 {
-	uint64		input_query_id = parsetree->queryId;
+	int64		input_query_id = parsetree->queryId;
 	List	   *querylist;
 	List	   *results;
 	ListCell   *l;
@@ -4563,7 +4752,7 @@ QueryRewrite(Query *parsetree)
 	 *
 	 * Apply all non-SELECT rules possibly getting 0 or many queries
 	 */
-	querylist = RewriteQuery(parsetree, NIL, 0);
+	querylist = RewriteQuery(parsetree, NIL, 0, 0);
 
 	/*
 	 * Step 2

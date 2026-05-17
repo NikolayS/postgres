@@ -7,6 +7,7 @@
 #include "btree_utils_num.h"
 #include "catalog/pg_type.h"
 #include "utils/builtins.h"
+#include "utils/rel.h"
 #include "utils/sortsupport.h"
 
 typedef struct inetkey
@@ -96,10 +97,10 @@ gbt_inet_compress(PG_FUNCTION_ARGS)
 
 	if (entry->leafkey)
 	{
-		inetKEY    *r = (inetKEY *) palloc(sizeof(inetKEY));
+		inetKEY    *r = palloc_object(inetKEY);
 		bool		failure = false;
 
-		retval = palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		r->lower = convert_network_to_scalar(entry->key, INETOID, &failure);
 		Assert(!failure);
 		r->upper = r->lower;
@@ -119,8 +120,9 @@ gbt_inet_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	Datum		dquery = PG_GETARG_DATUM(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	inetKEY    *kkk = (inetKEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;

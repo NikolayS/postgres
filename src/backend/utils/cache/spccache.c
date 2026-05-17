@@ -8,7 +8,7 @@
  * be a measurable performance gain from doing this, but that might change
  * in the future as we add more options.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -52,7 +52,8 @@ typedef struct
  * tablespaces, nor do we expect them to be frequently modified.
  */
 static void
-InvalidateTableSpaceCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
+InvalidateTableSpaceCacheCallback(Datum arg, SysCacheIdentifier cacheid,
+								  uint32 hashvalue)
 {
 	HASH_SEQ_STATUS status;
 	TableSpaceCacheEntry *spc;
