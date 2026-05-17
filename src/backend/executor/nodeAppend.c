@@ -3,7 +3,7 @@
  * nodeAppend.c
  *	  routines to handle append nodes.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -64,6 +64,8 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/latch.h"
+#include "storage/lwlock.h"
+#include "utils/wait_event.h"
 
 /* Shared state for parallel-aware Append. */
 struct ParallelAppendState
@@ -263,7 +265,7 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
 		{
 			AsyncRequest *areq;
 
-			areq = palloc(sizeof(AsyncRequest));
+			areq = palloc_object(AsyncRequest);
 			areq->requestor = (PlanState *) appendstate;
 			areq->requestee = appendplanstates[i];
 			areq->request_index = i;

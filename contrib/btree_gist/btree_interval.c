@@ -6,6 +6,7 @@
 #include "btree_gist.h"
 #include "btree_utils_num.h"
 #include "utils/fmgrprotos.h"
+#include "utils/rel.h"
 #include "utils/sortsupport.h"
 #include "utils/timestamp.h"
 
@@ -149,7 +150,7 @@ gbt_intv_compress(PG_FUNCTION_ARGS)
 	{
 		char	   *r = (char *) palloc(2 * INTERVALSIZE);
 
-		retval = palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 
 		if (entry->leafkey)
 		{
@@ -189,10 +190,10 @@ gbt_intv_decompress(PG_FUNCTION_ARGS)
 
 	if (INTERVALSIZE != sizeof(Interval))
 	{
-		intvKEY    *r = palloc(sizeof(intvKEY));
+		intvKEY    *r = palloc_object(intvKEY);
 		char	   *key = DatumGetPointer(entry->key);
 
-		retval = palloc(sizeof(GISTENTRY));
+		retval = palloc_object(GISTENTRY);
 		memcpy(&r->lower, key, INTERVALSIZE);
 		memcpy(&r->upper, key + INTERVALSIZE, INTERVALSIZE);
 
@@ -210,8 +211,9 @@ gbt_intv_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	Interval   *query = PG_GETARG_INTERVAL_P(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	intvKEY    *kkk = (intvKEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;
@@ -232,8 +234,9 @@ gbt_intv_distance(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	Interval   *query = PG_GETARG_INTERVAL_P(1);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	intvKEY    *kkk = (intvKEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;
 

@@ -8,6 +8,7 @@
 #include "utils/fmgrprotos.h"
 #include "utils/sortsupport.h"
 #include "utils/varbit.h"
+#include "varatt.h"
 
 /* GiST support functions */
 PG_FUNCTION_INFO_V1(gbt_bit_compress);
@@ -138,8 +139,9 @@ gbt_bit_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	void	   *query = DatumGetByteaP(PG_GETARG_DATUM(1));
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	bool		retval;
 	GBT_VARKEY *key = (GBT_VARKEY *) DatumGetPointer(entry->key);

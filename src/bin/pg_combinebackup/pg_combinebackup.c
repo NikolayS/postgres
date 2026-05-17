@@ -3,7 +3,7 @@
  * pg_combinebackup.c
  *		Combine incremental backups with prior backups.
  *
- * Copyright (c) 2017-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2017-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/bin/pg_combinebackup/pg_combinebackup.c
@@ -34,6 +34,7 @@
 #include "common/relpath.h"
 #include "copy_file.h"
 #include "fe_utils/option_utils.h"
+#include "fe_utils/version.h"
 #include "getopt_long.h"
 #include "lib/stringinfo.h"
 #include "load_manifest.h"
@@ -117,7 +118,6 @@ static void process_directory_recursively(Oid tsoid,
 										  manifest_data **manifests,
 										  manifest_writer *mwriter,
 										  cb_options *opt);
-static int	read_pg_version_file(char *directory);
 static void remember_to_cleanup_directory(char *target_path, bool rmtopdir);
 static void reset_directory_cleanup_list(void);
 static cb_tablespace *scan_for_existing_tablespaces(char *pathname,
@@ -153,7 +153,7 @@ main(int argc, char *argv[])
 	int			c;
 	int			n_backups;
 	int			n_prior_backups;
-	int			version;
+	uint32		version;
 	uint64		system_identifier;
 	char	  **prior_backup_dirs;
 	cb_options	opt;
@@ -162,6 +162,7 @@ main(int argc, char *argv[])
 	StringInfo	last_backup_label;
 	manifest_data **manifests;
 	manifest_writer *mwriter;
+	char	   *pgdata;
 
 	pg_logging_init(argv[0]);
 	progname = get_progname(argv[0]);
@@ -241,6 +242,10 @@ main(int argc, char *argv[])
 	if (opt.no_manifest)
 		opt.manifest_checksums = CHECKSUM_TYPE_NONE;
 
+	if (opt.dry_run)
+		pg_log_info("Executing in dry-run mode.\n"
+					"The target directory will not be modified.");
+
 	/* Check that the platform supports the requested copy method. */
 	if (opt.copy_method == COPY_METHOD_CLONE)
 	{
@@ -271,7 +276,12 @@ main(int argc, char *argv[])
 	}
 
 	/* Read the server version from the final backup. */
-	version = read_pg_version_file(argv[argc - 1]);
+	pgdata = argv[argc - 1];
+	version = get_pg_version(pgdata, NULL);
+	if (GET_PG_MAJORVERSION_NUM(version) < 10)
+		pg_fatal("server version too old");
+	pg_log_debug("read server version %u from file \"%s/%s\"",
+				 GET_PG_MAJORVERSION_NUM(version), pgdata, "PG_VERSION");
 
 	/* Sanity-check control files. */
 	n_backups = argc - optind;
@@ -425,7 +435,7 @@ main(int argc, char *argv[])
 		else
 		{
 			pg_log_debug("recursively fsyncing \"%s\"", opt.output);
-			sync_pgdata(opt.output, version * 10000, opt.sync_method, true);
+			sync_pgdata(opt.output, version, opt.sync_method, true);
 		}
 	}
 
@@ -445,7 +455,7 @@ main(int argc, char *argv[])
 static void
 add_tablespace_mapping(cb_options *opt, char *arg)
 {
-	cb_tablespace_mapping *tsmap = pg_malloc0(sizeof(cb_tablespace_mapping));
+	cb_tablespace_mapping *tsmap = pg_malloc0_object(cb_tablespace_mapping);
 	char	   *dst;
 	char	   *dst_ptr;
 	char	   *arg_ptr;
@@ -491,7 +501,7 @@ add_tablespace_mapping(cb_options *opt, char *arg)
 				 tsmap->old_dir);
 
 	if (!is_absolute_path(tsmap->new_dir))
-		pg_fatal("old directory is not an absolute path in tablespace mapping: %s",
+		pg_fatal("new directory is not an absolute path in tablespace mapping: %s",
 				 tsmap->new_dir);
 
 	/* Canonicalize paths to avoid spurious failures when comparing. */
@@ -569,7 +579,7 @@ check_backup_label_files(int n_backups, char **backup_dirs)
 			pg_fatal("backup at \"%s\" starts on timeline %u, but expected %u",
 					 backup_dirs[i], start_tli, check_tli);
 		if (i < n_backups - 1 && start_lsn != check_lsn)
-			pg_fatal("backup at \"%s\" starts at LSN %X/%X, but expected %X/%X",
+			pg_fatal("backup at \"%s\" starts at LSN %X/%08X, but expected %X/%08X",
 					 backup_dirs[i],
 					 LSN_FORMAT_ARGS(start_lsn),
 					 LSN_FORMAT_ARGS(check_lsn));
@@ -605,7 +615,7 @@ check_control_files(int n_backups, char **backup_dirs)
 {
 	int			i;
 	uint64		system_identifier = 0;	/* placate compiler */
-	uint32		data_checksum_version = 0;	/* placate compiler */
+	uint32		data_checksum_version = PG_DATA_CHECKSUM_OFF;	/* placate compiler */
 	bool		data_checksum_mismatch = false;
 
 	/* Try to read each control file in turn, last to first. */
@@ -642,7 +652,7 @@ check_control_files(int n_backups, char **backup_dirs)
 		 */
 		if (i == n_backups - 1)
 			data_checksum_version = control_file->data_checksum_version;
-		else if (data_checksum_version != 0 &&
+		else if (data_checksum_version != PG_DATA_CHECKSUM_OFF &&
 				 data_checksum_version != control_file->data_checksum_version)
 			data_checksum_mismatch = true;
 
@@ -1156,65 +1166,12 @@ process_directory_recursively(Oid tsoid,
 }
 
 /*
- * Read the version number from PG_VERSION and convert it to the usual server
- * version number format. (e.g. If PG_VERSION contains "14\n" this function
- * will return 140000)
- */
-static int
-read_pg_version_file(char *directory)
-{
-	char		filename[MAXPGPATH];
-	StringInfoData buf;
-	int			fd;
-	int			version;
-	char	   *ep;
-
-	/* Construct pathname. */
-	snprintf(filename, MAXPGPATH, "%s/PG_VERSION", directory);
-
-	/* Open file. */
-	if ((fd = open(filename, O_RDONLY, 0)) < 0)
-		pg_fatal("could not open file \"%s\": %m", filename);
-
-	/* Read into memory. Length limit of 128 should be more than generous. */
-	initStringInfo(&buf);
-	slurp_file(fd, filename, &buf, 128);
-
-	/* Close the file. */
-	if (close(fd) != 0)
-		pg_fatal("could not close file \"%s\": %m", filename);
-
-	/* Convert to integer. */
-	errno = 0;
-	version = strtoul(buf.data, &ep, 10);
-	if (errno != 0 || *ep != '\n')
-	{
-		/*
-		 * Incremental backup is not relevant to very old server versions that
-		 * used multi-part version number (e.g. 9.6, or 8.4). So if we see
-		 * what looks like the beginning of such a version number, just bail
-		 * out.
-		 */
-		if (version < 10 && *ep == '.')
-			pg_fatal("%s: server version too old", filename);
-		pg_fatal("%s: could not parse version number", filename);
-	}
-
-	/* Debugging output. */
-	pg_log_debug("read server version %d from file \"%s\"", version, filename);
-
-	/* Release memory and return result. */
-	pfree(buf.data);
-	return version * 10000;
-}
-
-/*
  * Add a directory to the list of output directories to clean up.
  */
 static void
 remember_to_cleanup_directory(char *target_path, bool rmtopdir)
 {
-	cb_cleanup_dir *dir = pg_malloc(sizeof(cb_cleanup_dir));
+	cb_cleanup_dir *dir = pg_malloc_object(cb_cleanup_dir);
 
 	dir->target_path = target_path;
 	dir->rmtopdir = rmtopdir;
@@ -1302,7 +1259,7 @@ scan_for_existing_tablespaces(char *pathname, cb_options *opt)
 		}
 
 		/* Create a new tablespace object. */
-		ts = pg_malloc0(sizeof(cb_tablespace));
+		ts = pg_malloc0_object(cb_tablespace);
 		ts->oid = oid;
 
 		/*

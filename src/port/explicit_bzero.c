@@ -2,7 +2,7 @@
  *
  * explicit_bzero.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -16,7 +16,23 @@
 
 #include "c.h"
 
-#if HAVE_DECL_MEMSET_S
+#if defined(HAVE_MEMSET_EXPLICIT)
+
+void
+explicit_bzero(void *buf, size_t len)
+{
+	(void) memset_explicit(buf, 0, len);
+}
+
+#elif defined(HAVE_EXPLICIT_MEMSET)
+
+void
+explicit_bzero(void *buf, size_t len)
+{
+	(void) explicit_memset(buf, 0, len);
+}
+
+#elif HAVE_DECL_MEMSET_S
 
 void
 explicit_bzero(void *buf, size_t len)

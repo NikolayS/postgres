@@ -14,6 +14,57 @@
 #
 # $ git log --pretty=format:"%H # %cd%n# %s" $PGINDENTGITHASH -1 --date=iso
 
+519acd1be59e407a62dbe6a5240d9d1dcb8cd062 # 2026-04-04 21:50:54 +0700
+# Fix indentation
+
+874da8b1f6143808a4433df645c1e81f6a8bbd1e # 2026-03-26 20:10:13 -0400
+# pg_plan_advice: pgindent
+
+015d32016d845f8a29b3ec3ab7fa98a69cea1a0f # 2026-03-19 13:42:24 +0900
+# test_saslprep: Apply proper indentation
+
+b6eb8dde6be32e394a4420dfeb671b5891a87c8b # 2026-03-11 15:14:46 +0100
+# Fix indentation from commit 29a0fb21577
+
+7b24959434629970c14fc5ee668585e491e565e4 # 2026-02-23 16:22:49 -0500
+# Fix indentation from commit b380a56a3f9
+
+09c37015d49665c52ae7eabd5852af36851aede4 # 2026-01-27 00:26:36 +0100
+# pgindent fix for 3fccbd94cba
+
+335f2231a30cb5002219888eef14f4dfce5b0391 # 2026-01-15 14:57:45 -0500
+# pgindent fix for 8077649907d
+
+86b276a4a9b4b2c63ef00765f0e2867e1bcac4ca # 2025-11-19 10:41:28 +0100
+# Fix indentation
+
+f63ae72bbcea057534144eaf27ffe3f6e9267511 # 2025-11-18 10:28:36 -0600
+# Switch from tabs to spaces in postgresql.conf.sample.
+
+c2b0e3a0351e021dea9b61fe2f759570d3fedb70 # 2025-11-13 14:25:21 +0900
+# Fix indentation issue
+
+e94a7afe44bfa1bd8dc929204a2d4ac8b3fa9854 # 2025-10-21 09:56:26 -0500
+# Re-pgindent brin.c.
+
+7e9c216b5236cc61f677787b35e8c8f28f5f6959 # 2025-09-13 14:50:02 -0500
+# Re-pgindent nbtpreprocesskeys.c after commit 796962922e.
+
+1d1612aec7688139e1a5506df1366b4b6a69605d # 2025-07-29 09:10:41 -0400
+# Run pgindent.
+
+73873805fb3627cb23937c750fa83ffd8f16fc6c # 2025-07-25 16:36:44 -0400
+# Run pgindent on the changes of the previous patch.
+
+9e345415bcd3c4358350b89edfd710469b8bfaf9 # 2025-07-01 15:23:07 +0200
+# Fix indentation in pg_numa code
+
+b27644bade0348d0dafd3036c47880a349fe9332 # 2025-06-15 13:04:24 -0400
+# Sync typedefs.list with the buildfarm.
+
+4672b6223910687b2aab075bcd2dd54ce90d5171 # 2025-06-01 14:55:24 -0400
+# Run pgindent on the previous commit.
+
 918e7287ed20eb1fe280ab6c4056ccf94dcd53a8 # 2025-04-30 19:18:30 +1200
 # Fix broken indentation
 
@@ -235,6 +286,9 @@ ce554810329b9b8e862eade08b598148931eb456 # 2017-05-17 19:01:23 -0400
 
 a6fd7b7a5f7bf3a8aa3f3d076cf09d922c1c6dd2 # 2017-05-17 16:31:56 -0400
 # Post-PG 10 beta1 pgindent run
+
+fcf70e0dbca1432959be5f3557acd546d639c9ba # 2016-11-17 14:36:59 -0500
+# Re-pgindent src/bin/pg_dump/*
 
 b5bce6c1ec6061c8a4f730d927e162db7e2ce365 # 2016-08-15 13:42:51 -0400
 # Final pgindent + perltidy run for 9.6.

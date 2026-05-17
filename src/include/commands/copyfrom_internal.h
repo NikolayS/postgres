@@ -4,7 +4,7 @@
  *	  Internal definitions for COPY FROM command.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/copyfrom_internal.h
@@ -108,6 +108,14 @@ typedef struct CopyFromStateData
 								 * att */
 	bool	   *defaults;		/* if DEFAULT marker was found for
 								 * corresponding att */
+	bool		simd_enabled;	/* use SIMD to scan for special chars? */
+
+	/*
+	 * True if the corresponding attribute's is a constrained domain. This
+	 * will be populated only when ON_ERROR is SET_NULL, otherwise NULL.
+	 */
+	bool	   *domain_with_constraint;
+
 	bool		volatile_defexprs;	/* is any of defexprs volatile? */
 	List	   *range_table;	/* single element list of RangeTblEntry */
 	List	   *rteperminfos;	/* single element list of RTEPermissionInfo */

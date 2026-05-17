@@ -4,10 +4,10 @@
  *	  Planner preprocessing for subqueries and join tree manipulation.
  *
  * NOTE: the intended sequence for invoking these operations is
+ *		preprocess_relation_rtes
  *		replace_empty_jointree
  *		pull_up_sublinks
  *		preprocess_function_rtes
- *		expand_virtual_generated_columns
  *		pull_up_subqueries
  *		flatten_simple_union_all
  *		do expression preprocessing (including flattening JOIN alias vars)
@@ -15,7 +15,7 @@
  *		remove_useless_result_rtes
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -36,6 +36,7 @@
 #include "optimizer/clauses.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/placeholder.h"
+#include "optimizer/plancat.h"
 #include "optimizer/prep.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
@@ -87,6 +88,8 @@ typedef struct reduce_outer_joins_pass1_state
 {
 	Relids		relids;			/* base relids within this subtree */
 	bool		contains_outer; /* does subtree contain outer join(s)? */
+	Relids		nullable_rels;	/* base relids that are nullable within this
+								 * subtree */
 	List	   *sub_states;		/* List of states for subtree components */
 } reduce_outer_joins_pass1_state;
 
@@ -102,6 +105,9 @@ typedef struct reduce_outer_joins_partial_state
 	Relids		unreduced_side; /* relids in its still-nullable side */
 } reduce_outer_joins_partial_state;
 
+static Query *expand_virtual_generated_columns(PlannerInfo *root, Query *parse,
+											   RangeTblEntry *rte, int rt_index,
+											   Relation relation);
 static Node *pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
 											   Relids *relids);
 static Node *pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
@@ -144,7 +150,7 @@ static void replace_vars_in_jointree(Node *jtnode,
 									 pullup_replace_vars_context *context);
 static Node *pullup_replace_vars(Node *expr,
 								 pullup_replace_vars_context *context);
-static Node *pullup_replace_vars_callback(Var *var,
+static Node *pullup_replace_vars_callback(const Var *var,
 										  replace_rte_variables_context *context);
 static Query *pullup_replace_vars_subquery(Query *query,
 										   pullup_replace_vars_context *context);
@@ -157,6 +163,8 @@ static void reduce_outer_joins_pass2(Node *jtnode,
 									 List *forced_null_vars);
 static void report_reduced_full_join(reduce_outer_joins_pass2_state *state2,
 									 int rtindex, Relids relids);
+static bool has_notnull_forced_var(PlannerInfo *root, List *forced_null_vars,
+								   reduce_outer_joins_pass1_state *right_state);
 static Node *remove_useless_results_recurse(PlannerInfo *root, Node *jtnode,
 											Node **parent_quals,
 											Relids *dropped_outer_joins);
@@ -393,6 +401,200 @@ transform_MERGE_to_join(Query *parse)
 }
 
 /*
+ * preprocess_relation_rtes
+ *		Do the preprocessing work for any relation RTEs in the FROM clause.
+ *
+ * This scans the rangetable for relation RTEs and retrieves the necessary
+ * catalog information for each relation.  Using this information, it clears
+ * the inh flag for any relation that has no children, collects not-null
+ * attribute numbers for any relation that has column not-null constraints, and
+ * expands virtual generated columns for any relation that contains them.
+ *
+ * Note that expanding virtual generated columns may cause the query tree to
+ * have new copies of rangetable entries.  Therefore, we have to use list_nth
+ * instead of foreach when iterating over the query's rangetable.
+ *
+ * Returns a modified copy of the query tree, if any relations with virtual
+ * generated columns are present.
+ */
+Query *
+preprocess_relation_rtes(PlannerInfo *root)
+{
+	Query	   *parse = root->parse;
+	int			rtable_size;
+	int			rt_index;
+
+	rtable_size = list_length(parse->rtable);
+
+	for (rt_index = 0; rt_index < rtable_size; rt_index++)
+	{
+		RangeTblEntry *rte = rt_fetch(rt_index + 1, parse->rtable);
+		Relation	relation;
+
+		/* We only care about relation RTEs. */
+		if (rte->rtekind != RTE_RELATION)
+			continue;
+
+		/*
+		 * We need not lock the relation since it was already locked by the
+		 * rewriter.
+		 */
+		relation = table_open(rte->relid, NoLock);
+
+		/*
+		 * Check to see if the relation actually has any children; if not,
+		 * clear the inh flag so we can treat it as a plain base relation.
+		 *
+		 * Note: this could give a false-positive result, if the rel once had
+		 * children but no longer does.  We used to be able to clear rte->inh
+		 * later on when we discovered that, but no more; we have to handle
+		 * such cases as full-fledged inheritance.
+		 */
+		if (rte->inh)
+			rte->inh = relation->rd_rel->relhassubclass;
+
+		/*
+		 * Check to see if the relation has any column not-null constraints;
+		 * if so, retrieve the constraint information and store it in a
+		 * relation OID based hash table.
+		 */
+		get_relation_notnullatts(root, relation);
+
+		/*
+		 * Check to see if the relation has any virtual generated columns; if
+		 * so, replace all Var nodes in the query that reference these columns
+		 * with the generation expressions.
+		 */
+		parse = expand_virtual_generated_columns(root, parse,
+												 rte, rt_index + 1,
+												 relation);
+
+		table_close(relation, NoLock);
+	}
+
+	return parse;
+}
+
+/*
+ * expand_virtual_generated_columns
+ *		Expand virtual generated columns for the given relation.
+ *
+ * This checks whether the given relation has any virtual generated columns,
+ * and if so, replaces all Var nodes in the query that reference those columns
+ * with their generation expressions.
+ *
+ * Returns a modified copy of the query tree if the relation contains virtual
+ * generated columns.
+ */
+static Query *
+expand_virtual_generated_columns(PlannerInfo *root, Query *parse,
+								 RangeTblEntry *rte, int rt_index,
+								 Relation relation)
+{
+	TupleDesc	tupdesc;
+
+	/* Only normal relations can have virtual generated columns */
+	Assert(rte->rtekind == RTE_RELATION);
+
+	tupdesc = RelationGetDescr(relation);
+	if (tupdesc->constr && tupdesc->constr->has_generated_virtual)
+	{
+		List	   *tlist = NIL;
+		pullup_replace_vars_context rvcontext;
+		List	   *save_exclRelTlist = NIL;
+
+		for (int i = 0; i < tupdesc->natts; i++)
+		{
+			Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+			TargetEntry *tle;
+
+			if (attr->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			{
+				Node	   *defexpr;
+
+				defexpr = build_generation_expression(relation, i + 1);
+				ChangeVarNodes(defexpr, 1, rt_index, 0);
+
+				tle = makeTargetEntry((Expr *) defexpr, i + 1, 0, false);
+				tlist = lappend(tlist, tle);
+			}
+			else
+			{
+				Var		   *var;
+
+				var = makeVar(rt_index,
+							  i + 1,
+							  attr->atttypid,
+							  attr->atttypmod,
+							  attr->attcollation,
+							  0);
+
+				tle = makeTargetEntry((Expr *) var, i + 1, 0, false);
+				tlist = lappend(tlist, tle);
+			}
+		}
+
+		Assert(list_length(tlist) > 0);
+		Assert(!rte->lateral);
+
+		/*
+		 * The relation's targetlist items are now in the appropriate form to
+		 * insert into the query, except that we may need to wrap them in
+		 * PlaceHolderVars.  Set up required context data for
+		 * pullup_replace_vars.
+		 */
+		rvcontext.root = root;
+		rvcontext.targetlist = tlist;
+		rvcontext.target_rte = rte;
+		rvcontext.result_relation = parse->resultRelation;
+		/* won't need these values */
+		rvcontext.relids = NULL;
+		rvcontext.nullinfo = NULL;
+		/* pass NULL for outer_hasSubLinks */
+		rvcontext.outer_hasSubLinks = NULL;
+		rvcontext.varno = rt_index;
+		/* this flag will be set below, if needed */
+		rvcontext.wrap_option = REPLACE_WRAP_NONE;
+		/* initialize cache array with indexes 0 .. length(tlist) */
+		rvcontext.rv_cache = palloc0((list_length(tlist) + 1) *
+									 sizeof(Node *));
+
+		/*
+		 * If the query uses grouping sets, we need a PlaceHolderVar for each
+		 * expression of the relation's targetlist items.  (See comments in
+		 * pull_up_simple_subquery().)
+		 */
+		if (parse->groupingSets)
+			rvcontext.wrap_option = REPLACE_WRAP_ALL;
+
+		/*
+		 * Apply pullup variable replacement throughout the query tree.
+		 *
+		 * We intentionally do not touch the EXCLUDED pseudo-relation's
+		 * targetlist here.  Various places in the planner assume that it
+		 * contains only Vars, and we want that to remain the case.  More
+		 * importantly, we don't want setrefs.c to turn any expanded
+		 * EXCLUDED.virtual_column expressions in other parts of the query
+		 * back into Vars referencing the original virtual column, which
+		 * set_plan_refs() would do if exclRelTlist contained matching
+		 * expressions.
+		 */
+		if (parse->onConflict)
+		{
+			save_exclRelTlist = parse->onConflict->exclRelTlist;
+			parse->onConflict->exclRelTlist = NIL;
+		}
+
+		parse = (Query *) pullup_replace_vars((Node *) parse, &rvcontext);
+
+		if (parse->onConflict)
+			parse->onConflict->exclRelTlist = save_exclRelTlist;
+	}
+
+	return parse;
+}
+
+/*
  * replace_empty_jointree
  *		If the Query's jointree is empty, replace it with a dummy RTE_RESULT
  *		relation.
@@ -562,7 +764,7 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
 		 * Make a modifiable copy of join node, but don't bother copying its
 		 * subnodes (yet).
 		 */
-		j = (JoinExpr *) palloc(sizeof(JoinExpr));
+		j = palloc_object(JoinExpr);
 		memcpy(j, jtnode, sizeof(JoinExpr));
 		jtlink = (Node *) j;
 
@@ -669,14 +871,15 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
 			if ((saop = convert_VALUES_to_ANY(root,
 											  sublink->testexpr,
 											  (Query *) sublink->subselect)) != NULL)
-
+			{
 				/*
 				 * The VALUES sequence was simplified.  Nothing more to do
 				 * here.
 				 */
 				return (Node *) saop;
+			}
 
-			if ((j = convert_ANY_sublink_to_join(root, sublink,
+			if ((j = convert_ANY_sublink_to_join(root, sublink, false,
 												 available_rels1)) != NULL)
 			{
 				/* Yes; insert the new join node into the join tree */
@@ -702,7 +905,7 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
 				return NULL;
 			}
 			if (available_rels2 != NULL &&
-				(j = convert_ANY_sublink_to_join(root, sublink,
+				(j = convert_ANY_sublink_to_join(root, sublink, false,
 												 available_rels2)) != NULL)
 			{
 				/* Yes; insert the new join node into the join tree */
@@ -787,14 +990,68 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
 	}
 	if (is_notclause(node))
 	{
-		/* If the immediate argument of NOT is EXISTS, try to convert */
+		/* If the immediate argument of NOT is ANY or EXISTS, try to convert */
 		SubLink    *sublink = (SubLink *) get_notclausearg((Expr *) node);
 		JoinExpr   *j;
 		Relids		child_rels;
 
 		if (sublink && IsA(sublink, SubLink))
 		{
-			if (sublink->subLinkType == EXISTS_SUBLINK)
+			if (sublink->subLinkType == ANY_SUBLINK)
+			{
+				if ((j = convert_ANY_sublink_to_join(root, sublink, true,
+													 available_rels1)) != NULL)
+				{
+					/* Yes; insert the new join node into the join tree */
+					j->larg = *jtlink1;
+					*jtlink1 = (Node *) j;
+					/* Recursively process pulled-up jointree nodes */
+					j->rarg = pull_up_sublinks_jointree_recurse(root,
+																j->rarg,
+																&child_rels);
+
+					/*
+					 * Now recursively process the pulled-up quals.  Because
+					 * we are underneath a NOT, we can't pull up sublinks that
+					 * reference the left-hand stuff, but it's still okay to
+					 * pull up sublinks referencing j->rarg.
+					 */
+					j->quals = pull_up_sublinks_qual_recurse(root,
+															 j->quals,
+															 &j->rarg,
+															 child_rels,
+															 NULL, NULL);
+					/* Return NULL representing constant TRUE */
+					return NULL;
+				}
+				if (available_rels2 != NULL &&
+					(j = convert_ANY_sublink_to_join(root, sublink, true,
+													 available_rels2)) != NULL)
+				{
+					/* Yes; insert the new join node into the join tree */
+					j->larg = *jtlink2;
+					*jtlink2 = (Node *) j;
+					/* Recursively process pulled-up jointree nodes */
+					j->rarg = pull_up_sublinks_jointree_recurse(root,
+																j->rarg,
+																&child_rels);
+
+					/*
+					 * Now recursively process the pulled-up quals.  Because
+					 * we are underneath a NOT, we can't pull up sublinks that
+					 * reference the left-hand stuff, but it's still okay to
+					 * pull up sublinks referencing j->rarg.
+					 */
+					j->quals = pull_up_sublinks_qual_recurse(root,
+															 j->quals,
+															 &j->rarg,
+															 child_rels,
+															 NULL, NULL);
+					/* Return NULL representing constant TRUE */
+					return NULL;
+				}
+			}
+			else if (sublink->subLinkType == EXISTS_SUBLINK)
 			{
 				if ((j = convert_EXISTS_sublink_to_join(root, sublink, true,
 														available_rels1)) != NULL)
@@ -887,13 +1144,15 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
 /*
  * preprocess_function_rtes
  *		Constant-simplify any FUNCTION RTEs in the FROM clause, and then
- *		attempt to "inline" any that are set-returning functions.
+ *		attempt to "inline" any that can be converted to simple subqueries.
  *
- * If an RTE_FUNCTION rtable entry invokes a set-returning function that
+ * If an RTE_FUNCTION rtable entry invokes a set-returning SQL function that
  * contains just a simple SELECT, we can convert the rtable entry to an
- * RTE_SUBQUERY entry exposing the SELECT directly.  This is especially
- * useful if the subquery can then be "pulled up" for further optimization,
- * but we do it even if not, to reduce executor overhead.
+ * RTE_SUBQUERY entry exposing the SELECT directly.  Other sorts of functions
+ * are also inline-able if they have a support function that can generate
+ * the replacement sub-Query.  This is especially useful if the subquery can
+ * then be "pulled up" for further optimization, but we do it even if not,
+ * to reduce executor overhead.
  *
  * This has to be done before we have started to do any optimization of
  * subqueries, else any such steps wouldn't get applied to subqueries
@@ -928,7 +1187,7 @@ preprocess_function_rtes(PlannerInfo *root)
 				eval_const_expressions(root, (Node *) rte->functions);
 
 			/* Check safety of expansion, and expand if possible */
-			funcquery = inline_set_returning_function(root, rte);
+			funcquery = inline_function_in_from(root, rte);
 			if (funcquery)
 			{
 				/* Successful expansion, convert the RTE to a subquery */
@@ -947,128 +1206,6 @@ preprocess_function_rtes(PlannerInfo *root)
 			}
 		}
 	}
-}
-
-/*
- * expand_virtual_generated_columns
- *		Expand all virtual generated column references in a query.
- *
- * This scans the rangetable for relations with virtual generated columns, and
- * replaces all Var nodes in the query that reference these columns with the
- * generation expressions.  Note that we do not descend into subqueries; that
- * is taken care of when the subqueries are planned.
- *
- * This has to be done after we have pulled up any SubLinks within the query's
- * quals; otherwise any virtual generated column references within the SubLinks
- * that should be transformed into joins wouldn't get expanded.
- *
- * Returns a modified copy of the query tree, if any relations with virtual
- * generated columns are present.
- */
-Query *
-expand_virtual_generated_columns(PlannerInfo *root)
-{
-	Query	   *parse = root->parse;
-	int			rt_index;
-	ListCell   *lc;
-
-	rt_index = 0;
-	foreach(lc, parse->rtable)
-	{
-		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
-		Relation	rel;
-		TupleDesc	tupdesc;
-
-		++rt_index;
-
-		/*
-		 * Only normal relations can have virtual generated columns.
-		 */
-		if (rte->rtekind != RTE_RELATION)
-			continue;
-
-		rel = table_open(rte->relid, NoLock);
-
-		tupdesc = RelationGetDescr(rel);
-		if (tupdesc->constr && tupdesc->constr->has_generated_virtual)
-		{
-			List	   *tlist = NIL;
-			pullup_replace_vars_context rvcontext;
-
-			for (int i = 0; i < tupdesc->natts; i++)
-			{
-				Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
-				TargetEntry *tle;
-
-				if (attr->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
-				{
-					Node	   *defexpr;
-
-					defexpr = build_generation_expression(rel, i + 1);
-					ChangeVarNodes(defexpr, 1, rt_index, 0);
-
-					tle = makeTargetEntry((Expr *) defexpr, i + 1, 0, false);
-					tlist = lappend(tlist, tle);
-				}
-				else
-				{
-					Var		   *var;
-
-					var = makeVar(rt_index,
-								  i + 1,
-								  attr->atttypid,
-								  attr->atttypmod,
-								  attr->attcollation,
-								  0);
-
-					tle = makeTargetEntry((Expr *) var, i + 1, 0, false);
-					tlist = lappend(tlist, tle);
-				}
-			}
-
-			Assert(list_length(tlist) > 0);
-			Assert(!rte->lateral);
-
-			/*
-			 * The relation's targetlist items are now in the appropriate form
-			 * to insert into the query, except that we may need to wrap them
-			 * in PlaceHolderVars.  Set up required context data for
-			 * pullup_replace_vars.
-			 */
-			rvcontext.root = root;
-			rvcontext.targetlist = tlist;
-			rvcontext.target_rte = rte;
-			rvcontext.result_relation = parse->resultRelation;
-			/* won't need these values */
-			rvcontext.relids = NULL;
-			rvcontext.nullinfo = NULL;
-			/* pass NULL for outer_hasSubLinks */
-			rvcontext.outer_hasSubLinks = NULL;
-			rvcontext.varno = rt_index;
-			/* this flag will be set below, if needed */
-			rvcontext.wrap_option = REPLACE_WRAP_NONE;
-			/* initialize cache array with indexes 0 .. length(tlist) */
-			rvcontext.rv_cache = palloc0((list_length(tlist) + 1) *
-										 sizeof(Node *));
-
-			/*
-			 * If the query uses grouping sets, we need a PlaceHolderVar for
-			 * each expression of the relation's targetlist items.  (See
-			 * comments in pull_up_simple_subquery().)
-			 */
-			if (parse->groupingSets)
-				rvcontext.wrap_option = REPLACE_WRAP_ALL;
-
-			/*
-			 * Apply pullup variable replacement throughout the query tree.
-			 */
-			parse = (Query *) pullup_replace_vars((Node *) parse, &rvcontext);
-		}
-
-		table_close(rel, NoLock);
-	}
-
-	return parse;
 }
 
 /*
@@ -1299,6 +1436,8 @@ pull_up_simple_subquery(PlannerInfo *root, Node *jtnode, RangeTblEntry *rte,
 	subroot->parse = subquery;
 	subroot->glob = root->glob;
 	subroot->query_level = root->query_level;
+	subroot->plan_name = root->plan_name;
+	subroot->alternative_plan_name = root->alternative_plan_name;
 	subroot->parent_root = root->parent_root;
 	subroot->plan_params = NIL;
 	subroot->outer_params = NULL;
@@ -1326,12 +1465,23 @@ pull_up_simple_subquery(PlannerInfo *root, Node *jtnode, RangeTblEntry *rte,
 	subroot->qual_security_level = 0;
 	subroot->placeholdersFrozen = false;
 	subroot->hasRecursion = false;
+	subroot->assumeReplanning = false;
 	subroot->wt_param_id = -1;
 	subroot->non_recursive_path = NULL;
 	/* We don't currently need a top JoinDomain for the subroot */
 
 	/* No CTEs to worry about */
 	Assert(subquery->cteList == NIL);
+
+	/*
+	 * Scan the rangetable for relation RTEs and retrieve the necessary
+	 * catalog information for each relation.  Using this information, clear
+	 * the inh flag for any relation that has no children, collect not-null
+	 * attribute numbers for any relation that has column not-null
+	 * constraints, and expand virtual generated columns for any relation that
+	 * contains them.
+	 */
+	subquery = subroot->parse = preprocess_relation_rtes(subroot);
 
 	/*
 	 * If the FROM clause is empty, replace it with a dummy RTE_RESULT RTE, so
@@ -1351,13 +1501,6 @@ pull_up_simple_subquery(PlannerInfo *root, Node *jtnode, RangeTblEntry *rte,
 	 * functions in its rangetable.
 	 */
 	preprocess_function_rtes(subroot);
-
-	/*
-	 * Scan the rangetable for relations with virtual generated columns, and
-	 * replace all Var nodes in the query that reference these columns with
-	 * the generation expressions.
-	 */
-	subquery = subroot->parse = expand_virtual_generated_columns(subroot);
 
 	/*
 	 * Recursively pull up the subquery's subqueries, so that
@@ -1507,6 +1650,10 @@ pull_up_simple_subquery(PlannerInfo *root, Node *jtnode, RangeTblEntry *rte,
 				case RTE_RESULT:
 				case RTE_GROUP:
 					/* these can't contain any lateral references */
+					break;
+				case RTE_GRAPH_TABLE:
+					/* shouldn't happen here */
+					Assert(false);
 					break;
 			}
 		}
@@ -2573,6 +2720,10 @@ replace_vars_in_jointree(Node *jtnode,
 						/* these shouldn't be marked LATERAL */
 						Assert(false);
 						break;
+					case RTE_GRAPH_TABLE:
+						/* shouldn't happen here */
+						Assert(false);
+						break;
 				}
 			}
 		}
@@ -2630,7 +2781,7 @@ pullup_replace_vars(Node *expr, pullup_replace_vars_context *context)
 }
 
 static Node *
-pullup_replace_vars_callback(Var *var,
+pullup_replace_vars_callback(const Var *var,
 							 replace_rte_variables_context *context)
 {
 	pullup_replace_vars_context *rcon = (pullup_replace_vars_context *) context->callback_arg;
@@ -3080,13 +3231,16 @@ flatten_simple_union_all(PlannerInfo *root)
  * to each side separately.)
  *
  * Another transformation we apply here is to recognize cases like
- *		SELECT ... FROM a LEFT JOIN b ON (a.x = b.y) WHERE b.y IS NULL;
- * If the join clause is strict for b.y, then only null-extended rows could
- * pass the upper WHERE, and we can conclude that what the query is really
- * specifying is an anti-semijoin.  We change the join type from JOIN_LEFT
- * to JOIN_ANTI.  The IS NULL clause then becomes redundant, and must be
- * removed to prevent bogus selectivity calculations, but we leave it to
- * distribute_qual_to_rels to get rid of such clauses.
+ *		SELECT ... FROM a LEFT JOIN b ON (a.x = b.y) WHERE b.z IS NULL;
+ * If we can prove that b.z must be non-null for any matching row, either
+ * because the join clause is strict for b.z and b.z happens to be the join
+ * key b.y, or because b.z is defined NOT NULL by table constraints and is
+ * not nullable due to lower-level outer joins, then only null-extended rows
+ * could pass the upper WHERE, and we can conclude that what the query is
+ * really specifying is an anti-semijoin.  We change the join type from
+ * JOIN_LEFT to JOIN_ANTI.  The IS NULL clause then becomes redundant, and
+ * must be removed to prevent bogus selectivity calculations, but we leave
+ * it to distribute_qual_to_rels to get rid of such clauses.
  *
  * Also, we get rid of JOIN_RIGHT cases by flipping them around to become
  * JOIN_LEFT.  This saves some code here and in some later planner routines;
@@ -3110,8 +3264,9 @@ reduce_outer_joins(PlannerInfo *root)
 	 * to stop descending the jointree as soon as there are no outer joins
 	 * below our current point.  This consideration forces a two-pass process.
 	 * The first pass gathers information about which base rels appear below
-	 * each side of each join clause, and about whether there are outer
-	 * join(s) below each side of each join clause. The second pass examines
+	 * each side of each join clause, about whether there are outer join(s)
+	 * below each side of each join clause, and about which base rels are from
+	 * the nullable side of those outer join(s).  The second pass examines
 	 * qual clauses and changes join types as it descends the tree.
 	 */
 	state1 = reduce_outer_joins_pass1((Node *) root->parse->jointree);
@@ -3176,10 +3331,10 @@ reduce_outer_joins_pass1(Node *jtnode)
 {
 	reduce_outer_joins_pass1_state *result;
 
-	result = (reduce_outer_joins_pass1_state *)
-		palloc(sizeof(reduce_outer_joins_pass1_state));
+	result = palloc_object(reduce_outer_joins_pass1_state);
 	result->relids = NULL;
 	result->contains_outer = false;
+	result->nullable_rels = NULL;
 	result->sub_states = NIL;
 
 	if (jtnode == NULL)
@@ -3203,29 +3358,62 @@ reduce_outer_joins_pass1(Node *jtnode)
 			result->relids = bms_add_members(result->relids,
 											 sub_state->relids);
 			result->contains_outer |= sub_state->contains_outer;
+			result->nullable_rels = bms_add_members(result->nullable_rels,
+													sub_state->nullable_rels);
 			result->sub_states = lappend(result->sub_states, sub_state);
 		}
 	}
 	else if (IsA(jtnode, JoinExpr))
 	{
 		JoinExpr   *j = (JoinExpr *) jtnode;
-		reduce_outer_joins_pass1_state *sub_state;
+		reduce_outer_joins_pass1_state *left_state;
+		reduce_outer_joins_pass1_state *right_state;
+
+		/* Recurse to children */
+		left_state = reduce_outer_joins_pass1(j->larg);
+		right_state = reduce_outer_joins_pass1(j->rarg);
 
 		/* join's own RT index is not wanted in result->relids */
-		if (IS_OUTER_JOIN(j->jointype))
-			result->contains_outer = true;
+		result->relids = bms_union(left_state->relids, right_state->relids);
 
-		sub_state = reduce_outer_joins_pass1(j->larg);
-		result->relids = bms_add_members(result->relids,
-										 sub_state->relids);
-		result->contains_outer |= sub_state->contains_outer;
-		result->sub_states = lappend(result->sub_states, sub_state);
+		/* Store children's states for pass 2 */
+		result->sub_states = list_make2(left_state, right_state);
 
-		sub_state = reduce_outer_joins_pass1(j->rarg);
-		result->relids = bms_add_members(result->relids,
-										 sub_state->relids);
-		result->contains_outer |= sub_state->contains_outer;
-		result->sub_states = lappend(result->sub_states, sub_state);
+		/* Collect outer join information */
+		switch (j->jointype)
+		{
+			case JOIN_INNER:
+			case JOIN_SEMI:
+				/* No new nullability; propagate state from children */
+				result->contains_outer = left_state->contains_outer ||
+					right_state->contains_outer;
+				result->nullable_rels = bms_union(left_state->nullable_rels,
+												  right_state->nullable_rels);
+				break;
+			case JOIN_LEFT:
+			case JOIN_ANTI:
+				/* RHS is nullable; LHS keeps existing status */
+				result->contains_outer = true;
+				result->nullable_rels = bms_union(left_state->nullable_rels,
+												  right_state->relids);
+				break;
+			case JOIN_RIGHT:
+				/* LHS is nullable; RHS keeps existing status */
+				result->contains_outer = true;
+				result->nullable_rels = bms_union(left_state->relids,
+												  right_state->nullable_rels);
+				break;
+			case JOIN_FULL:
+				/* Both sides are nullable */
+				result->contains_outer = true;
+				result->nullable_rels = bms_union(left_state->relids,
+												  right_state->relids);
+				break;
+			default:
+				elog(ERROR, "unrecognized join type: %d",
+					 (int) j->jointype);
+				break;
+		}
 	}
 	else
 		elog(ERROR, "unrecognized node type: %d",
@@ -3377,15 +3565,16 @@ reduce_outer_joins_pass2(Node *jtnode,
 
 		/*
 		 * See if we can reduce JOIN_LEFT to JOIN_ANTI.  This is the case if
-		 * the join's own quals are strict for any var that was forced null by
-		 * higher qual levels.  NOTE: there are other ways that we could
-		 * detect an anti-join, in particular if we were to check whether Vars
-		 * coming from the RHS must be non-null because of table constraints.
-		 * That seems complicated and expensive though (in particular, one
-		 * would have to be wary of lower outer joins). For the moment this
-		 * seems sufficient.
+		 * any var from the RHS was forced null by higher qual levels, but is
+		 * known to be non-nullable.  We detect this either by seeing if the
+		 * join's own quals are strict for the var, or by checking if the var
+		 * is defined NOT NULL by table constraints (being careful to exclude
+		 * vars that are nullable due to lower-level outer joins).  In either
+		 * case, the only way the higher qual clause's requirement for NULL
+		 * can be met is if the join fails to match, producing a null-extended
+		 * row.  Thus, we can treat this as an anti-join.
 		 */
-		if (jointype == JOIN_LEFT)
+		if (jointype == JOIN_LEFT && forced_null_vars != NIL)
 		{
 			List	   *nonnullable_vars;
 			Bitmapset  *overlap;
@@ -3397,9 +3586,13 @@ reduce_outer_joins_pass2(Node *jtnode,
 			 * It's not sufficient to check whether nonnullable_vars and
 			 * forced_null_vars overlap: we need to know if the overlap
 			 * includes any RHS variables.
+			 *
+			 * Also check if any forced-null var is defined NOT NULL by table
+			 * constraints.
 			 */
 			overlap = mbms_overlap_sets(nonnullable_vars, forced_null_vars);
-			if (bms_overlap(overlap, right_state->relids))
+			if (bms_overlap(overlap, right_state->relids) ||
+				has_notnull_forced_var(root, forced_null_vars, right_state))
 				jointype = JOIN_ANTI;
 		}
 
@@ -3529,10 +3722,108 @@ report_reduced_full_join(reduce_outer_joins_pass2_state *state2,
 {
 	reduce_outer_joins_partial_state *statep;
 
-	statep = palloc(sizeof(reduce_outer_joins_partial_state));
+	statep = palloc_object(reduce_outer_joins_partial_state);
 	statep->full_join_rti = rtindex;
 	statep->unreduced_side = relids;
 	state2->partial_reduced = lappend(state2->partial_reduced, statep);
+}
+
+/*
+ * has_notnull_forced_var
+ *		Check if "forced_null_vars" contains any Vars belonging to the subtree
+ *		indicated by "right_state" that are known to be non-nullable due to
+ *		table constraints.
+ *
+ * Note that we must also consider the situation where a NOT NULL Var can be
+ * nulled by lower-level outer joins.
+ *
+ * Helper for reduce_outer_joins_pass2.
+ */
+static bool
+has_notnull_forced_var(PlannerInfo *root, List *forced_null_vars,
+					   reduce_outer_joins_pass1_state *right_state)
+{
+	int			varno = -1;
+
+	foreach_node(Bitmapset, attrs, forced_null_vars)
+	{
+		RangeTblEntry *rte;
+		Bitmapset  *notnullattnums;
+		Bitmapset  *forcednullattnums = NULL;
+		int			attno;
+
+		varno++;
+
+		/* Skip empty bitmaps */
+		if (bms_is_empty(attrs))
+			continue;
+
+		/* Skip Vars that do not belong to the target relations */
+		if (!bms_is_member(varno, right_state->relids))
+			continue;
+
+		/*
+		 * Skip Vars that can be nulled by lower-level outer joins within the
+		 * given subtree.  These Vars might be NULL even if the schema defines
+		 * them as NOT NULL.
+		 */
+		if (bms_is_member(varno, right_state->nullable_rels))
+			continue;
+
+		/*
+		 * Iterate over attributes and adjust the bitmap indexes by
+		 * FirstLowInvalidHeapAttributeNumber to get the actual attribute
+		 * numbers.
+		 */
+		attno = -1;
+		while ((attno = bms_next_member(attrs, attno)) >= 0)
+		{
+			AttrNumber	real_attno = attno + FirstLowInvalidHeapAttributeNumber;
+
+			/* system columns cannot be NULL */
+			if (real_attno < 0)
+				return true;
+
+			forcednullattnums = bms_add_member(forcednullattnums, real_attno);
+		}
+
+		rte = rt_fetch(varno, root->parse->rtable);
+
+		/* We can only reason about ordinary relations */
+		if (rte->rtekind != RTE_RELATION)
+		{
+			bms_free(forcednullattnums);
+			continue;
+		}
+
+		/*
+		 * We must skip inheritance parent tables, as some child tables may
+		 * have a NOT NULL constraint for a column while others may not.  This
+		 * cannot happen with partitioned tables, though.
+		 */
+		if (rte->inh && rte->relkind != RELKIND_PARTITIONED_TABLE)
+		{
+			bms_free(forcednullattnums);
+			continue;
+		}
+
+		/* Get the column not-null constraint information for this relation */
+		notnullattnums = find_relation_notnullatts(root, rte->relid);
+
+		/*
+		 * Check if any forced-null attributes are defined as NOT NULL by
+		 * table constraints.
+		 */
+		if (bms_overlap(notnullattnums, forcednullattnums))
+		{
+			bms_free(forcednullattnums);
+			return true;
+		}
+
+		bms_free(forcednullattnums);
+	}
+
+	return false;
 }
 
 

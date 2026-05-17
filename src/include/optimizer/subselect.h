@@ -3,7 +3,7 @@
  * subselect.h
  *	  Planning routines for subselects.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/subselect.h
@@ -22,6 +22,7 @@ extern ScalarArrayOpExpr *convert_VALUES_to_ANY(PlannerInfo *root,
 												Query *values);
 extern JoinExpr *convert_ANY_sublink_to_join(PlannerInfo *root,
 											 SubLink *sublink,
+											 bool under_not,
 											 Relids available_rels);
 extern JoinExpr *convert_EXISTS_sublink_to_join(PlannerInfo *root,
 												SubLink *sublink,

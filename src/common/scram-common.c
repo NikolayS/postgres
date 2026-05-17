@@ -6,7 +6,7 @@
  * backend, for implement the Salted Challenge Response Authentication
  * Mechanism (SCRAM), per IETF's RFC 5802.
  *
- * Portions Copyright (c) 2017-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2017-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/common/scram-common.c
@@ -61,7 +61,7 @@ scram_SaltedPassword(const char *password,
 	 */
 
 	/* First iteration */
-	if (pg_hmac_init(hmac_ctx, (uint8 *) password, password_len) < 0 ||
+	if (pg_hmac_init(hmac_ctx, (const uint8 *) password, password_len) < 0 ||
 		pg_hmac_update(hmac_ctx, salt, saltlen) < 0 ||
 		pg_hmac_update(hmac_ctx, (uint8 *) &one, sizeof(uint32)) < 0 ||
 		pg_hmac_final(hmac_ctx, Ui_prev, key_length) < 0)
@@ -84,7 +84,7 @@ scram_SaltedPassword(const char *password,
 		CHECK_FOR_INTERRUPTS();
 #endif
 
-		if (pg_hmac_init(hmac_ctx, (uint8 *) password, password_len) < 0 ||
+		if (pg_hmac_init(hmac_ctx, (const uint8 *) password, password_len) < 0 ||
 			pg_hmac_update(hmac_ctx, (uint8 *) Ui_prev, key_length) < 0 ||
 			pg_hmac_final(hmac_ctx, Ui, key_length) < 0)
 		{

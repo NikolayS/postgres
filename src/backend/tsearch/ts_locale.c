@@ -3,7 +3,7 @@
  * ts_locale.c
  *		locale compatibility layer for tsearch
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -20,47 +20,43 @@
 static void tsearch_readline_callback(void *arg);
 
 
-/*
- * The reason these functions use a 3-wchar_t output buffer, not 2 as you
- * might expect, is that on Windows "wchar_t" is 16 bits and what we'll be
- * getting from char2wchar() is UTF16 not UTF32.  A single input character
- * may therefore produce a surrogate pair rather than just one wchar_t;
- * we also need room for a trailing null.  When we do get a surrogate pair,
- * we pass just the first code to iswdigit() etc, so that these functions will
- * always return false for characters outside the Basic Multilingual Plane.
- */
-#define WC_BUF_LEN  3
+/* space for a single character plus a trailing NUL */
+#define WC_BUF_LEN  2
 
-int
-t_isalpha(const char *ptr)
-{
-	int			clen = pg_mblen(ptr);
-	wchar_t		character[WC_BUF_LEN];
-	pg_locale_t mylocale = 0;	/* TODO */
-
-	if (clen == 1 || database_ctype_is_c)
-		return isalpha(TOUCHAR(ptr));
-
-	char2wchar(character, WC_BUF_LEN, ptr, clen, mylocale);
-
-	return iswalpha((wint_t) character[0]);
+#define GENERATE_T_ISCLASS_DEF(character_class) \
+/* mblen shall be that of the first character */ \
+int \
+t_is##character_class##_with_len(const char *ptr, int mblen) \
+{ \
+	pg_wchar	wstr[WC_BUF_LEN]; \
+	int			wlen pg_attribute_unused(); \
+	wlen = pg_mb2wchar_with_len(ptr, wstr, mblen); \
+	Assert(wlen <= 1); \
+	/* pass single character, or NUL if empty */ \
+	return pg_isw##character_class(wstr[0], pg_database_locale()); \
+} \
+\
+/* ptr shall point to a NUL-terminated string */ \
+int \
+t_is##character_class##_cstr(const char *ptr) \
+{ \
+	return t_is##character_class##_with_len(ptr, pg_mblen_cstr(ptr)); \
+} \
+/* ptr shall point to a string with pre-validated encoding */ \
+int \
+t_is##character_class##_unbounded(const char *ptr) \
+{ \
+	return t_is##character_class##_with_len(ptr, pg_mblen_unbounded(ptr)); \
+} \
+/* historical name for _unbounded */ \
+int \
+t_is##character_class(const char *ptr) \
+{ \
+	return t_is##character_class##_unbounded(ptr); \
 }
 
-int
-t_isalnum(const char *ptr)
-{
-	int			clen = pg_mblen(ptr);
-	wchar_t		character[WC_BUF_LEN];
-	pg_locale_t mylocale = 0;	/* TODO */
-
-	if (clen == 1 || database_ctype_is_c)
-		return isalnum(TOUCHAR(ptr));
-
-	char2wchar(character, WC_BUF_LEN, ptr, clen, mylocale);
-
-	return iswalnum((wint_t) character[0]);
-}
-
+GENERATE_T_ISCLASS_DEF(alnum)
+GENERATE_T_ISCLASS_DEF(alpha)
 
 /*
  * Set up to read a file using tsearch_readline().  This facility is

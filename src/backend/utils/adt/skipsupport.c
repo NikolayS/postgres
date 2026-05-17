@@ -4,7 +4,7 @@
  *	  Support routines for B-Tree skip scan.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -38,7 +38,7 @@ PrepareSkipSupportFromOpclass(Oid opfamily, Oid opcintype, bool reverse)
 	if (!OidIsValid(skipSupportFunction))
 		return NULL;
 
-	sksup = palloc(sizeof(SkipSupportData));
+	sksup = palloc_object(SkipSupportData);
 	OidFunctionCall1(skipSupportFunction, PointerGetDatum(sksup));
 
 	if (reverse)

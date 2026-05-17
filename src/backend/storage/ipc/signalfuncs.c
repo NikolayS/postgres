@@ -3,7 +3,7 @@
  * signalfuncs.c
  *	  Functions for signaling backends
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -25,6 +25,7 @@
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/fmgrprotos.h"
+#include "utils/wait_event.h"
 
 
 /*
@@ -87,10 +88,7 @@ pg_signal_backend(int pid, int sig)
 	 */
 	if (!OidIsValid(proc->roleId) || superuser_arg(proc->roleId))
 	{
-		ProcNumber	procNumber = GetNumberFromPGProc(proc);
-		BackendType backendType = pgstat_get_backend_type_by_proc_number(procNumber);
-
-		if (backendType == B_AUTOVAC_WORKER)
+		if (proc->backendType == B_AUTOVAC_WORKER)
 		{
 			if (!has_privs_of_role(GetUserId(), ROLE_PG_SIGNAL_AUTOVACUUM_WORKER))
 				return SIGNAL_BACKEND_NOAUTOVAC;

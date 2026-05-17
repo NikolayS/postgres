@@ -3,7 +3,7 @@
  * walreceiver.h
  *	  Exports from replication/walreceiverfuncs.c.
  *
- * Portions Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *
  * src/include/replication/walreceiver.h
  *
@@ -47,6 +47,7 @@ typedef enum
 	WALRCV_STOPPED,				/* stopped and mustn't start up again */
 	WALRCV_STARTING,			/* launched, but the process hasn't
 								 * initialized yet */
+	WALRCV_CONNECTING,			/* connecting to upstream server */
 	WALRCV_STREAMING,			/* walreceiver is streaming */
 	WALRCV_WAITING,				/* stopped streaming, waiting for orders */
 	WALRCV_RESTARTING,			/* asked to restart streaming */
@@ -155,11 +156,11 @@ typedef struct
 	pg_atomic_uint64 writtenUpto;
 
 	/*
-	 * force walreceiver reply?  This doesn't need to be locked; memory
+	 * request walreceiver reply?  This doesn't need to be locked; memory
 	 * barriers for ordering are sufficient.  But we do need atomic fetch and
 	 * store semantics, so use sig_atomic_t.
 	 */
-	sig_atomic_t force_reply;	/* used as a bool */
+	sig_atomic_t apply_reply_requested; /* used as a bool */
 } WalRcvData;
 
 extern PGDLLIMPORT WalRcvData *WalRcv;
@@ -487,14 +488,13 @@ walrcv_clear_result(WalRcvExecResult *walres)
 
 /* prototypes for functions in walreceiver.c */
 pg_noreturn extern void WalReceiverMain(const void *startup_data, size_t startup_data_len);
-extern void WalRcvForceReply(void);
+extern void WalRcvRequestApplyReply(void);
 
 /* prototypes for functions in walreceiverfuncs.c */
-extern Size WalRcvShmemSize(void);
-extern void WalRcvShmemInit(void);
 extern void ShutdownWalRcv(void);
 extern bool WalRcvStreaming(void);
 extern bool WalRcvRunning(void);
+extern WalRcvState WalRcvGetState(void);
 extern void RequestXLogStreaming(TimeLineID tli, XLogRecPtr recptr,
 								 const char *conninfo, const char *slotname,
 								 bool create_temp_slot);

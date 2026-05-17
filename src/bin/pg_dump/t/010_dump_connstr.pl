@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -152,20 +152,6 @@ $node->command_ok(
 		'--dbname' => 'dbname=template1',
 	],
 	'pg_dumpall --dbname accepts connection string');
-
-$node->run_log(
-	[ 'createdb', '--username' => $src_bootstrap_super, "foo\n\rbar" ]);
-
-# not sufficient to use --roles-only here
-$node->command_fails(
-	[
-		'pg_dumpall', '--no-sync',
-		'--username' => $src_bootstrap_super,
-		'--file' => $discard,
-	],
-	'pg_dumpall with \n\r in database name');
-$node->run_log(
-	[ 'dropdb', '--username' => $src_bootstrap_super, "foo\n\rbar" ]);
 
 
 # make a table, so the parallel worker has something to dump

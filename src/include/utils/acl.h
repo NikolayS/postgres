@@ -4,7 +4,7 @@
  *	  Definition of (and support for) access control list data structures.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/acl.h
@@ -166,6 +166,7 @@ typedef struct ArrayType Acl;
 #define ACL_ALL_RIGHTS_LANGUAGE		(ACL_USAGE)
 #define ACL_ALL_RIGHTS_LARGEOBJECT	(ACL_SELECT|ACL_UPDATE)
 #define ACL_ALL_RIGHTS_PARAMETER_ACL (ACL_SET|ACL_ALTER_SYSTEM)
+#define ACL_ALL_RIGHTS_PROPGRAPH	(ACL_SELECT)
 #define ACL_ALL_RIGHTS_SCHEMA		(ACL_USAGE|ACL_CREATE)
 #define ACL_ALL_RIGHTS_TABLESPACE	(ACL_CREATE)
 #define ACL_ALL_RIGHTS_TYPE			(ACL_USAGE)
@@ -223,7 +224,7 @@ extern void check_rolespec_name(const RoleSpec *role, const char *detail_msg);
 extern HeapTuple get_rolespec_tuple(const RoleSpec *role);
 extern char *get_rolespec_name(const RoleSpec *role);
 
-extern void select_best_grantor(Oid roleId, AclMode privileges,
+extern void select_best_grantor(const RoleSpec *grantedBy, AclMode privileges,
 								const Acl *acl, Oid ownerId,
 								Oid *grantorId, AclMode *grantOptions);
 

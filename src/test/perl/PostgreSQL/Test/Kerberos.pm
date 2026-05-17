@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Sets up a stand-alone KDC for testing PostgreSQL GSSAPI / Kerberos
 # functionality.
@@ -9,6 +9,7 @@ package PostgreSQL::Test::Kerberos;
 use strict;
 use warnings FATAL => 'all';
 use PostgreSQL::Test::Utils;
+use Test::More;
 
 our (
 	$krb5_bin_dir, $krb5_sbin_dir, $krb5_config, $kinit,

@@ -4,7 +4,7 @@
  *	  prototypes for postgres.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/tcop/tcopprot.h
@@ -20,6 +20,7 @@
 #include "utils/guc.h"
 #include "utils/queryenvironment.h"
 
+typedef struct ExplainState ExplainState;	/* defined in explain_state.h */
 
 extern PGDLLIMPORT CommandDest whereToSendOutput;
 extern PGDLLIMPORT const char *debug_query_string;
@@ -63,7 +64,8 @@ extern List *pg_analyze_and_rewrite_withcb(RawStmt *parsetree,
 										   QueryEnvironment *queryEnv);
 extern PlannedStmt *pg_plan_query(Query *querytree, const char *query_string,
 								  int cursorOptions,
-								  ParamListInfo boundParams);
+								  ParamListInfo boundParams,
+								  ExplainState *es);
 extern List *pg_plan_queries(List *querytrees, const char *query_string,
 							 int cursorOptions,
 							 ParamListInfo boundParams);
@@ -72,7 +74,7 @@ extern void die(SIGNAL_ARGS);
 pg_noreturn extern void quickdie(SIGNAL_ARGS);
 extern void StatementCancelHandler(SIGNAL_ARGS);
 pg_noreturn extern void FloatExceptionHandler(SIGNAL_ARGS);
-extern void HandleRecoveryConflictInterrupt(ProcSignalReason reason);
+extern void HandleRecoveryConflictInterrupt(void);
 extern void ProcessClientReadInterrupt(bool blocked);
 extern void ProcessClientWriteInterrupt(bool blocked);
 

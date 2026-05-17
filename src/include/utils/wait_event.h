@@ -2,7 +2,7 @@
  * wait_event.h
  *	  Definitions related to wait event reporting
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  * src/include/utils/wait_event.h
  * ----------
@@ -12,6 +12,7 @@
 
 /* enums for wait events */
 #include "utils/wait_event_types.h"
+#include "utils/probes.h"
 
 extern const char *pgstat_get_wait_event(uint32 wait_event_info);
 extern const char *pgstat_get_wait_event_type(uint32 wait_event_info);
@@ -42,8 +43,6 @@ extern PGDLLIMPORT uint32 *my_wait_event_info;
 extern uint32 WaitEventExtensionNew(const char *wait_event_name);
 extern uint32 WaitEventInjectionPointNew(const char *wait_event_name);
 
-extern void WaitEventCustomShmemInit(void);
-extern Size WaitEventCustomShmemSize(void);
 extern char **GetWaitEventCustomNames(uint32 classId, int *nwaitevents);
 
 /* ----------
@@ -73,6 +72,8 @@ pgstat_report_wait_start(uint32 wait_event_info)
 	 * four-bytes, updates are atomic.
 	 */
 	*(volatile uint32 *) my_wait_event_info = wait_event_info;
+
+	TRACE_POSTGRESQL_WAIT_EVENT_START(wait_event_info);
 }
 
 /* ----------
@@ -86,6 +87,8 @@ pgstat_report_wait_end(void)
 {
 	/* see pgstat_report_wait_start() */
 	*(volatile uint32 *) my_wait_event_info = 0;
+
+	TRACE_POSTGRESQL_WAIT_EVENT_END();
 }
 
 

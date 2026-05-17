@@ -13,7 +13,7 @@
  * We likely will want to introduce a backend-local io_uring instance in the
  * future, e.g. for FE/BE network IO.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -28,6 +28,9 @@
 #include "storage/aio.h"
 
 #ifdef IOMETHOD_IO_URING_ENABLED
+
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include <liburing.h>
 
@@ -46,11 +49,12 @@
 
 
 /* Entry points for IoMethodOps. */
-static size_t pgaio_uring_shmem_size(void);
-static void pgaio_uring_shmem_init(bool first_time);
+static void pgaio_uring_shmem_request(void *arg);
+static void pgaio_uring_shmem_init(void *arg);
 static void pgaio_uring_init_backend(void);
 static int	pgaio_uring_submit(uint16 num_staged_ios, PgAioHandle **staged_ios);
 static void pgaio_uring_wait_one(PgAioHandle *ioh, uint64 ref_generation);
+static void pgaio_uring_check_one(PgAioHandle *ioh, uint64 ref_generation);
 
 /* helper functions */
 static void pgaio_uring_sq_from_io(PgAioHandle *ioh, struct io_uring_sqe *sqe);
@@ -66,23 +70,26 @@ const IoMethodOps pgaio_uring_ops = {
 	 */
 	.wait_on_fd_before_close = true,
 
-	.shmem_size = pgaio_uring_shmem_size,
-	.shmem_init = pgaio_uring_shmem_init,
+	.shmem_callbacks.request_fn = pgaio_uring_shmem_request,
+	.shmem_callbacks.init_fn = pgaio_uring_shmem_init,
 	.init_backend = pgaio_uring_init_backend,
 
 	.submit = pgaio_uring_submit,
 	.wait_one = pgaio_uring_wait_one,
+	.check_one = pgaio_uring_check_one,
 };
 
 /*
  * Per-backend state when using io_method=io_uring
- *
- * Align the whole struct to a cacheline boundary, to prevent false sharing
- * between completion_lock and prior backend's io_uring_ring.
  */
-typedef struct pg_attribute_aligned (PG_CACHE_LINE_SIZE)
-PgAioUringContext
+typedef struct PgAioUringContext
 {
+	/*
+	 * Align the whole struct to a cacheline boundary, to prevent false
+	 * sharing between completion_lock and prior backend's io_uring_ring.
+	 */
+	alignas(PG_CACHE_LINE_SIZE)
+
 	/*
 	 * Multiple backends can process completions for this backend's io_uring
 	 * instance (e.g. when the backend issuing IO is busy doing something
@@ -94,12 +101,32 @@ PgAioUringContext
 	struct io_uring io_uring_ring;
 } PgAioUringContext;
 
+/*
+ * Information about the capabilities that io_uring has.
+ *
+ * Depending on liburing and kernel version different features are
+ * supported. At least for the kernel a kernel version check does not suffice
+ * as various vendors do backport features to older kernels :(.
+ */
+typedef struct PgAioUringCaps
+{
+	bool		checked;
+	/* -1 if io_uring_queue_init_mem() is unsupported */
+	int			mem_init_size;
+} PgAioUringCaps;
+
+
 /* PgAioUringContexts for all backends */
 static PgAioUringContext *pgaio_uring_contexts;
 
 /* the current backend's context */
 static PgAioUringContext *pgaio_my_uring_context;
 
+static PgAioUringCaps pgaio_uring_caps =
+{
+	.checked = false,
+	.mem_init_size = -1,
+};
 
 static uint32
 pgaio_uring_procs(void)
@@ -111,29 +138,189 @@ pgaio_uring_procs(void)
 	return MaxBackends + NUM_AUXILIARY_PROCS - MAX_IO_WORKERS;
 }
 
-static Size
+/*
+ * Initializes pgaio_uring_caps, unless that's already done.
+ */
+static void
+pgaio_uring_check_capabilities(void)
+{
+	if (pgaio_uring_caps.checked)
+		return;
+
+	/*
+	 * By default io_uring creates a shared memory mapping for each io_uring
+	 * instance, leading to a large number of memory mappings. Unfortunately a
+	 * large number of memory mappings slows things down, backend exit is
+	 * particularly affected.  To address that, newer kernels (6.5) support
+	 * using user-provided memory for the memory, by putting the relevant
+	 * memory into shared memory we don't need any additional mappings.
+	 *
+	 * To know whether this is supported, we unfortunately need to probe the
+	 * kernel by trying to create a ring with userspace-provided memory. This
+	 * also has a secondary benefit: We can determine precisely how much
+	 * memory we need for each io_uring instance.
+	 */
+#if defined(HAVE_IO_URING_QUEUE_INIT_MEM) && defined(IORING_SETUP_NO_MMAP)
+	{
+		struct io_uring test_ring;
+		size_t		ring_size;
+		void	   *ring_ptr;
+		struct io_uring_params p = {0};
+		int			ret;
+
+		/*
+		 * Liburing does not yet provide an API to query how much memory a
+		 * ring will need. So we over-estimate it here. As the memory is freed
+		 * just below that's small temporary waste of memory.
+		 *
+		 * 1MB is more than enough for rings within io_max_concurrency's
+		 * range.
+		 */
+		ring_size = 1024 * 1024;
+
+		/*
+		 * Hard to believe a system exists where 1MB would not be a multiple
+		 * of the page size. But it's cheap to ensure...
+		 */
+		ring_size -= ring_size % sysconf(_SC_PAGESIZE);
+
+		ring_ptr = mmap(NULL, ring_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+		if (ring_ptr == MAP_FAILED)
+			elog(ERROR,
+				 "mmap(%zu) to determine io_uring_queue_init_mem() support failed: %m",
+				 ring_size);
+
+		ret = io_uring_queue_init_mem(io_max_concurrency, &test_ring, &p, ring_ptr, ring_size);
+		if (ret > 0)
+		{
+			pgaio_uring_caps.mem_init_size = ret;
+
+			elog(DEBUG1,
+				 "can use combined memory mapping for io_uring, each ring needs %d bytes",
+				 ret);
+
+			/* clean up the created ring, it was just for a test */
+			io_uring_queue_exit(&test_ring);
+		}
+		else
+		{
+			/*
+			 * There are different reasons for ring creation to fail, but it's
+			 * ok to treat that just as io_uring_queue_init_mem() not being
+			 * supported. We'll report a more detailed error in
+			 * pgaio_uring_shmem_init().
+			 */
+			errno = -ret;
+			elog(DEBUG1,
+				 "cannot use combined memory mapping for io_uring, ring creation failed: %m");
+
+		}
+
+		if (munmap(ring_ptr, ring_size) != 0)
+			elog(ERROR, "munmap() failed: %m");
+	}
+#else
+	{
+		elog(DEBUG1,
+			 "can't use combined memory mapping for io_uring, kernel or liburing too old");
+	}
+#endif
+
+	pgaio_uring_caps.checked = true;
+}
+
+/*
+ * Memory for all PgAioUringContext instances
+ */
+static size_t
 pgaio_uring_context_shmem_size(void)
 {
 	return mul_size(pgaio_uring_procs(), sizeof(PgAioUringContext));
 }
 
+/*
+ * Memory for the combined memory used by io_uring instances. Returns 0 if
+ * that is not supported by kernel/liburing.
+ */
+static size_t
+pgaio_uring_ring_shmem_size(void)
+{
+	size_t		sz = 0;
+
+	if (pgaio_uring_caps.mem_init_size > 0)
+	{
+		/*
+		 * Memory for rings needs to be allocated to the page boundary,
+		 * reserve space. Luckily it does not need to be aligned to hugepage
+		 * boundaries, even if huge pages are used.
+		 */
+		sz = add_size(sz, sysconf(_SC_PAGESIZE));
+		sz = add_size(sz, mul_size(pgaio_uring_procs(),
+								   pgaio_uring_caps.mem_init_size));
+	}
+
+	return sz;
+}
+
 static size_t
 pgaio_uring_shmem_size(void)
 {
-	return pgaio_uring_context_shmem_size();
+	size_t		sz;
+
+	sz = pgaio_uring_context_shmem_size();
+	sz = add_size(sz, pgaio_uring_ring_shmem_size());
+
+	return sz;
 }
 
 static void
-pgaio_uring_shmem_init(bool first_time)
+pgaio_uring_shmem_request(void *arg)
 {
-	int			TotalProcs = MaxBackends + NUM_AUXILIARY_PROCS - MAX_IO_WORKERS;
-	bool		found;
+	/*
+	 * Kernel and liburing support for various features influences how much
+	 * shmem we need, perform the necessary checks.
+	 */
+	pgaio_uring_check_capabilities();
 
-	pgaio_uring_contexts = (PgAioUringContext *)
-		ShmemInitStruct("AioUring", pgaio_uring_shmem_size(), &found);
+	ShmemRequestStruct(.name = "AioUringContext",
+					   .size = pgaio_uring_shmem_size(),
+					   .ptr = (void **) &pgaio_uring_contexts,
+		);
+}
 
-	if (found)
-		return;
+static void
+pgaio_uring_shmem_init(void *arg)
+{
+	int			TotalProcs = pgaio_uring_procs();
+	char	   *shmem;
+	size_t		ring_mem_remain = 0;
+	char	   *ring_mem_next = 0;
+
+	/*
+	 * We allocate memory for all PgAioUringContext instances and, if
+	 * supported, the memory required for each of the io_uring instances, in
+	 * one combined allocation.
+	 *
+	 * pgaio_uring_contexts is already set to the base of the allocation.
+	 */
+	shmem = (char *) pgaio_uring_contexts;
+	shmem += pgaio_uring_context_shmem_size();
+
+	/* if supported, handle memory alignment / sizing for io_uring memory */
+	if (pgaio_uring_caps.mem_init_size > 0)
+	{
+		ring_mem_remain = pgaio_uring_ring_shmem_size();
+		ring_mem_next = shmem;
+
+		/* align to page boundary, see also pgaio_uring_ring_shmem_size() */
+		ring_mem_next = (char *) TYPEALIGN(sysconf(_SC_PAGESIZE), ring_mem_next);
+
+		/* account for alignment */
+		ring_mem_remain -= ring_mem_next - shmem;
+		shmem += ring_mem_next - shmem;
+
+		shmem += ring_mem_remain;
+	}
 
 	for (int contextno = 0; contextno < TotalProcs; contextno++)
 	{
@@ -158,7 +345,28 @@ pgaio_uring_shmem_init(bool first_time)
 		 * be worth using that - also need to evaluate if that causes
 		 * noticeable additional contention?
 		 */
-		ret = io_uring_queue_init(io_max_concurrency, &context->io_uring_ring, 0);
+
+		/*
+		 * If supported (c.f. pgaio_uring_check_capabilities()), create ring
+		 * with its data in shared memory. Otherwise fall back io_uring
+		 * creating a memory mapping for each ring.
+		 */
+#if defined(HAVE_IO_URING_QUEUE_INIT_MEM) && defined(IORING_SETUP_NO_MMAP)
+		if (pgaio_uring_caps.mem_init_size > 0)
+		{
+			struct io_uring_params p = {0};
+
+			ret = io_uring_queue_init_mem(io_max_concurrency, &context->io_uring_ring, &p, ring_mem_next, ring_mem_remain);
+
+			ring_mem_remain -= ret;
+			ring_mem_next += ret;
+		}
+		else
+#endif
+		{
+			ret = io_uring_queue_init(io_max_concurrency, &context->io_uring_ring, 0);
+		}
+
 		if (ret < 0)
 		{
 			char	   *hint = NULL;
@@ -179,7 +387,7 @@ pgaio_uring_shmem_init(bool first_time)
 			else if (-ret == ENOSYS)
 			{
 				err = ERRCODE_FEATURE_NOT_SUPPORTED;
-				hint = _("Kernel does not support io_uring.");
+				hint = _("The kernel does not support io_uring.");
 			}
 
 			/* update errno to allow %m to work */
@@ -207,7 +415,6 @@ static int
 pgaio_uring_submit(uint16 num_staged_ios, PgAioHandle **staged_ios)
 {
 	struct io_uring *uring_instance = &pgaio_my_uring_context->io_uring_ring;
-	int			in_flight_before = dclist_count(&pgaio_my_backend->in_flight_ios);
 
 	Assert(num_staged_ios <= PGAIO_SUBMIT_BATCH_SIZE);
 
@@ -223,27 +430,6 @@ pgaio_uring_submit(uint16 num_staged_ios, PgAioHandle **staged_ios)
 
 		pgaio_io_prepare_submit(ioh);
 		pgaio_uring_sq_from_io(ioh, sqe);
-
-		/*
-		 * io_uring executes IO in process context if possible. That's
-		 * generally good, as it reduces context switching. When performing a
-		 * lot of buffered IO that means that copying between page cache and
-		 * userspace memory happens in the foreground, as it can't be
-		 * offloaded to DMA hardware as is possible when using direct IO. When
-		 * executing a lot of buffered IO this causes io_uring to be slower
-		 * than worker mode, as worker mode parallelizes the copying. io_uring
-		 * can be told to offload work to worker threads instead.
-		 *
-		 * If an IO is buffered IO and we already have IOs in flight or
-		 * multiple IOs are being submitted, we thus tell io_uring to execute
-		 * the IO in the background. We don't do so for the first few IOs
-		 * being submitted as executing in this process' context has lower
-		 * latency.
-		 */
-		if (in_flight_before > 4 && (ioh->flags & PGAIO_HF_BUFFERED))
-			io_uring_sqe_set_flags(sqe, IOSQE_ASYNC);
-
-		in_flight_before++;
 	}
 
 	while (true)
@@ -361,13 +547,14 @@ pgaio_uring_drain_locked(PgAioUringContext *context)
 		for (int i = 0; i < ncqes; i++)
 		{
 			struct io_uring_cqe *cqe = cqes[i];
-			PgAioHandle *ioh;
+			PgAioHandle *ioh = io_uring_cqe_get_data(cqe);
+			int			result = cqe->res;
 
-			ioh = io_uring_cqe_get_data(cqe);
 			errcallback.arg = ioh;
+
 			io_uring_cqe_seen(&context->io_uring_ring, cqe);
 
-			pgaio_io_process_completion(ioh, cqe->res);
+			pgaio_io_process_completion(ioh, result);
 			errcallback.arg = NULL;
 		}
 
@@ -400,9 +587,9 @@ pgaio_uring_wait_one(PgAioHandle *ioh, uint64 ref_generation)
 	while (true)
 	{
 		pgaio_debug_io(DEBUG3, ioh,
-					   "wait_one io_gen: %llu, ref_gen: %llu, cycle %d",
-					   (long long unsigned) ioh->generation,
-					   (long long unsigned) ref_generation,
+					   "wait_one io_gen: %" PRIu64 ", ref_gen: %" PRIu64 ", cycle %d",
+					   ioh->generation,
+					   ref_generation,
 					   waited);
 
 		if (pgaio_io_was_recycled(ioh, ref_generation, &state) ||
@@ -458,11 +645,107 @@ pgaio_uring_wait_one(PgAioHandle *ioh, uint64 ref_generation)
 }
 
 static void
+pgaio_uring_check_one(PgAioHandle *ioh, uint64 ref_generation)
+{
+	ProcNumber	owner_procno = ioh->owner_procno;
+	PgAioUringContext *owner_context = &pgaio_uring_contexts[owner_procno];
+
+	/*
+	 * This check is not reliable when not holding the completion lock, but
+	 * it's a useful cheap pre-check to see if it's worth trying to get the
+	 * completion lock.
+	 */
+	if (!io_uring_cq_ready(&owner_context->io_uring_ring))
+		return;
+
+	/*
+	 * If the completion lock is currently held, the holder will likely
+	 * process any pending completions, give up.
+	 */
+	if (!LWLockConditionalAcquire(&owner_context->completion_lock, LW_EXCLUSIVE))
+		return;
+
+	pgaio_debug_io(DEBUG3, ioh,
+				   "check_one io_gen: %" PRIu64 ", ref_gen: %" PRIu64,
+				   ioh->generation,
+				   ref_generation);
+
+	/*
+	 * Recheck if there are any completions, another backend could have
+	 * processed them since we checked above, or our unlocked pre-check could
+	 * have been reading outdated values.
+	 *
+	 * It is possible that the IO handle has been reused since the start of
+	 * the call, but now that we have the lock, we can just as well drain all
+	 * completions.
+	 */
+	if (io_uring_cq_ready(&owner_context->io_uring_ring))
+		pgaio_uring_drain_locked(owner_context);
+
+	LWLockRelease(&owner_context->completion_lock);
+}
+
+/*
+ * io_uring executes IO in process context if possible. That's generally good,
+ * as it reduces context switching. When performing a lot of buffered IO that
+ * means that copying between page cache and userspace memory happens in the
+ * foreground, as it can't be offloaded to DMA hardware as is possible when
+ * using direct IO. When executing a lot of buffered IO this causes io_uring
+ * to be slower than worker mode, as worker mode parallelizes the
+ * copying. io_uring can be told to offload work to worker threads instead.
+ *
+ * If the IOs are small, we only benefit from forcing things into the
+ * background if there is a lot of IO, as otherwise the overhead from context
+ * switching is higher than the gain.
+ *
+ * If IOs are large, there is benefit from asynchronous processing at lower
+ * queue depths, as IO latency is less of a crucial factor and parallelizing
+ * memory copies is more important.  In addition, it is important to trigger
+ * asynchronous processing even at low queue depth, as with foreground
+ * processing we might never actually reach deep enough IO depths to trigger
+ * asynchronous processing, which in turn would deprive readahead control
+ * logic of information about whether a deeper look-ahead distance would be
+ * advantageous.
+ *
+ * We have done some basic benchmarking to validate the thresholds used, but
+ * it's quite plausible that there are better values.  See
+ * https://postgr.es/m/3gkuvs3lz3u3skuaxfkxnsysfqslf2srigl6546vhesekve6v2%40va3r5esummvg
+ * for some details of this benchmarking.
+ */
+static bool
+pgaio_uring_should_use_async(PgAioHandle *ioh, size_t io_size)
+{
+	/*
+	 * With DIO there's no benefit from forcing asynchronous processing, as
+	 * io_uring will never execute direct IO synchronously during submission.
+	 */
+	if (!(ioh->flags & PGAIO_HF_BUFFERED))
+		return false;
+
+	/*
+	 * Once the IO queue depth is not that shallow anymore, the overhead of
+	 * dispatching to the background is a less significant factor.
+	 */
+	if (dclist_count(&pgaio_my_backend->in_flight_ios) > 4)
+		return true;
+
+	/*
+	 * If the IO is larger, the gains from parallelizing the memory copy are
+	 * larger and typically the impact of the latency is smaller.
+	 */
+	if (io_size >= (BLCKSZ * 4))
+		return true;
+
+	return false;
+}
+
+static void
 pgaio_uring_sq_from_io(PgAioHandle *ioh, struct io_uring_sqe *sqe)
 {
 	struct iovec *iov;
+	size_t		io_size = 0;
 
-	switch (ioh->op)
+	switch ((PgAioOp) ioh->op)
 	{
 		case PGAIO_OP_READV:
 			iov = &pgaio_ctl->iovecs[ioh->iovec_off];
@@ -473,6 +756,8 @@ pgaio_uring_sq_from_io(PgAioHandle *ioh, struct io_uring_sqe *sqe)
 								   iov->iov_base,
 								   iov->iov_len,
 								   ioh->op_data.read.offset);
+
+				io_size = iov->iov_len;
 			}
 			else
 			{
@@ -482,7 +767,13 @@ pgaio_uring_sq_from_io(PgAioHandle *ioh, struct io_uring_sqe *sqe)
 									ioh->op_data.read.iov_length,
 									ioh->op_data.read.offset);
 
+				for (int i = 0; i < ioh->op_data.read.iov_length; i++, iov++)
+					io_size += iov->iov_len;
 			}
+
+			if (pgaio_uring_should_use_async(ioh, io_size))
+				io_uring_sqe_set_flags(sqe, IOSQE_ASYNC);
+
 			break;
 
 		case PGAIO_OP_WRITEV:
@@ -503,6 +794,12 @@ pgaio_uring_sq_from_io(PgAioHandle *ioh, struct io_uring_sqe *sqe)
 									 ioh->op_data.write.iov_length,
 									 ioh->op_data.write.offset);
 			}
+
+			/*
+			 * For now don't trigger use of IOSQE_ASYNC for writes, it's not
+			 * clear there is a performance benefit in doing so.
+			 */
+
 			break;
 
 		case PGAIO_OP_INVALID:

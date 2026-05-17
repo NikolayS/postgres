@@ -4,7 +4,7 @@
  *	  definition of the "index" system catalog (pg_index)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_index.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_index.
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_index,2610,IndexRelationId) BKI_SCHEMA_MACRO
 {
 	Oid			indexrelid BKI_LOOKUP(pg_class);	/* OID of the index */
@@ -62,6 +64,8 @@ CATALOG(pg_index,2610,IndexRelationId) BKI_SCHEMA_MACRO
 #endif
 } FormData_pg_index;
 
+END_CATALOG_STRUCT
+
 /* ----------------
  *		Form_pg_index corresponds to a pointer to a tuple with
  *		the format of pg_index relation.
@@ -69,7 +73,7 @@ CATALOG(pg_index,2610,IndexRelationId) BKI_SCHEMA_MACRO
  */
 typedef FormData_pg_index *Form_pg_index;
 
-DECLARE_TOAST_WITH_MACRO(pg_index, 8149, 8150, PgIndexToastTable, PgIndexToastIndex);
+DECLARE_TOAST_WITH_MACRO(pg_index, 6351, 6352, PgIndexToastTable, PgIndexToastIndex);
 
 DECLARE_INDEX(pg_index_indrelid_index, 2678, IndexIndrelidIndexId, pg_index, btree(indrelid oid_ops));
 DECLARE_UNIQUE_INDEX_PKEY(pg_index_indexrelid_index, 2679, IndexRelidIndexId, pg_index, btree(indexrelid oid_ops));

@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025, PostgreSQL Global Development Group
+# Copyright (c) 2023-2026, PostgreSQL Global Development Group
 
 xid_wraparound_sources = files(
   'xid_wraparound.c',
@@ -30,6 +30,7 @@ tests += {
       't/001_emergency_vacuum.pl',
       't/002_limits.pl',
       't/003_wraparounds.pl',
+      't/004_notify_freeze.pl',
     ],
   },
 }

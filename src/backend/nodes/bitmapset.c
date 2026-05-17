@@ -29,7 +29,7 @@
  * any users of the old set will be accessing pfree'd memory.  This option is
  * only intended to be used for debugging.
  *
- * Copyright (c) 2003-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2003-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/nodes/bitmapset.c
@@ -538,7 +538,6 @@ bms_is_member(int x, const Bitmapset *a)
 int
 bms_member_index(Bitmapset *a, int x)
 {
-	int			i;
 	int			bitnum;
 	int			wordnum;
 	int			result = 0;
@@ -554,14 +553,8 @@ bms_member_index(Bitmapset *a, int x)
 	bitnum = BITNUM(x);
 
 	/* count bits in preceding words */
-	for (i = 0; i < wordnum; i++)
-	{
-		bitmapword	w = a->words[i];
-
-		/* No need to count the bits in a zero word */
-		if (w != 0)
-			result += bmw_popcount(w);
-	}
+	result += pg_popcount((const char *) a->words,
+						  wordnum * sizeof(bitmapword));
 
 	/*
 	 * Now add bits of the last word, but only those before the item. We can
@@ -750,26 +743,17 @@ bms_get_singleton_member(const Bitmapset *a, int *member)
 int
 bms_num_members(const Bitmapset *a)
 {
-	int			result = 0;
-	int			nwords;
-	int			wordnum;
-
 	Assert(bms_is_valid_set(a));
 
 	if (a == NULL)
 		return 0;
 
-	nwords = a->nwords;
-	wordnum = 0;
-	do
-	{
-		bitmapword	w = a->words[wordnum];
+	/* fast-path for common case */
+	if (a->nwords == 1)
+		return bmw_popcount(a->words[0]);
 
-		/* No need to count the bits in a zero word */
-		if (w != 0)
-			result += bmw_popcount(w);
-	} while (++wordnum < nwords);
-	return result;
+	return pg_popcount((const char *) a->words,
+					   a->nwords * sizeof(bitmapword));
 }
 
 /*
@@ -1305,8 +1289,8 @@ bms_join(Bitmapset *a, Bitmapset *b)
 int
 bms_next_member(const Bitmapset *a, int prevbit)
 {
+	unsigned int currbit = prevbit;
 	int			nwords;
-	int			wordnum;
 	bitmapword	mask;
 
 	Assert(bms_is_valid_set(a));
@@ -1314,13 +1298,15 @@ bms_next_member(const Bitmapset *a, int prevbit)
 	if (a == NULL)
 		return -2;
 	nwords = a->nwords;
-	prevbit++;
-	mask = (~(bitmapword) 0) << BITNUM(prevbit);
-	for (wordnum = WORDNUM(prevbit); wordnum < nwords; wordnum++)
+
+	/* use an unsigned int to avoid the risk that int overflows */
+	currbit++;
+	mask = (~(bitmapword) 0) << BITNUM(currbit);
+	for (int wordnum = WORDNUM(currbit); wordnum < nwords; wordnum++)
 	{
 		bitmapword	w = a->words[wordnum];
 
-		/* ignore bits before prevbit */
+		/* ignore bits before currbit */
 		w &= mask;
 
 		if (w != 0)
@@ -1343,7 +1329,7 @@ bms_next_member(const Bitmapset *a, int prevbit)
  *
  * Returns largest member less than "prevbit", or -2 if there is none.
  * "prevbit" must NOT be more than one above the highest possible bit that can
- * be set at the Bitmapset at its current size.
+ * be set in the Bitmapset at its current size.
  *
  * To ease finding the highest set bit for the initial loop, the special
  * prevbit value of -1 can be passed to have the function find the highest
@@ -1362,11 +1348,10 @@ bms_next_member(const Bitmapset *a, int prevbit)
  * It makes no difference in simple loop usage, but complex iteration logic
  * might need such an ability.
  */
-
 int
 bms_prev_member(const Bitmapset *a, int prevbit)
 {
-	int			wordnum;
+	unsigned int currbit;
 	int			ushiftbits;
 	bitmapword	mask;
 
@@ -1379,19 +1364,26 @@ bms_prev_member(const Bitmapset *a, int prevbit)
 	if (a == NULL || prevbit == 0)
 		return -2;
 
-	/* transform -1 to the highest possible bit we could have set */
-	if (prevbit == -1)
-		prevbit = a->nwords * BITS_PER_BITMAPWORD - 1;
-	else
-		prevbit--;
+	/* Validate callers didn't give us something out of range */
+	Assert(prevbit < 0 || prevbit <= (unsigned int) (a->nwords * BITS_PER_BITMAPWORD));
 
-	ushiftbits = BITS_PER_BITMAPWORD - (BITNUM(prevbit) + 1);
+	/*
+	 * Transform -1 (or any negative number) to the highest possible bit we
+	 * could have set.  We do this in unsigned math to avoid the risk of
+	 * overflowing a signed int.
+	 */
+	if (prevbit < 0)
+		currbit = (unsigned int) a->nwords * BITS_PER_BITMAPWORD - 1;
+	else
+		currbit = prevbit - 1;
+
+	ushiftbits = BITS_PER_BITMAPWORD - (BITNUM(currbit) + 1);
 	mask = (~(bitmapword) 0) >> ushiftbits;
-	for (wordnum = WORDNUM(prevbit); wordnum >= 0; wordnum--)
+	for (int wordnum = WORDNUM(currbit); wordnum >= 0; wordnum--)
 	{
 		bitmapword	w = a->words[wordnum];
 
-		/* mask out bits left of prevbit */
+		/* mask out bits left of currbit */
 		w &= mask;
 
 		if (w != 0)

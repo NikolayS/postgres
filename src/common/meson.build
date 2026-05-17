@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 common_sources = files(
   'archive.c',
@@ -13,6 +13,7 @@ common_sources = files(
   'file_perm.c',
   'file_utils.c',
   'hashfn.c',
+  'instr_time.c',
   'ip.c',
   'jsonapi.c',
   'keywords.c',
@@ -192,6 +193,7 @@ foreach name, opts : pgcommon_variants
           opts.get('include_directories', []),
         ],
         'dependencies': opts['dependencies'] + [ssl],
+        'install': install_internal_static_lib and name != '_srv',
       }
     )
   pgcommon += {name: lib}

@@ -37,7 +37,6 @@ typedef enum UserAuth
 	uaBSD,
 	uaLDAP,
 	uaCert,
-	uaRADIUS,
 	uaPeer,
 	uaOAuth,
 #define USER_AUTH_LAST uaOAuth	/* Must be last value of this enum */
@@ -128,18 +127,12 @@ typedef struct HbaLine
 	bool		include_realm;
 	bool		compat_realm;
 	bool		upn_username;
-	List	   *radiusservers;
-	char	   *radiusservers_s;
-	List	   *radiussecrets;
-	char	   *radiussecrets_s;
-	List	   *radiusidentifiers;
-	char	   *radiusidentifiers_s;
-	List	   *radiusports;
-	char	   *radiusports_s;
 	char	   *oauth_issuer;
 	char	   *oauth_scope;
 	char	   *oauth_validator;
 	bool		oauth_skip_usermap;
+	List	   *oauth_opt_keys;
+	List	   *oauth_opt_vals;
 } HbaLine;
 
 typedef struct IdentLine
@@ -150,6 +143,36 @@ typedef struct IdentLine
 	AuthToken  *system_user;
 	AuthToken  *pg_user;
 } IdentLine;
+
+typedef struct HostsLine
+{
+	int			linenumber;
+
+	char	   *sourcefile;
+	char	   *rawline;
+
+	/* Required fields */
+	List	   *hostnames;
+	char	   *ssl_key;
+	char	   *ssl_cert;
+
+	/* Optional fields */
+	char	   *ssl_ca;
+	char	   *ssl_passphrase_cmd;
+	bool		ssl_passphrase_reload;
+
+	/* Internal bookkeeping */
+	void	   *ssl_ctx;		/* associated SSL_CTX* for the above settings */
+} HostsLine;
+
+typedef enum HostsFileLoadResult
+{
+	HOSTSFILE_LOAD_OK = 0,
+	HOSTSFILE_LOAD_FAILED,
+	HOSTSFILE_EMPTY,
+	HOSTSFILE_MISSING,
+	HOSTSFILE_DISABLED,
+} HostsFileLoadResult;
 
 /*
  * TokenizedAuthLine represents one line lexed from an authentication
@@ -169,19 +192,18 @@ typedef struct TokenizedAuthLine
 	char	   *err_msg;		/* Error message if any */
 } TokenizedAuthLine;
 
-/* kluge to avoid including libpq/libpq-be.h here */
-typedef struct Port hbaPort;
+/* avoid including libpq/libpq-be.h here */
+typedef struct Port Port;
 
 extern bool load_hba(void);
 extern bool load_ident(void);
 extern const char *hba_authname(UserAuth auth_method);
-extern void hba_getauthmethod(hbaPort *port);
+extern void hba_getauthmethod(Port *port);
 extern int	check_usermap(const char *usermap_name,
 						  const char *pg_user, const char *system_user,
 						  bool case_insensitive);
 extern HbaLine *parse_hba_line(TokenizedAuthLine *tok_line, int elevel);
 extern IdentLine *parse_ident_line(TokenizedAuthLine *tok_line, int elevel);
-extern bool pg_isblank(const char c);
 extern FILE *open_auth_file(const char *filename, int elevel, int depth,
 							char **err_msg);
 extern void free_auth_file(FILE *file, int depth);

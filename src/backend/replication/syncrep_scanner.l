@@ -4,7 +4,7 @@
  * syncrep_scanner.l
  *	  a lexical scanner for synchronous_standby_names
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -157,17 +157,16 @@ syncrep_yyerror(SyncRepConfigData **syncrep_parse_result_p, char **syncrep_parse
 {
 	struct yyguts_t *yyg = (struct yyguts_t *) yyscanner;	/* needed for yytext
 															 * macro */
-	char *syncrep_parse_error_msg = *syncrep_parse_error_msg_p;
 
 	/* report only the first error in a parse operation */
-	if (syncrep_parse_error_msg)
+	if (*syncrep_parse_error_msg_p)
 		return;
 	if (yytext[0])
-		syncrep_parse_error_msg = psprintf("%s at or near \"%s\"",
-										   message, yytext);
+		*syncrep_parse_error_msg_p = psprintf("%s at or near \"%s\"",
+											  message, yytext);
 	else
-		syncrep_parse_error_msg = psprintf("%s at end of input",
-										   message);
+		*syncrep_parse_error_msg_p = psprintf("%s at end of input",
+											  message);
 }
 
 void

@@ -3,7 +3,7 @@
  * fileset.c
  *	  Management of named temporary files.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -114,7 +114,8 @@ FileSetCreate(FileSet *fileset, const char *name)
 }
 
 /*
- * Open a file that was created with FileSetCreate() */
+ * Open a file that was created with FileSetCreate()
+ */
 File
 FileSetOpen(FileSet *fileset, const char *name, int mode)
 {
@@ -185,7 +186,7 @@ FileSetPath(char *path, FileSet *fileset, Oid tablespace)
 static Oid
 ChooseTablespace(const FileSet *fileset, const char *name)
 {
-	uint32		hash = hash_any((const unsigned char *) name, strlen(name));
+	uint32		hash = hash_bytes((const unsigned char *) name, strlen(name));
 
 	return fileset->tablespaces[hash % fileset->ntablespaces];
 }

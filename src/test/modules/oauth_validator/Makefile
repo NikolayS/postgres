@@ -2,7 +2,7 @@
 #
 # Makefile for src/test/modules/oauth_validator
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/test/modules/oauth_validator/Makefile
@@ -36,5 +36,6 @@ include $(top_srcdir)/contrib/contrib-global.mk
 export PYTHON
 export with_libcurl
 export with_python
+export cert_dir=$(top_srcdir)/src/test/ssl/ssl
 
 endif

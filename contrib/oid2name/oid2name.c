@@ -237,13 +237,13 @@ add_one_elt(char *eltname, eary *eary)
 	if (eary->alloc == 0)
 	{
 		eary	  ->alloc = 8;
-		eary	  ->array = (char **) pg_malloc(8 * sizeof(char *));
+		eary	  ->array = pg_malloc_array(char *, 8);
 	}
 	else if (eary->num >= eary->alloc)
 	{
 		eary	  ->alloc *= 2;
-		eary	  ->array = (char **) pg_realloc(eary->array,
-												 eary->alloc * sizeof(char *));
+		eary	  ->array = pg_realloc_array(eary->array, char *,
+											 eary->alloc);
 	}
 
 	eary	  ->array[eary->num] = pg_strdup(eltname);
@@ -400,7 +400,7 @@ sql_exec(PGconn *conn, const char *todo, bool quiet)
 	nfields = PQnfields(res);
 
 	/* for each field, get the needed width */
-	length = (int *) pg_malloc(sizeof(int) * nfields);
+	length = pg_malloc_array(int, nfields);
 	for (j = 0; j < nfields; j++)
 		length[j] = strlen(PQfname(res, j));
 
@@ -469,7 +469,7 @@ void
 sql_exec_dumpalltables(PGconn *conn, struct options *opts)
 {
 	char		todo[1024];
-	char	   *addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
+	char	   *addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\", pg_relation_filepath(c.oid) as \"Path\" ";
 
 	snprintf(todo, sizeof(todo),
 			 "SELECT pg_catalog.pg_relation_filenode(c.oid) as \"Filenode\", relname as \"Table Name\" %s "
@@ -507,7 +507,7 @@ sql_exec_searchtables(PGconn *conn, struct options *opts)
 			   *comma_filenumbers,
 			   *comma_tables;
 	bool		written = false;
-	char	   *addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
+	char	   *addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\", pg_relation_filepath(c.oid) as \"Path\" ";
 
 	/* get tables qualifiers, whether names, filenumbers, or OIDs */
 	comma_oids = get_comma_elts(opts->oids);
@@ -585,11 +585,11 @@ main(int argc, char **argv)
 	struct options *my_opts;
 	PGconn	   *pgconn;
 
-	my_opts = (struct options *) pg_malloc(sizeof(struct options));
+	my_opts = pg_malloc_object(struct options);
 
-	my_opts->oids = (eary *) pg_malloc(sizeof(eary));
-	my_opts->tables = (eary *) pg_malloc(sizeof(eary));
-	my_opts->filenumbers = (eary *) pg_malloc(sizeof(eary));
+	my_opts->oids = pg_malloc_object(eary);
+	my_opts->tables = pg_malloc_object(eary);
+	my_opts->filenumbers = pg_malloc_object(eary);
 
 	my_opts->oids->num = my_opts->oids->alloc = 0;
 	my_opts->tables->num = my_opts->tables->alloc = 0;

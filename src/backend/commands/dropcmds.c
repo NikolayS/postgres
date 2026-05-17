@@ -3,7 +3,7 @@
  * dropcmds.c
  *	  handle various "DROP" operations
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -482,6 +482,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
 		case OBJECT_FOREIGN_TABLE:
 		case OBJECT_INDEX:
 		case OBJECT_MATVIEW:
+		case OBJECT_PROPGRAPH:
 		case OBJECT_ROLE:
 		case OBJECT_SEQUENCE:
 		case OBJECT_SUBSCRIPTION:

@@ -4,7 +4,7 @@
  *	  Common header for some locking-related declarations.
  *
  *
- * Copyright (c) 2014-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2026, PostgreSQL Global Development Group
  *
  * src/include/nodes/lockoptions.h
  *
@@ -20,7 +20,8 @@
  */
 typedef enum LockClauseStrength
 {
-	LCS_NONE,					/* no such clause - only used in PlanRowMark */
+	LCS_NONE,					/* no such clause - only used in PlanRowMark
+								 * and ON CONFLICT DO SELECT */
 	LCS_FORKEYSHARE,			/* FOR KEY SHARE */
 	LCS_FORSHARE,				/* FOR SHARE */
 	LCS_FORNOKEYUPDATE,			/* FOR NO KEY UPDATE */

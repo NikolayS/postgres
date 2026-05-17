@@ -52,7 +52,7 @@
  * other, more complicated, problems would need to be fixed for that to be
  * viable (e.g. smgr.c is often called with interrupts already held).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -270,7 +270,8 @@ smgropen(RelFileLocator rlocator, ProcNumber backend)
 	if (!found)
 	{
 		/* hash_search already filled in the lookup key */
-		reln->smgr_targblock = InvalidBlockNumber;
+		for (int i = 0; i < SMGR_TARGBLOCK_SLOTS; i++)
+			reln->smgr_targblock[i] = InvalidBlockNumber;
 		for (int i = 0; i <= MAX_FORKNUM; ++i)
 			reln->smgr_cached_nblocks[i] = InvalidBlockNumber;
 		reln->smgr_which = 0;	/* we only have md.c at present */
@@ -356,7 +357,8 @@ smgrrelease(SMgrRelation reln)
 		smgrsw[reln->smgr_which].smgr_close(reln, forknum);
 		reln->smgr_cached_nblocks[forknum] = InvalidBlockNumber;
 	}
-	reln->smgr_targblock = InvalidBlockNumber;
+	for (int i = 0; i < SMGR_TARGBLOCK_SLOTS; i++)
+		reln->smgr_targblock[i] = InvalidBlockNumber;
 
 	RESUME_INTERRUPTS();
 }
@@ -561,7 +563,7 @@ smgrdounlinkall(SMgrRelation *rels, int nrels, bool isRedo)
 	 * create an array which contains all relations to be dropped, and close
 	 * each relation's forks at the smgr level while at it
 	 */
-	rlocators = palloc(sizeof(RelFileLocatorBackend) * nrels);
+	rlocators = palloc_array(RelFileLocatorBackend, nrels);
 	for (i = 0; i < nrels; i++)
 	{
 		RelFileLocatorBackend rlocator = rels[i]->smgr_rlocator;
@@ -898,7 +900,7 @@ smgrtruncate(SMgrRelation reln, ForkNumber *forknum, int nforks,
 	/* Do the truncation */
 	for (i = 0; i < nforks; i++)
 	{
-		/* Make the cached size is invalid if we encounter an error. */
+		/* Make the cached size invalid if we encounter an error. */
 		reln->smgr_cached_nblocks[forknum[i]] = InvalidBlockNumber;
 
 		smgrsw[reln->smgr_which].smgr_truncate(reln, forknum[i],
@@ -910,8 +912,17 @@ smgrtruncate(SMgrRelation reln, ForkNumber *forknum, int nforks,
 		 * backends to invalidate their copies of smgr_cached_nblocks, and
 		 * these ones too at the next command boundary. But ensure they aren't
 		 * outright wrong until then.
+		 *
+		 * We can have nblocks > old_nblocks when a relation was truncated
+		 * multiple times, a replica applied all the truncations, and later
+		 * restarts from a restartpoint located before the truncations. The
+		 * relation on disk will be the size of the last truncate. When
+		 * replaying the first truncate, we will have nblocks > current size.
+		 * In such cases, smgr_truncate does nothing, so set the cached size
+		 * to the old size rather than the requested size.
 		 */
-		reln->smgr_cached_nblocks[forknum[i]] = nblocks[i];
+		reln->smgr_cached_nblocks[forknum[i]] =
+			nblocks[i] > old_nblocks[i] ? old_nblocks[i] : nblocks[i];
 	}
 }
 

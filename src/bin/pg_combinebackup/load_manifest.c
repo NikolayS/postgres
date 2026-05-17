@@ -2,7 +2,7 @@
  *
  * Load data from a backup manifest into memory.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_combinebackup/load_manifest.c
@@ -85,7 +85,7 @@ load_backup_manifests(int n_backups, char **backup_directories)
 	manifest_data **result;
 	int			i;
 
-	result = pg_malloc(sizeof(manifest_data *) * n_backups);
+	result = pg_malloc_array(manifest_data *, n_backups);
 	for (i = 0; i < n_backups; ++i)
 		result[i] = load_backup_manifest(backup_directories[i]);
 
@@ -139,7 +139,7 @@ load_backup_manifest(char *backup_directory)
 	/* Create the hash table. */
 	ht = manifest_files_create(initial_size, NULL);
 
-	result = pg_malloc0(sizeof(manifest_data));
+	result = pg_malloc0_object(manifest_data);
 	result->files = ht;
 	context.private_data = result;
 	context.version_cb = combinebackup_version_cb;
@@ -298,7 +298,7 @@ combinebackup_per_wal_range_cb(JsonManifestParseContext *context,
 	manifest_wal_range *range;
 
 	/* Allocate and initialize a struct describing this WAL range. */
-	range = palloc(sizeof(manifest_wal_range));
+	range = palloc_object(manifest_wal_range);
 	range->tli = tli;
 	range->start_lsn = start_lsn;
 	range->end_lsn = end_lsn;

@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Test for recovery targets: name, timestamp, XID
 use strict;
@@ -155,7 +155,9 @@ my $res = run_log(
 ok(!$res, 'invalid recovery startup fails');
 
 my $logfile = slurp_file($node_standby->logfile());
-ok($logfile =~ qr/multiple recovery targets specified/,
+like(
+	$logfile,
+	qr/multiple recovery targets specified/,
 	'multiple conflicting settings');
 
 # Check behavior when recovery ends before target is reached
@@ -183,8 +185,53 @@ foreach my $i (0 .. 10 * $PostgreSQL::Test::Utils::timeout_default)
 	usleep(100_000);
 }
 $logfile = slurp_file($node_standby->logfile());
-ok( $logfile =~
-	  qr/FATAL: .* recovery ended before configured recovery target was reached/,
+like(
+	$logfile,
+	qr/FATAL: .* recovery ended before configured recovery target was reached/,
 	'recovery end before target reached is a fatal error');
+
+# Invalid recovery_target_timeline tests
+my ($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_timeline TO 'bogus'");
+like(
+	$stderr,
+	qr/is not a valid number/,
+	"invalid recovery_target_timeline (bogus value)");
+
+($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_timeline TO '0'");
+like(
+	$stderr,
+	qr/must be between 1 and 4294967295/,
+	"invalid recovery_target_timeline (lower bound check)");
+
+($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_timeline TO '4294967296'");
+like(
+	$stderr,
+	qr/must be between 1 and 4294967295/,
+	"invalid recovery_target_timeline (upper bound check)");
+
+# Invalid recovery_target_xid tests
+($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_xid TO 'bogus'");
+like(
+	$stderr,
+	qr/is not a valid number/,
+	"invalid recovery_target_xid (bogus value)");
+
+($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_xid TO '-1'");
+like(
+	$stderr,
+	qr/is not a valid number/,
+	"invalid recovery_target_xid (negative)");
+
+($result, $stdout, $stderr) = $node_primary->psql('postgres',
+	"ALTER SYSTEM SET recovery_target_xid TO '0'");
+like(
+	$stderr,
+	qr/without epoch must be greater than or equal to 3/,
+	"invalid recovery_target_xid (lower bound check)");
 
 done_testing();

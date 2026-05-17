@@ -3,7 +3,7 @@
  * pg_seclabel.h
  *	  definition of the "security label" system catalog (pg_seclabel)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_seclabel.h
@@ -25,6 +25,8 @@
  *		typedef struct FormData_pg_seclabel
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_seclabel,3596,SecLabelRelationId)
 {
 	Oid			objoid;			/* OID of the object itself */
@@ -37,6 +39,8 @@ CATALOG(pg_seclabel,3596,SecLabelRelationId)
 	text		label BKI_FORCE_NOT_NULL;	/* security label of the object */
 #endif
 } FormData_pg_seclabel;
+
+END_CATALOG_STRUCT
 
 DECLARE_TOAST(pg_seclabel, 3598, 3599);
 

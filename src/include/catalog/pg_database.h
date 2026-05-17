@@ -4,7 +4,7 @@
  *	  definition of the "database" system catalog (pg_database)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_database.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_database
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_database,1262,DatabaseRelationId) BKI_SHARED_RELATION BKI_ROWTYPE_OID(1248,DatabaseRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 {
 	/* oid */
@@ -88,6 +90,8 @@ CATALOG(pg_database,1262,DatabaseRelationId) BKI_SHARED_RELATION BKI_ROWTYPE_OID
 #endif
 } FormData_pg_database;
 
+END_CATALOG_STRUCT
+
 /* ----------------
  *		Form_pg_database corresponds to a pointer to a tuple with
  *		the format of pg_database relation.
@@ -123,6 +127,7 @@ DECLARE_OID_DEFINING_MACRO(PostgresDbOid, 5);
  */
 #define		  DATCONNLIMIT_INVALID_DB	-2
 
+extern Oid	get_database_oid(const char *dbname, bool missing_ok);
 extern bool database_is_invalid_form(Form_pg_database datform);
 extern bool database_is_invalid_oid(Oid dboid);
 
