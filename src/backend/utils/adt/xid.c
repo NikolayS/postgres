@@ -3,7 +3,7 @@
  * xid.c
  *	  POSTGRES transaction identifier and command identifier datatypes.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -45,7 +45,7 @@ xidout(PG_FUNCTION_ARGS)
 	TransactionId transactionId = PG_GETARG_TRANSACTIONID(0);
 	char	   *result = (char *) palloc(16);
 
-	snprintf(result, 16, "%lu", (unsigned long) transactionId);
+	snprintf(result, 16, "%u", transactionId);
 	PG_RETURN_CSTRING(result);
 }
 
@@ -362,7 +362,7 @@ cidout(PG_FUNCTION_ARGS)
 	CommandId	c = PG_GETARG_COMMANDID(0);
 	char	   *result = (char *) palloc(16);
 
-	snprintf(result, 16, "%lu", (unsigned long) c);
+	snprintf(result, 16, "%u", c);
 	PG_RETURN_CSTRING(result);
 }
 

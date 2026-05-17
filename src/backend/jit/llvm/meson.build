@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 if not llvm.found()
   subdir_done()
@@ -53,7 +53,7 @@ llvm_irgen_args = [
 
 if ccache.found()
   llvm_irgen_command = ccache
-  llvm_irgen_args = [clang.path()] + llvm_irgen_args
+  llvm_irgen_args = [clang.full_path()] + llvm_irgen_args
 else
   llvm_irgen_command = clang
 endif

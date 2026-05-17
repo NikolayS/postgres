@@ -3,7 +3,7 @@
  * pg_iovec.h
  *	  Header for vectored I/O functions, to use in place of <sys/uio.h>.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/port/pg_iovec.h
@@ -21,9 +21,6 @@
 
 #else
 
-/* POSIX requires at least 16 as a maximum iovcnt. */
-#define IOV_MAX 16
-
 /* Define our own POSIX-compatible iovec struct. */
 struct iovec
 {
@@ -31,6 +28,15 @@ struct iovec
 	size_t		iov_len;
 };
 
+#endif
+
+/*
+ * If <limits.h> didn't define IOV_MAX, define our own.  X/Open requires at
+ * least 16.  (GNU Hurd apparently feel that they're not bound by X/Open,
+ * because they don't define this symbol at all.)
+ */
+#ifndef IOV_MAX
+#define IOV_MAX 16
 #endif
 
 /*
@@ -45,7 +51,7 @@ struct iovec
  * this changes the current file position.
  */
 static inline ssize_t
-pg_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+pg_preadv(int fd, const struct iovec *iov, int iovcnt, pgoff_t offset)
 {
 #if HAVE_DECL_PREADV
 	/*
@@ -84,7 +90,7 @@ pg_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
  * this changes the current file position.
  */
 static inline ssize_t
-pg_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+pg_pwritev(int fd, const struct iovec *iov, int iovcnt, pgoff_t offset)
 {
 #if HAVE_DECL_PWRITEV
 	/*

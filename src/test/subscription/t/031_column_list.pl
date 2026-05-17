@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 # Test partial-column publication of tables
 use strict;
@@ -1272,8 +1272,9 @@ my ($cmdret, $stdout, $stderr) = $node_subscriber->psql(
 	CREATE SUBSCRIPTION sub1 CONNECTION '$publisher_connstr' PUBLICATION pub_mix_1, pub_mix_2;
 ));
 
-ok( $stderr =~
-	  qr/cannot use different column lists for table "public.test_mix_1" in different publications/,
+like(
+	$stderr,
+	qr/cannot use different column lists for table "public.test_mix_1" in different publications/,
 	'different column lists detected');
 
 # TEST: If the column list is changed after creating the subscription, we

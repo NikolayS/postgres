@@ -3,7 +3,7 @@
  * postinit.c
  *	  postgres initialization utilities
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -38,6 +38,7 @@
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "port/pg_bitutils.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
 #include "replication/slot.h"
@@ -70,6 +71,13 @@
 #include "utils/syscache.h"
 #include "utils/timeout.h"
 
+/* has this backend called EmitConnectionWarnings()? */
+static bool ConnectionWarningsEmitted;
+
+/* content of warnings to send via EmitConnectionWarnings() */
+static List *ConnectionWarningMessages;
+static List *ConnectionWarningDetails;
+
 static HeapTuple GetDatabaseTuple(const char *dbname);
 static HeapTuple GetDatabaseTupleByOid(Oid dboid);
 static void PerformAuthentication(Port *port);
@@ -85,6 +93,7 @@ static void ClientCheckTimeoutHandler(void);
 static bool ThereIsAtLeastOneRole(void);
 static void process_startup_options(Port *port, bool am_superuser);
 static void process_settings(Oid databaseid, Oid roleid);
+static void EmitConnectionWarnings(void);
 
 
 /*** InitPostgres support ***/
@@ -417,12 +426,11 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 	datum = SysCacheGetAttrNotNull(DATABASEOID, tup, Anum_pg_database_datctype);
 	ctype = TextDatumGetCString(datum);
 
-	if (pg_perm_setlocale(LC_COLLATE, collate) == NULL)
-		ereport(FATAL,
-				(errmsg("database locale is incompatible with operating system"),
-				 errdetail("The database was initialized with LC_COLLATE \"%s\", "
-						   " which is not recognized by setlocale().", collate),
-				 errhint("Recreate the database with another locale or install the missing locale.")));
+	/*
+	 * Historically, we set LC_COLLATE from datcollate, as well. That's no
+	 * longer necessary because all collation behavior is handled through
+	 * pg_locale_t.
+	 */
 
 	if (pg_perm_setlocale(LC_CTYPE, ctype) == NULL)
 		ereport(FATAL,
@@ -430,10 +438,6 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 				 errdetail("The database was initialized with LC_CTYPE \"%s\", "
 						   " which is not recognized by setlocale().", ctype),
 				 errhint("Recreate the database with another locale or install the missing locale.")));
-
-	if (strcmp(ctype, "C") == 0 ||
-		strcmp(ctype, "POSIX") == 0)
-		database_ctype_is_c = true;
 
 	init_database_collation();
 
@@ -589,7 +593,7 @@ InitializeFastPathLocks(void)
 	 * value at FP_LOCK_GROUPS_PER_BACKEND_MAX and insist the value is at
 	 * least 1.
 	 *
-	 * The default max_locks_per_transaction = 64 means 4 groups by default.
+	 * The default max_locks_per_transaction = 128 means 8 groups by default.
 	 */
 	FastPathLockGroupsPerBackend =
 		Max(Min(pg_nextpower2_32(max_locks_per_xact) / FP_LOCK_SLOTS_PER_GROUP,
@@ -658,6 +662,9 @@ BaseInit(void)
 	/* Initialize lock manager's local structs */
 	InitLockManagerAccess();
 
+	/* Initialize logical info WAL logging state */
+	InitializeProcessXLogLogicalInfo();
+
 	/*
 	 * Initialize replication slots after pgstat. The exit hook might need to
 	 * drop ephemeral slots, which in turn triggers stats reporting.
@@ -711,7 +718,7 @@ BaseInit(void)
 void
 InitPostgres(const char *in_dbname, Oid dboid,
 			 const char *username, Oid useroid,
-			 bits32 flags,
+			 uint32 flags,
 			 char *out_dbname)
 {
 	bool		bootstrap = IsBootstrapProcessingMode();
@@ -750,6 +757,24 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	SharedInvalBackendInit(false);
 
 	ProcSignalInit(MyCancelKey, MyCancelKeyLength);
+
+	/*
+	 * Initialize a local cache of the data_checksum_version, to be updated by
+	 * the procsignal-based barriers.
+	 *
+	 * This intentionally happens after initializing the procsignal, otherwise
+	 * we might miss a state change. This means we can get a barrier for the
+	 * state we've just initialized.
+	 *
+	 * The postmaster (which is what gets forked into the new child process)
+	 * does not handle barriers, therefore it may not have the current value
+	 * of LocalDataChecksumVersion value (it'll have the value read from the
+	 * control file, which may be arbitrarily old).
+	 *
+	 * NB: Even if the postmaster handled barriers, the value might still be
+	 * stale, as it might have changed after this process forked.
+	 */
+	InitLocalDataChecksumState();
 
 	/*
 	 * Also set up timeout handlers needed for backend operation.  We need
@@ -818,9 +843,9 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	RelationCacheInitializePhase2();
 
 	/*
-	 * Set up process-exit callback to do pre-shutdown cleanup.  This is the
-	 * one of the first before_shmem_exit callbacks we register; thus, this
-	 * will be one the last things we do before low-level modules like the
+	 * Set up process-exit callback to do pre-shutdown cleanup.  This is one
+	 * of the first before_shmem_exit callbacks we register; thus, this will
+	 * be one of the last things we do before low-level modules like the
 	 * buffer manager begin to close down.  We need to have this in place
 	 * before we begin our first transaction --- if we fail during the
 	 * initialization transaction, as is entirely possible, we need the
@@ -879,7 +904,7 @@ InitPostgres(const char *in_dbname, Oid dboid,
 					 errhint("You should immediately run CREATE USER \"%s\" SUPERUSER;.",
 							 username != NULL ? username : "postgres")));
 	}
-	else if (AmBackgroundWorkerProcess())
+	else if (AmBackgroundWorkerProcess() || AmDataChecksumsWorkerProcess())
 	{
 		if (username == NULL && !OidIsValid(useroid))
 		{
@@ -988,6 +1013,9 @@ InitPostgres(const char *in_dbname, Oid dboid,
 
 		/* close the transaction we started above */
 		CommitTransactionCommand();
+
+		/* send any WARNINGs we've accumulated during initialization */
+		EmitConnectionWarnings();
 
 		return;
 	}
@@ -1234,6 +1262,9 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	/* close the transaction we started above */
 	if (!bootstrap)
 		CommitTransactionCommand();
+
+	/* send any WARNINGs we've accumulated during initialization */
+	EmitConnectionWarnings();
 }
 
 /*
@@ -1265,7 +1296,7 @@ process_startup_options(Port *port, bool am_superuser)
 
 		maxac = 2 + (strlen(port->cmdline_options) + 1) / 2;
 
-		av = (char **) palloc(maxac * sizeof(char *));
+		av = palloc_array(char *, maxac);
 		ac = 0;
 
 		av[ac++] = "postgres";
@@ -1447,4 +1478,59 @@ ThereIsAtLeastOneRole(void)
 	table_close(pg_authid_rel, AccessShareLock);
 
 	return result;
+}
+
+/*
+ * Stores a warning message to be sent later via EmitConnectionWarnings().
+ * Both msg and detail must be non-NULL.
+ *
+ * NB: Caller should ensure the strings are allocated in a long-lived context
+ * like TopMemoryContext.
+ */
+void
+StoreConnectionWarning(char *msg, char *detail)
+{
+	MemoryContext oldcontext;
+
+	Assert(msg);
+	Assert(detail);
+
+	if (ConnectionWarningsEmitted)
+		elog(ERROR, "StoreConnectionWarning() called after EmitConnectionWarnings()");
+
+	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+
+	ConnectionWarningMessages = lappend(ConnectionWarningMessages, msg);
+	ConnectionWarningDetails = lappend(ConnectionWarningDetails, detail);
+
+	MemoryContextSwitchTo(oldcontext);
+}
+
+/*
+ * Sends the warning messages saved via StoreConnectionWarning() and frees the
+ * strings and lists.
+ *
+ * NB: This can only be called once per backend.
+ */
+static void
+EmitConnectionWarnings(void)
+{
+	ListCell   *lc_msg;
+	ListCell   *lc_detail;
+
+	if (ConnectionWarningsEmitted)
+		elog(ERROR, "EmitConnectionWarnings() called more than once");
+	else
+		ConnectionWarningsEmitted = true;
+
+	forboth(lc_msg, ConnectionWarningMessages,
+			lc_detail, ConnectionWarningDetails)
+	{
+		ereport(WARNING,
+				(errmsg("%s", (char *) lfirst(lc_msg)),
+				 errdetail("%s", (char *) lfirst(lc_detail))));
+	}
+
+	list_free_deep(ConnectionWarningMessages);
+	list_free_deep(ConnectionWarningDetails);
 }

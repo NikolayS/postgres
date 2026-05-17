@@ -3,7 +3,7 @@
  * explain_dr.h
  *	  prototypes for explain_dr.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  * src/include/commands/explain_dr.h
@@ -16,7 +16,8 @@
 #include "executor/instrument.h"
 #include "tcop/dest.h"
 
-struct ExplainState;			/* avoid including explain.h here */
+/* avoid including explain_state.h here */
+typedef struct ExplainState ExplainState;
 
 /* Instrumentation data for EXPLAIN's SERIALIZE option */
 typedef struct SerializeMetrics
@@ -26,7 +27,7 @@ typedef struct SerializeMetrics
 	BufferUsage bufferUsage;	/* buffers accessed during serialization */
 } SerializeMetrics;
 
-extern DestReceiver *CreateExplainSerializeDestReceiver(struct ExplainState *es);
+extern DestReceiver *CreateExplainSerializeDestReceiver(ExplainState *es);
 extern SerializeMetrics GetSerializationMetrics(DestReceiver *dest);
 
 #endif

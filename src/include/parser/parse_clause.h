@@ -4,7 +4,7 @@
  *	  handle clauses in parser
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/parser/parse_clause.h
@@ -26,6 +26,7 @@ extern Node *transformLimitClause(ParseState *pstate, Node *clause,
 								  ParseExprKind exprKind, const char *constructName,
 								  LimitOption limitOption);
 extern List *transformGroupClause(ParseState *pstate, List *grouplist,
+								  bool groupByAll,
 								  List **groupingSets,
 								  List **targetlist, List *sortClause,
 								  ParseExprKind exprKind, bool useSQL99);

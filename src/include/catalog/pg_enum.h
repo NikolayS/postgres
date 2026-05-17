@@ -4,7 +4,7 @@
  *	  definition of the "enum" system catalog (pg_enum)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_enum.h
@@ -28,6 +28,8 @@
  *		typedef struct FormData_pg_enum
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_enum,3501,EnumRelationId)
 {
 	Oid			oid;			/* oid */
@@ -35,6 +37,8 @@ CATALOG(pg_enum,3501,EnumRelationId)
 	float4		enumsortorder;	/* sort position of this enum value */
 	NameData	enumlabel;		/* text representation of enum value */
 } FormData_pg_enum;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_enum corresponds to a pointer to a tuple with

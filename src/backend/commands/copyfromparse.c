@@ -47,7 +47,7 @@
  * and 'attribute_buf' are expanded on demand, to hold the longest line
  * encountered so far.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -71,9 +71,12 @@
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "port/pg_bitutils.h"
 #include "port/pg_bswap.h"
+#include "port/simd.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
+#include "utils/wait_event.h"
 
 #define ISOCTAL(c) (((c) >= '0') && ((c) <= '7'))
 #define OCTVALUE(c) ((c) - '0')
@@ -141,7 +144,8 @@ static const char BinarySignature[11] = "PGCOPY\n\377\r\n\0";
 
 /* non-export function prototypes */
 static bool CopyReadLine(CopyFromState cstate, bool is_csv);
-static bool CopyReadLineText(CopyFromState cstate, bool is_csv);
+static pg_attribute_always_inline bool CopyReadLineText(CopyFromState cstate,
+														bool is_csv);
 static int	CopyReadAttributesText(CopyFromState cstate);
 static int	CopyReadAttributesCSV(CopyFromState cstate);
 static Datum CopyReadBinaryAttribute(CopyFromState cstate, FmgrInfo *flinfo,
@@ -171,7 +175,7 @@ ReceiveCopyBegin(CopyFromState cstate)
 {
 	StringInfoData buf;
 	int			natts = list_length(cstate->attnumlist);
-	int16		format = (cstate->opts.binary ? 1 : 0);
+	int16		format = (cstate->opts.format == COPY_FORMAT_BINARY ? 1 : 0);
 	int			i;
 
 	pq_beginmessage(&buf, PqMsg_CopyInResponse);
@@ -249,7 +253,9 @@ CopyGetData(CopyFromState cstate, void *databuf, int minread, int maxread)
 	switch (cstate->copy_src)
 	{
 		case COPY_FILE:
+			pgstat_report_wait_start(WAIT_EVENT_COPY_FROM_READ);
 			bytesread = fread(databuf, 1, maxread, cstate->copy_file);
+			pgstat_report_wait_end();
 			if (ferror(cstate->copy_file))
 				ereport(ERROR,
 						(errcode_for_file_access(),
@@ -335,7 +341,7 @@ CopyGetData(CopyFromState cstate, void *databuf, int minread, int maxread)
 				if (avail > maxread)
 					avail = maxread;
 				pq_copymsgbytes(cstate->fe_msgbuf, databuf, avail);
-				databuf = (void *) ((char *) databuf + avail);
+				databuf = (char *) databuf + avail;
 				maxread -= avail;
 				bytesread += avail;
 			}
@@ -747,7 +753,7 @@ bool
 NextCopyFromRawFields(CopyFromState cstate, char ***fields, int *nfields)
 {
 	return NextCopyFromRawFieldsInternal(cstate, fields, nfields,
-										 cstate->opts.csv_mode);
+										 cstate->opts.format == COPY_FORMAT_CSV);
 }
 
 /*
@@ -771,21 +777,31 @@ static pg_attribute_always_inline bool
 NextCopyFromRawFieldsInternal(CopyFromState cstate, char ***fields, int *nfields, bool is_csv)
 {
 	int			fldct;
-	bool		done;
+	bool		done = false;
 
 	/* only available for text or csv input */
-	Assert(!cstate->opts.binary);
+	Assert(cstate->opts.format == COPY_FORMAT_TEXT ||
+		   cstate->opts.format == COPY_FORMAT_CSV);
 
 	/* on input check that the header line is correct if needed */
-	if (cstate->cur_lineno == 0 && cstate->opts.header_line)
+	if (cstate->cur_lineno == 0 && cstate->opts.header_line != COPY_HEADER_FALSE)
 	{
 		ListCell   *cur;
 		TupleDesc	tupDesc;
+		int			lines_to_skip = cstate->opts.header_line;
+
+		/* If set to "match", one header line is skipped */
+		if (cstate->opts.header_line == COPY_HEADER_MATCH)
+			lines_to_skip = 1;
 
 		tupDesc = RelationGetDescr(cstate->rel);
 
-		cstate->cur_lineno++;
-		done = CopyReadLine(cstate, is_csv);
+		for (int i = 0; i < lines_to_skip; i++)
+		{
+			cstate->cur_lineno++;
+			if ((done = CopyReadLine(cstate, is_csv)))
+				break;
+		}
 
 		if (cstate->opts.header_line == COPY_HEADER_MATCH)
 		{
@@ -947,6 +963,7 @@ CopyFromTextLikeOneRow(CopyFromState cstate, ExprContext *econtext,
 	int			fldct;
 	int			fieldno;
 	char	   *string;
+	bool		current_row_erroneous = false;
 
 	tupDesc = RelationGetDescr(cstate->rel);
 	attr_count = list_length(cstate->attnumlist);
@@ -1024,7 +1041,7 @@ CopyFromTextLikeOneRow(CopyFromState cstate, ExprContext *econtext,
 		}
 
 		/*
-		 * If ON_ERROR is specified with IGNORE, skip rows with soft errors
+		 * If ON_ERROR is specified, handle the different options
 		 */
 		else if (!InputFunctionCallSafe(&in_functions[m],
 										string,
@@ -1035,7 +1052,55 @@ CopyFromTextLikeOneRow(CopyFromState cstate, ExprContext *econtext,
 		{
 			Assert(cstate->opts.on_error != COPY_ON_ERROR_STOP);
 
-			cstate->num_errors++;
+			if (cstate->opts.on_error == COPY_ON_ERROR_IGNORE)
+				cstate->num_errors++;
+			else if (cstate->opts.on_error == COPY_ON_ERROR_SET_NULL)
+			{
+				/*
+				 * Reset error state so the subsequent InputFunctionCallSafe
+				 * call (for domain constraint check) can properly report
+				 * whether it succeeded or failed.
+				 */
+				cstate->escontext->error_occurred = false;
+
+				Assert(cstate->domain_with_constraint != NULL);
+
+				/*
+				 * For constrained domains, we need an additional
+				 * InputFunctionCallSafe() to ensure that an error is thrown
+				 * if the domain constraint rejects null values.
+				 */
+				if (!cstate->domain_with_constraint[m] ||
+					InputFunctionCallSafe(&in_functions[m],
+										  NULL,
+										  typioparams[m],
+										  att->atttypmod,
+										  (Node *) cstate->escontext,
+										  &values[m]))
+				{
+					nulls[m] = true;
+					values[m] = (Datum) 0;
+				}
+				else
+					ereport(ERROR,
+							errcode(ERRCODE_NOT_NULL_VIOLATION),
+							errmsg("domain %s does not allow null values",
+								   format_type_be(typioparams[m])),
+							errdetail("ON_ERROR SET_NULL cannot be applied because column \"%s\" (domain %s) does not accept null values.",
+									  cstate->cur_attname,
+									  format_type_be(typioparams[m])),
+							errdatatype(typioparams[m]));
+
+				/*
+				 * We count only the number of rows (not fields) where
+				 * ON_ERROR SET_NULL was applied.
+				 */
+				if (!current_row_erroneous)
+				{
+					current_row_erroneous = true;
+					cstate->num_errors++;
+				}
+			}
 
 			if (cstate->opts.log_verbosity == COPY_LOG_VERBOSITY_VERBOSE)
 			{
@@ -1052,24 +1117,37 @@ CopyFromTextLikeOneRow(CopyFromState cstate, ExprContext *econtext,
 					char	   *attval;
 
 					attval = CopyLimitPrintoutLength(cstate->cur_attval);
-					ereport(NOTICE,
-							errmsg("skipping row due to data type incompatibility at line %" PRIu64 " for column \"%s\": \"%s\"",
-								   cstate->cur_lineno,
-								   cstate->cur_attname,
-								   attval));
+
+					if (cstate->opts.on_error == COPY_ON_ERROR_IGNORE)
+						ereport(NOTICE,
+								errmsg("skipping row due to data type incompatibility at line %" PRIu64 " for column \"%s\": \"%s\"",
+									   cstate->cur_lineno,
+									   cstate->cur_attname,
+									   attval));
+					else if (cstate->opts.on_error == COPY_ON_ERROR_SET_NULL)
+						ereport(NOTICE,
+								errmsg("setting to null due to data type incompatibility at line %" PRIu64 " for column \"%s\": \"%s\"",
+									   cstate->cur_lineno,
+									   cstate->cur_attname,
+									   attval));
 					pfree(attval);
 				}
 				else
-					ereport(NOTICE,
-							errmsg("skipping row due to data type incompatibility at line %" PRIu64 " for column \"%s\": null input",
-								   cstate->cur_lineno,
-								   cstate->cur_attname));
-
+				{
+					if (cstate->opts.on_error == COPY_ON_ERROR_IGNORE)
+						ereport(NOTICE,
+								errmsg("skipping row due to data type incompatibility at line %" PRIu64 " for column \"%s\": null input",
+									   cstate->cur_lineno,
+									   cstate->cur_attname));
+				}
 				/* reset relname_only */
 				cstate->relname_only = false;
 			}
 
-			return true;
+			if (cstate->opts.on_error == COPY_ON_ERROR_IGNORE)
+				return true;
+			else if (cstate->opts.on_error == COPY_ON_ERROR_SET_NULL)
+				continue;
 		}
 
 		cstate->cur_attname = NULL;
@@ -1127,7 +1205,7 @@ CopyFromBinaryOneRow(CopyFromState cstate, ExprContext *econtext, Datum *values,
 		ereport(ERROR,
 				(errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
 				 errmsg("row field count is %d, expected %d",
-						(int) fld_count, attr_count)));
+						fld_count, attr_count)));
 
 	foreach(cur, cstate->attnumlist)
 	{
@@ -1162,8 +1240,17 @@ CopyReadLine(CopyFromState cstate, bool is_csv)
 	resetStringInfo(&cstate->line_buf);
 	cstate->line_buf_valid = false;
 
-	/* Parse data and transfer into line_buf */
-	result = CopyReadLineText(cstate, is_csv);
+	/*
+	 * Parse data and transfer into line_buf.
+	 *
+	 * Because this is performance critical, we inline CopyReadLineText() and
+	 * pass the boolean parameters as constants to allow the compiler to emit
+	 * specialized code with fewer branches.
+	 */
+	if (is_csv)
+		result = CopyReadLineText(cstate, true);
+	else
+		result = CopyReadLineText(cstate, false);
 
 	if (result)
 	{
@@ -1227,10 +1314,156 @@ CopyReadLine(CopyFromState cstate, bool is_csv)
 	return result;
 }
 
+#ifndef USE_NO_SIMD
+/*
+ * Helper function for CopyReadLineText() that uses SIMD instructions to scan
+ * the input buffer for special characters.  This can be much faster.
+ *
+ * Note that we disable SIMD for the remainder of the COPY FROM command upon
+ * encountering a special character (except for end-of-line characters) or a
+ * short line.  This is perhaps too conservative, but it should help avoid
+ * regressions.  It could probably be made more lenient in the future via
+ * fine-tuned heuristics.
+ */
+static bool
+CopyReadLineTextSIMDHelper(CopyFromState cstate, bool is_csv,
+						   bool *hit_eof_p, int *input_buf_ptr_p)
+{
+	char	   *copy_input_buf;
+	int			input_buf_ptr;
+	int			copy_buf_len;
+	bool		unique_esc_char;	/* for csv, do quote/esc chars differ? */
+	bool		first = true;
+	bool		result = false;
+	const Vector8 nl_vec = vector8_broadcast('\n');
+	const Vector8 cr_vec = vector8_broadcast('\r');
+	Vector8		bs_or_quote_vec;	/* '\' for text, quote for csv */
+	Vector8		esc_vec;		/* only for csv */
+
+	if (is_csv)
+	{
+		char		quote = cstate->opts.quote[0];
+		char		esc = cstate->opts.escape[0];
+
+		bs_or_quote_vec = vector8_broadcast(quote);
+		esc_vec = vector8_broadcast(esc);
+		unique_esc_char = (quote != esc);
+	}
+	else
+	{
+		bs_or_quote_vec = vector8_broadcast('\\');
+		unique_esc_char = false;
+	}
+
+	/*
+	 * For a little extra speed within the loop, we copy some state members
+	 * into local variables. Note that we need to use a separate local
+	 * variable for input_buf_ptr so that the REFILL_LINEBUF macro works.  We
+	 * copy its value into the input_buf_ptr_p argument before returning.
+	 */
+	copy_input_buf = cstate->input_buf;
+	input_buf_ptr = cstate->input_buf_index;
+	copy_buf_len = cstate->input_buf_len;
+
+	/*
+	 * See the corresponding loop in CopyReadLineText() for more information
+	 * about the purpose of this loop.  This one does the same thing using
+	 * SIMD instructions, although we are quick to bail out to the scalar path
+	 * if we encounter a special character.
+	 */
+	for (;;)
+	{
+		Vector8		chunk;
+		Vector8		match;
+
+		/* Load more data if needed. */
+		if (copy_buf_len - input_buf_ptr < sizeof(Vector8))
+		{
+			REFILL_LINEBUF;
+
+			CopyLoadInputBuf(cstate);
+			/* update our local variables */
+			*hit_eof_p = cstate->input_reached_eof;
+			input_buf_ptr = cstate->input_buf_index;
+			copy_buf_len = cstate->input_buf_len;
+
+			/*
+			 * If we are completely out of data, break out of the loop,
+			 * reporting EOF.
+			 */
+			if (INPUT_BUF_BYTES(cstate) <= 0)
+			{
+				result = true;
+				break;
+			}
+		}
+
+		/*
+		 * If we still don't have enough data for the SIMD path, fall back to
+		 * the scalar code.  Note that this doesn't necessarily mean we
+		 * encountered a short line, so we leave cstate->simd_enabled set to
+		 * true.
+		 */
+		if (copy_buf_len - input_buf_ptr < sizeof(Vector8))
+			break;
+
+		/*
+		 * If we made it here, we have at least enough data to fit in a
+		 * Vector8, so we can use SIMD instructions to scan for special
+		 * characters.
+		 */
+		vector8_load(&chunk, (const uint8 *) &copy_input_buf[input_buf_ptr]);
+
+		/*
+		 * Check for \n, \r, \\ (for text), quotes (for csv), and escapes (for
+		 * csv, if different from quotes).
+		 */
+		match = vector8_eq(chunk, nl_vec);
+		match = vector8_or(match, vector8_eq(chunk, cr_vec));
+		match = vector8_or(match, vector8_eq(chunk, bs_or_quote_vec));
+		if (unique_esc_char)
+			match = vector8_or(match, vector8_eq(chunk, esc_vec));
+
+		/*
+		 * If we found a special character, advance to it and hand off to the
+		 * scalar path.  Except for end-of-line characters, we also disable
+		 * SIMD processing for the remainder of the COPY FROM command.
+		 */
+		if (vector8_is_highbit_set(match))
+		{
+			uint32		mask;
+			char		c;
+
+			mask = vector8_highbit_mask(match);
+			input_buf_ptr += pg_rightmost_one_pos32(mask);
+
+			/*
+			 * Don't disable SIMD if we found \n or \r, else we'd stop using
+			 * SIMD instructions after the first line.  As an exception, we do
+			 * disable it if this is the first vector we processed, as that
+			 * means the line is too short for SIMD.
+			 */
+			c = copy_input_buf[input_buf_ptr];
+			if (first || (c != '\n' && c != '\r'))
+				cstate->simd_enabled = false;
+
+			break;
+		}
+
+		/* That chunk was clear of special characters, so we can skip it. */
+		input_buf_ptr += sizeof(Vector8);
+		first = false;
+	}
+
+	*input_buf_ptr_p = input_buf_ptr;
+	return result;
+}
+#endif							/* ! USE_NO_SIMD */
+
 /*
  * CopyReadLineText - inner loop of CopyReadLine for text mode
  */
-static bool
+static pg_attribute_always_inline bool
 CopyReadLineText(CopyFromState cstate, bool is_csv)
 {
 	char	   *copy_input_buf;
@@ -1277,11 +1510,43 @@ CopyReadLineText(CopyFromState cstate, bool is_csv)
 	 * input_buf_ptr have been determined to be part of the line, but not yet
 	 * transferred to line_buf.
 	 *
-	 * For a little extra speed within the loop, we copy input_buf and
-	 * input_buf_len into local variables.
+	 * For a little extra speed within the loop, we copy some state
+	 * information into local variables.  input_buf_ptr could be changed in
+	 * the SIMD path, so we must set that one before it.  The others are set
+	 * afterwards.
 	 */
-	copy_input_buf = cstate->input_buf;
 	input_buf_ptr = cstate->input_buf_index;
+
+	/*
+	 * We first try to use SIMD for the task described above, falling back to
+	 * the scalar path (i.e., the loop below) if needed.
+	 */
+#ifndef USE_NO_SIMD
+	if (cstate->simd_enabled)
+	{
+		/*
+		 * Using temporary variables seems to encourage the compiler to keep
+		 * them in a register, which is beneficial for performance.
+		 */
+		bool		tmp_hit_eof = false;
+		int			tmp_input_buf_ptr = 0;	/* silence compiler warning */
+
+		result = CopyReadLineTextSIMDHelper(cstate, is_csv, &tmp_hit_eof,
+											&tmp_input_buf_ptr);
+		hit_eof = tmp_hit_eof;
+		input_buf_ptr = tmp_input_buf_ptr;
+
+		if (result)
+		{
+			/* Transfer any still-uncopied data to line_buf. */
+			REFILL_LINEBUF;
+
+			return result;
+		}
+	}
+#endif							/* ! USE_NO_SIMD */
+
+	copy_input_buf = cstate->input_buf;
 	copy_buf_len = cstate->input_buf_len;
 
 	for (;;)
@@ -1538,7 +1803,7 @@ GetDecimalFromHex(char hex)
 	if (isdigit((unsigned char) hex))
 		return hex - '0';
 	else
-		return tolower((unsigned char) hex) - 'a' + 10;
+		return pg_ascii_tolower((unsigned char) hex) - 'a' + 10;
 }
 
 /*

@@ -5,7 +5,7 @@
 # This makefile generates a static library, libpgfeutils.a,
 # for use by client applications
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # IDENTIFICATION
@@ -37,7 +37,8 @@ OBJS = \
 	query_utils.o \
 	recovery_gen.o \
 	simple_list.o \
-	string_utils.o
+	string_utils.o \
+	version.o
 
 ifeq ($(PORTNAME), win32)
 override CPPFLAGS += -DFD_SETSIZE=1024

@@ -3,7 +3,7 @@
  * heap_surgery.c
  *	  Functions to perform surgery on the damaged heap table.
  *
- * Copyright (c) 2020-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2020-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/pg_surgery/heap_surgery.c
@@ -356,8 +356,8 @@ heap_force_common(FunctionCallInfo fcinfo, HeapTupleForceOption heap_force_opt)
 static int32
 tidcmp(const void *a, const void *b)
 {
-	ItemPointer iptr1 = ((const ItemPointer) a);
-	ItemPointer iptr2 = ((const ItemPointer) b);
+	const ItemPointerData *iptr1 = a;
+	const ItemPointerData *iptr2 = b;
 
 	return ItemPointerCompare(iptr1, iptr2);
 }

@@ -3,7 +3,7 @@
  * partdesc.c
  *		Support routines for manipulating partition descriptors
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -37,7 +37,7 @@ typedef struct PartitionDirectoryData
 	MemoryContext pdir_mcxt;
 	HTAB	   *pdir_hash;
 	bool		omit_detached;
-}			PartitionDirectoryData;
+} PartitionDirectoryData;
 
 typedef struct PartitionDirectoryEntry
 {
@@ -426,7 +426,7 @@ CreatePartitionDirectory(MemoryContext mcxt, bool omit_detached)
 	PartitionDirectory pdir;
 	HASHCTL		ctl;
 
-	pdir = palloc(sizeof(PartitionDirectoryData));
+	pdir = palloc_object(PartitionDirectoryData);
 	pdir->pdir_mcxt = mcxt;
 
 	ctl.keysize = sizeof(Oid);

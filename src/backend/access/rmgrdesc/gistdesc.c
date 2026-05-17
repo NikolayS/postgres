@@ -3,7 +3,7 @@
  * gistdesc.c
  *	  rmgr descriptor routines for access/gist/gistxlog.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -80,9 +80,6 @@ gist_desc(StringInfo buf, XLogReaderState *record)
 		case XLOG_GIST_PAGE_DELETE:
 			out_gistxlogPageDelete(buf, (gistxlogPageDelete *) rec);
 			break;
-		case XLOG_GIST_ASSIGN_LSN:
-			/* No details to write out */
-			break;
 	}
 }
 
@@ -107,9 +104,6 @@ gist_identify(uint8 info)
 			break;
 		case XLOG_GIST_PAGE_DELETE:
 			id = "PAGE_DELETE";
-			break;
-		case XLOG_GIST_ASSIGN_LSN:
-			id = "ASSIGN_LSN";
 			break;
 	}
 

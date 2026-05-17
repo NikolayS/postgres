@@ -3,7 +3,7 @@
  * binaryheap.c
  *	  A simple binary heap implementation
  *
- * Portions Copyright (c) 2012-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/common/binaryheap.c
@@ -16,8 +16,6 @@
 #else
 #include "postgres.h"
 #endif
-
-#include <math.h>
 
 #ifdef FRONTEND
 #include "common/logging.h"

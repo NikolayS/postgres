@@ -2,7 +2,7 @@
 #
 # Makefile for src/bin/initdb
 #
-# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/bin/initdb/Makefile
@@ -20,7 +20,7 @@ include $(top_builddir)/src/Makefile.global
 # from libpq, else we have risks of version skew if we run with a libpq
 # shared library from a different PG version.  Define
 # USE_PRIVATE_ENCODING_FUNCS to ensure that that happens.
-override CPPFLAGS := -DUSE_PRIVATE_ENCODING_FUNCS -I$(libpq_srcdir) -I$(top_srcdir)/src/timezone $(ICU_CFLAGS) $(CPPFLAGS)
+override CPPFLAGS := -DUSE_PRIVATE_ENCODING_FUNCS -I$(libpq_srcdir) -I$(top_srcdir)/src/timezone $(CPPFLAGS) $(ICU_CFLAGS)
 
 # We need libpq only because fe_utils does.
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport) $(ICU_LIBS)

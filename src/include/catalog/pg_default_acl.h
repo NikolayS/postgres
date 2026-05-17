@@ -5,7 +5,7 @@
  *	  (pg_default_acl)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_default_acl.h
@@ -27,6 +27,8 @@
  *		typedef struct FormData_pg_default_acl
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_default_acl,826,DefaultAclRelationId)
 {
 	Oid			oid;			/* oid */
@@ -41,6 +43,8 @@ CATALOG(pg_default_acl,826,DefaultAclRelationId)
 													 * CREATE time */
 #endif
 } FormData_pg_default_acl;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_default_acl corresponds to a pointer to a tuple with

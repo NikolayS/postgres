@@ -3,7 +3,7 @@
  * arch-ppc.h
  *	  Atomic operations considerations specific to PowerPC
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES:
@@ -36,7 +36,7 @@ typedef struct pg_atomic_uint32
 #define PG_HAVE_ATOMIC_U64_SUPPORT
 typedef struct pg_atomic_uint64
 {
-	volatile uint64 value pg_attribute_aligned(8);
+	alignas(8) volatile uint64 value;
 } pg_atomic_uint64;
 
 #endif

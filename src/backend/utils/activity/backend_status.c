@@ -2,7 +2,7 @@
  * backend_status.c
  *	  Backend status reporting infrastructure.
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -19,6 +19,8 @@
 #include "storage/ipc.h"
 #include "storage/proc.h"		/* for MyProc */
 #include "storage/procarray.h"
+#include "storage/shmem.h"
+#include "storage/subsystems.h"
 #include "utils/ascii.h"
 #include "utils/guc.h"			/* for application_name */
 #include "utils/memutils.h"
@@ -73,132 +75,96 @@ static void pgstat_beshutdown_hook(int code, Datum arg);
 static void pgstat_read_current_status(void);
 static void pgstat_setup_backend_status_context(void);
 
+static void BackendStatusShmemRequest(void *arg);
+static void BackendStatusShmemInit(void *arg);
+static void BackendStatusShmemAttach(void *arg);
+
+const ShmemCallbacks BackendStatusShmemCallbacks = {
+	.request_fn = BackendStatusShmemRequest,
+	.init_fn = BackendStatusShmemInit,
+	.attach_fn = BackendStatusShmemAttach,
+};
 
 /*
- * Report shared-memory space needed by BackendStatusShmemInit.
+ * Register shared memory needs for backend status reporting.
  */
-Size
-BackendStatusShmemSize(void)
+static void
+BackendStatusShmemRequest(void *arg)
 {
-	Size		size;
+	ShmemRequestStruct(.name = "Backend Status Array",
+					   .size = mul_size(sizeof(PgBackendStatus), NumBackendStatSlots),
+					   .ptr = (void **) &BackendStatusArray,
+		);
 
-	/* BackendStatusArray: */
-	size = mul_size(sizeof(PgBackendStatus), NumBackendStatSlots);
-	/* BackendAppnameBuffer: */
-	size = add_size(size,
-					mul_size(NAMEDATALEN, NumBackendStatSlots));
-	/* BackendClientHostnameBuffer: */
-	size = add_size(size,
-					mul_size(NAMEDATALEN, NumBackendStatSlots));
-	/* BackendActivityBuffer: */
-	size = add_size(size,
-					mul_size(pgstat_track_activity_query_size, NumBackendStatSlots));
+	ShmemRequestStruct(.name = "Backend Application Name Buffer",
+					   .size = mul_size(NAMEDATALEN, NumBackendStatSlots),
+					   .ptr = (void **) &BackendAppnameBuffer,
+		);
+
+	ShmemRequestStruct(.name = "Backend Client Host Name Buffer",
+					   .size = mul_size(NAMEDATALEN, NumBackendStatSlots),
+					   .ptr = (void **) &BackendClientHostnameBuffer,
+		);
+
+	BackendActivityBufferSize = mul_size(pgstat_track_activity_query_size,
+										 NumBackendStatSlots);
+	ShmemRequestStruct(.name = "Backend Activity Buffer",
+					   .size = BackendActivityBufferSize,
+					   .ptr = (void **) &BackendActivityBuffer
+		);
+
 #ifdef USE_SSL
-	/* BackendSslStatusBuffer: */
-	size = add_size(size,
-					mul_size(sizeof(PgBackendSSLStatus), NumBackendStatSlots));
+	ShmemRequestStruct(.name = "Backend SSL Status Buffer",
+					   .size = mul_size(sizeof(PgBackendSSLStatus), NumBackendStatSlots),
+					   .ptr = (void **) &BackendSslStatusBuffer,
+		);
 #endif
+
 #ifdef ENABLE_GSS
-	/* BackendGssStatusBuffer: */
-	size = add_size(size,
-					mul_size(sizeof(PgBackendGSSStatus), NumBackendStatSlots));
+	ShmemRequestStruct(.name = "Backend GSS Status Buffer",
+					   .size = mul_size(sizeof(PgBackendGSSStatus), NumBackendStatSlots),
+					   .ptr = (void **) &BackendGssStatusBuffer,
+		);
 #endif
-	return size;
 }
 
 /*
  * Initialize the shared status array and several string buffers
  * during postmaster startup.
  */
-void
-BackendStatusShmemInit(void)
+static void
+BackendStatusShmemInit(void *arg)
 {
-	Size		size;
-	bool		found;
 	int			i;
 	char	   *buffer;
 
-	/* Create or attach to the shared array */
-	size = mul_size(sizeof(PgBackendStatus), NumBackendStatSlots);
-	BackendStatusArray = (PgBackendStatus *)
-		ShmemInitStruct("Backend Status Array", size, &found);
-
-	if (!found)
+	/* Initialize st_appname pointers. */
+	buffer = BackendAppnameBuffer;
+	for (i = 0; i < NumBackendStatSlots; i++)
 	{
-		/*
-		 * We're the first - initialize.
-		 */
-		MemSet(BackendStatusArray, 0, size);
+		BackendStatusArray[i].st_appname = buffer;
+		buffer += NAMEDATALEN;
 	}
 
-	/* Create or attach to the shared appname buffer */
-	size = mul_size(NAMEDATALEN, NumBackendStatSlots);
-	BackendAppnameBuffer = (char *)
-		ShmemInitStruct("Backend Application Name Buffer", size, &found);
-
-	if (!found)
+	/* Initialize st_clienthostname pointers. */
+	buffer = BackendClientHostnameBuffer;
+	for (i = 0; i < NumBackendStatSlots; i++)
 	{
-		MemSet(BackendAppnameBuffer, 0, size);
-
-		/* Initialize st_appname pointers. */
-		buffer = BackendAppnameBuffer;
-		for (i = 0; i < NumBackendStatSlots; i++)
-		{
-			BackendStatusArray[i].st_appname = buffer;
-			buffer += NAMEDATALEN;
-		}
+		BackendStatusArray[i].st_clienthostname = buffer;
+		buffer += NAMEDATALEN;
 	}
 
-	/* Create or attach to the shared client hostname buffer */
-	size = mul_size(NAMEDATALEN, NumBackendStatSlots);
-	BackendClientHostnameBuffer = (char *)
-		ShmemInitStruct("Backend Client Host Name Buffer", size, &found);
-
-	if (!found)
+	/* Initialize st_activity pointers. */
+	buffer = BackendActivityBuffer;
+	for (i = 0; i < NumBackendStatSlots; i++)
 	{
-		MemSet(BackendClientHostnameBuffer, 0, size);
-
-		/* Initialize st_clienthostname pointers. */
-		buffer = BackendClientHostnameBuffer;
-		for (i = 0; i < NumBackendStatSlots; i++)
-		{
-			BackendStatusArray[i].st_clienthostname = buffer;
-			buffer += NAMEDATALEN;
-		}
-	}
-
-	/* Create or attach to the shared activity buffer */
-	BackendActivityBufferSize = mul_size(pgstat_track_activity_query_size,
-										 NumBackendStatSlots);
-	BackendActivityBuffer = (char *)
-		ShmemInitStruct("Backend Activity Buffer",
-						BackendActivityBufferSize,
-						&found);
-
-	if (!found)
-	{
-		MemSet(BackendActivityBuffer, 0, BackendActivityBufferSize);
-
-		/* Initialize st_activity pointers. */
-		buffer = BackendActivityBuffer;
-		for (i = 0; i < NumBackendStatSlots; i++)
-		{
-			BackendStatusArray[i].st_activity_raw = buffer;
-			buffer += pgstat_track_activity_query_size;
-		}
+		BackendStatusArray[i].st_activity_raw = buffer;
+		buffer += pgstat_track_activity_query_size;
 	}
 
 #ifdef USE_SSL
-	/* Create or attach to the shared SSL status buffer */
-	size = mul_size(sizeof(PgBackendSSLStatus), NumBackendStatSlots);
-	BackendSslStatusBuffer = (PgBackendSSLStatus *)
-		ShmemInitStruct("Backend SSL Status Buffer", size, &found);
-
-	if (!found)
 	{
 		PgBackendSSLStatus *ptr;
-
-		MemSet(BackendSslStatusBuffer, 0, size);
 
 		/* Initialize st_sslstatus pointers. */
 		ptr = BackendSslStatusBuffer;
@@ -211,16 +177,8 @@ BackendStatusShmemInit(void)
 #endif
 
 #ifdef ENABLE_GSS
-	/* Create or attach to the shared GSSAPI status buffer */
-	size = mul_size(sizeof(PgBackendGSSStatus), NumBackendStatSlots);
-	BackendGssStatusBuffer = (PgBackendGSSStatus *)
-		ShmemInitStruct("Backend GSS Status Buffer", size, &found);
-
-	if (!found)
 	{
 		PgBackendGSSStatus *ptr;
-
-		MemSet(BackendGssStatusBuffer, 0, size);
 
 		/* Initialize st_gssstatus pointers. */
 		ptr = BackendGssStatusBuffer;
@@ -231,6 +189,13 @@ BackendStatusShmemInit(void)
 		}
 	}
 #endif
+}
+
+static void
+BackendStatusShmemAttach(void *arg)
+{
+	BackendActivityBufferSize = mul_size(pgstat_track_activity_query_size,
+										 NumBackendStatSlots);
 }
 
 /*
@@ -320,8 +285,8 @@ pgstat_bestart_initial(void)
 	lbeentry.st_state = STATE_STARTING;
 	lbeentry.st_progress_command = PROGRESS_COMMAND_INVALID;
 	lbeentry.st_progress_command_target = InvalidOid;
-	lbeentry.st_query_id = UINT64CONST(0);
-	lbeentry.st_plan_id = UINT64CONST(0);
+	lbeentry.st_query_id = INT64CONST(0);
+	lbeentry.st_plan_id = INT64CONST(0);
 
 	/*
 	 * we don't zero st_progress_param here to save cycles; nobody should
@@ -599,8 +564,8 @@ pgstat_report_activity(BackendState state, const char *cmd_str)
 			beentry->st_activity_start_timestamp = 0;
 			/* st_xact_start_timestamp and wait_event_info are also disabled */
 			beentry->st_xact_start_timestamp = 0;
-			beentry->st_query_id = UINT64CONST(0);
-			beentry->st_plan_id = UINT64CONST(0);
+			beentry->st_query_id = INT64CONST(0);
+			beentry->st_plan_id = INT64CONST(0);
 			proc->wait_event_info = 0;
 			PGSTAT_END_WRITE_ACTIVITY(beentry);
 		}
@@ -662,8 +627,8 @@ pgstat_report_activity(BackendState state, const char *cmd_str)
 	 */
 	if (state == STATE_RUNNING)
 	{
-		beentry->st_query_id = UINT64CONST(0);
-		beentry->st_plan_id = UINT64CONST(0);
+		beentry->st_query_id = INT64CONST(0);
+		beentry->st_plan_id = INT64CONST(0);
 	}
 
 	if (cmd_str != NULL)
@@ -683,7 +648,7 @@ pgstat_report_activity(BackendState state, const char *cmd_str)
  * --------
  */
 void
-pgstat_report_query_id(uint64 query_id, bool force)
+pgstat_report_query_id(int64 query_id, bool force)
 {
 	volatile PgBackendStatus *beentry = MyBEEntry;
 
@@ -702,7 +667,7 @@ pgstat_report_query_id(uint64 query_id, bool force)
 	 * command, so ignore the one provided unless it's an explicit call to
 	 * reset the identifier.
 	 */
-	if (beentry->st_query_id != 0 && !force)
+	if (beentry->st_query_id != INT64CONST(0) && !force)
 		return;
 
 	/*
@@ -722,7 +687,7 @@ pgstat_report_query_id(uint64 query_id, bool force)
  * --------
  */
 void
-pgstat_report_plan_id(uint64 plan_id, bool force)
+pgstat_report_plan_id(int64 plan_id, bool force)
 {
 	volatile PgBackendStatus *beentry = MyBEEntry;
 
@@ -1134,7 +1099,7 @@ pgstat_get_crashed_backend_activity(int pid, char *buffer, int buflen)
  *
  * Return current backend's query identifier.
  */
-uint64
+int64
 pgstat_get_my_query_id(void)
 {
 	if (!MyBEEntry)
@@ -1154,7 +1119,7 @@ pgstat_get_my_query_id(void)
  *
  * Return current backend's plan identifier.
  */
-uint64
+int64
 pgstat_get_my_plan_id(void)
 {
 	if (!MyBEEntry)
@@ -1162,31 +1127,6 @@ pgstat_get_my_plan_id(void)
 
 	/* No need for a lock, for roughly the same reasons as above. */
 	return MyBEEntry->st_plan_id;
-}
-
-/* ----------
- * pgstat_get_backend_type_by_proc_number() -
- *
- *	Return the type of the backend with the specified ProcNumber.  This looks
- *	directly at the BackendStatusArray, so the return value may be out of date.
- *	The only current use of this function is in pg_signal_backend(), which is
- *	inherently racy, so we don't worry too much about this.
- *
- *	It is the caller's responsibility to use this wisely; at minimum, callers
- *	should ensure that procNumber is valid and perform the required permissions
- *	checks.
- * ----------
- */
-BackendType
-pgstat_get_backend_type_by_proc_number(ProcNumber procNumber)
-{
-	volatile PgBackendStatus *status = &BackendStatusArray[procNumber];
-
-	/*
-	 * We bypass the changecount mechanism since fetching and storing an int
-	 * is almost certainly atomic.
-	 */
-	return status->st_backendType;
 }
 
 /* ----------

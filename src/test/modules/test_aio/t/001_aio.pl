@@ -1,4 +1,4 @@
-# Copyright (c) 2025, PostgreSQL Global Development Group
+# Copyright (c) 2025-2026, PostgreSQL Global Development Group
 
 use strict;
 use warnings FATAL => 'all';
@@ -7,53 +7,48 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+use FindBin;
+use lib $FindBin::RealBin;
+
+use TestAio;
+
+my @methods = TestAio::supported_io_methods();
+my %nodes;
+
 
 ###
-# Test io_method=worker
+# Create and configure one instance for each io_method
 ###
-my $node_worker = create_node('worker');
-$node_worker->start();
 
-test_generic('worker', $node_worker);
-SKIP:
+foreach my $method (@methods)
 {
-	skip 'Injection points not supported by this build', 1
-	  unless $ENV{enable_injection_points} eq 'yes';
-	test_inject_worker('worker', $node_worker);
+	my $node = PostgreSQL::Test::Cluster->new($method);
+
+	$nodes{$method} = $node;
+	$node->init();
+	$node->append_conf('postgresql.conf', "io_method=$method");
+	TestAio::configure($node);
 }
 
-$node_worker->stop();
-
-
-###
-# Test io_method=io_uring
-###
-
-if (have_io_uring())
-{
-	my $node_uring = create_node('io_uring');
-	$node_uring->start();
-	test_generic('io_uring', $node_uring);
-	$node_uring->stop();
-}
-
-
-###
-# Test io_method=sync
-###
-
-my $node_sync = create_node('sync');
-
-# just to have one test not use the default auto-tuning
-
-$node_sync->append_conf(
+# Just to have one test not use the default auto-tuning
+$nodes{'sync'}->append_conf(
 	'postgresql.conf', qq(
-io_max_concurrency=4
+ io_max_concurrency=4
 ));
 
-$node_sync->start();
-test_generic('sync', $node_sync);
-$node_sync->stop();
+
+###
+# Execute the tests for each io_method
+###
+
+foreach my $method (@methods)
+{
+	my $node = $nodes{$method};
+
+	$node->start();
+	test_io_method($method, $node);
+	$node->stop();
+}
 
 done_testing();
 
@@ -62,71 +57,6 @@ done_testing();
 # Test Helpers
 ###
 
-sub create_node
-{
-	local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-	my $io_method = shift;
-
-	my $node = PostgreSQL::Test::Cluster->new($io_method);
-
-	# Want to test initdb for each IO method, otherwise we could just reuse
-	# the cluster.
-	#
-	# Unfortunately Cluster::init() puts PG_TEST_INITDB_EXTRA_OPTS after the
-	# options specified by ->extra, if somebody puts -c io_method=xyz in
-	# PG_TEST_INITDB_EXTRA_OPTS it would break this test. Fix that up if we
-	# detect it.
-	local $ENV{PG_TEST_INITDB_EXTRA_OPTS} = $ENV{PG_TEST_INITDB_EXTRA_OPTS};
-	if (defined $ENV{PG_TEST_INITDB_EXTRA_OPTS}
-		&& $ENV{PG_TEST_INITDB_EXTRA_OPTS} =~ m/io_method=/)
-	{
-		$ENV{PG_TEST_INITDB_EXTRA_OPTS} .= " -c io_method=$io_method";
-	}
-
-	$node->init(extra => [ '-c', "io_method=$io_method" ]);
-
-	$node->append_conf(
-		'postgresql.conf', qq(
-shared_preload_libraries=test_aio
-log_min_messages = 'DEBUG3'
-log_statement=all
-log_error_verbosity=default
-restart_after_crash=false
-temp_buffers=100
-));
-
-	# Even though we used -c io_method=... above, if TEMP_CONFIG sets
-	# io_method, it'd override the setting persisted at initdb time. While
-	# using (and later verifying) the setting from initdb provides some
-	# verification of having used the io_method during initdb, it's probably
-	# not worth the complication of only appending if the variable is set in
-	# in TEMP_CONFIG.
-	$node->append_conf(
-		'postgresql.conf', qq(
-io_method=$io_method
-));
-
-	ok(1, "$io_method: initdb");
-
-	return $node;
-}
-
-sub have_io_uring
-{
-	# To detect if io_uring is supported, we look at the error message for
-	# assigning an invalid value to an enum GUC, which lists all the valid
-	# options. We need to use -C to deal with running as administrator on
-	# windows, the superuser check is omitted if -C is used.
-	my ($stdout, $stderr) =
-	  run_command [qw(postgres -C invalid -c io_method=invalid)];
-	die "can't determine supported io_method values"
-	  unless $stderr =~ m/Available values: ([^\.]+)\./;
-	my $methods = $1;
-	note "supported io_method values are: $methods";
-
-	return ($methods =~ m/io_uring/) ? 1 : 0;
-}
 
 sub psql_like
 {
@@ -149,6 +79,9 @@ sub psql_like
 	return $output;
 }
 
+# Issue query, wait for the specified wait event to be reached. If
+# wait_current_session is true, we will wait for the event in the current
+# session, otherwise we'll wait for any session.
 sub query_wait_block
 {
 	local $Test::Builder::Level = $Test::Builder::Level + 1;
@@ -158,16 +91,29 @@ sub query_wait_block
 	my $name = shift;
 	my $sql = shift;
 	my $waitfor = shift;
+	my $wait_current_session = shift;
 
 	my $pid = $psql->query_safe('SELECT pg_backend_pid()');
 
 	$psql->{stdin} .= qq($sql;\n);
 	$psql->{run}->pump_nb();
+	note "issued sql: $sql;\n";
 	ok(1, "$io_method: $name: issued sql");
 
-	$node->poll_query_until('postgres',
-		qq(SELECT wait_event FROM pg_stat_activity WHERE pid = $pid),
-		$waitfor);
+	my $waitquery;
+	if ($wait_current_session)
+	{
+		$waitquery =
+		  qq(SELECT wait_event FROM pg_stat_activity WHERE pid = $pid);
+	}
+	else
+	{
+		$waitquery =
+		  qq(SELECT wait_event FROM pg_stat_activity WHERE wait_event = '$waitfor');
+	}
+
+	note "polling for completion with $waitquery";
+	$node->poll_query_until('postgres', $waitquery, $waitfor);
 	ok(1, "$io_method: $name: observed $waitfor wait event");
 }
 
@@ -396,8 +342,8 @@ SELECT modify_rel_block('tmp_corr', 1, corrupt_header=>true);
 	{
 		my $invalid_page_re =
 		  $tblname eq 'tbl_corr'
-		  ? qr/invalid page in block 1 of relation base\/\d+\/\d+/
-		  : qr/invalid page in block 1 of relation base\/\d+\/t\d+_\d+/;
+		  ? qr/invalid page in block 1 of relation "base\/\d+\/\d+/
+		  : qr/invalid page in block 1 of relation "base\/\d+\/t\d+_\d+/;
 
 		# verify the error is reported in custom C code
 		psql_like(
@@ -453,7 +399,7 @@ sub test_startwait_io
 		$io_method,
 		$psql_a,
 		"first StartBufferIO",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>false);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true);),
 		qr/^t$/,
 		qr/^$/);
 
@@ -462,14 +408,14 @@ sub test_startwait_io
 		$io_method,
 		$psql_a,
 		"second StartBufferIO fails, same session",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>true);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>false);),
 		qr/^f$/,
 		qr/^$/);
 	psql_like(
 		$io_method,
 		$psql_b,
 		"second StartBufferIO fails, other session",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>true);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>false);),
 		qr/^f$/,
 		qr/^$/);
 
@@ -479,8 +425,9 @@ sub test_startwait_io
 		$node,
 		$psql_b,
 		"blocking start buffer io",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>false);),
-		"BufferIo");
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true);),
+		"BufferIo",
+		1);
 
 	# Terminate the IO, without marking it as success, this should trigger the
 	# waiting session to be able to start the io
@@ -508,7 +455,7 @@ sub test_startwait_io
 		$io_method,
 		$psql_a,
 		"blocking buffer io w/ success: first start buffer io",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>false);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true);),
 		qr/^t$/,
 		qr/^$/);
 
@@ -518,8 +465,9 @@ sub test_startwait_io
 		$node,
 		$psql_b,
 		"blocking start buffer io",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>false);),
-		"BufferIo");
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true);),
+		"BufferIo",
+		1);
 
 	# Terminate the IO, marking it as success
 	psql_like(
@@ -556,7 +504,7 @@ INSERT INTO tmp_ok SELECT generate_series(1, 10000);
 		$io_method,
 		$psql_a,
 		"first StartLocalBufferIO",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>true);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>false);),
 		qr/^t$/,
 		qr/^$/);
 
@@ -567,7 +515,7 @@ INSERT INTO tmp_ok SELECT generate_series(1, 10000);
 		$io_method,
 		$psql_a,
 		"second StartLocalBufferIO succeeds, same session",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>true);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>false);),
 		qr/^t$/,
 		qr/^$/);
 
@@ -579,7 +527,7 @@ INSERT INTO tmp_ok SELECT generate_series(1, 10000);
 		$io_method,
 		$psql_a,
 		"StartLocalBufferIO after not marking valid succeeds, same session",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>true);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>false);),
 		qr/^t$/,
 		qr/^$/);
 
@@ -594,7 +542,7 @@ INSERT INTO tmp_ok SELECT generate_series(1, 10000);
 		$io_method,
 		$psql_a,
 		"StartLocalBufferIO after marking valid fails",
-		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, nowait=>false);),
+		qq(SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true);),
 		qr/^f$/,
 		qr/^$/);
 
@@ -798,7 +746,7 @@ SELECT inj_io_short_read_attach(8192);
 		"shortened multi-block read detects invalid page",
 		qq(SELECT count(*) FROM tbl_corr WHERE ctid < '(2, 1)'),
 		qr/^$/,
-		qr/ERROR:.*invalid page in block 1 of relation base\/.*/);
+		qr/ERROR:.*invalid page in block 1 of relation "base\/.*/);
 
 	# trigger a hard error, should error out
 	$psql->query_safe(
@@ -985,7 +933,7 @@ SELECT modify_rel_block('tbl_zero', 0, corrupt_header=>true);
 			qq(
 SELECT read_rel_block_ll('tbl_zero', 0, zero_on_error=>false)),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 0 of relation base\/.*\/.*$/
+			qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 0 of relation "base\/.*\/.*$/
 		);
 
 		# Check that page validity errors are zeroed
@@ -996,7 +944,7 @@ SELECT read_rel_block_ll('tbl_zero', 0, zero_on_error=>false)),
 			qq(
 SELECT read_rel_block_ll('tbl_zero', 0, zero_on_error=>true)),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 0 of relation base\/.*\/.*; zeroing out page$/
+			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 0 of relation "base\/.*\/.*"; zeroing out page$/
 		);
 
 		# And that once the corruption is fixed, we can read again
@@ -1027,7 +975,7 @@ SELECT modify_rel_block('tbl_zero', 3, corrupt_header=>true);
 			"$persistency: test zeroing of invalid block 3",
 			qq(SELECT read_rel_block_ll('tbl_zero', 3, zero_on_error=>true);),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 3 of relation base\/.*\/.*; zeroing out page$/
+			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 3 of relation "base\/.*\/.*"; zeroing out page$/
 		);
 
 
@@ -1044,7 +992,7 @@ SELECT modify_rel_block('tbl_zero', 3, corrupt_header=>true);
 			"$persistency: test reading of invalid block 2,3 in larger read",
 			qq(SELECT read_rel_block_ll('tbl_zero', 1, nblocks=>4, zero_on_error=>false)),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: ERROR:  2 invalid pages among blocks 1..4 of relation base\/.*\/.*\nDETAIL:  Block 2 held first invalid page\.\nHINT:[^\n]+$/
+			qr/^psql:<stdin>:\d+: ERROR:  2 invalid pages among blocks 1..4 of relation "base\/.*\/.*\nDETAIL:  Block 2 held the first invalid page\.\nHINT:[^\n]+$/
 		);
 
 		# Then test zeroing via ZERO_ON_ERROR flag
@@ -1054,7 +1002,7 @@ SELECT modify_rel_block('tbl_zero', 3, corrupt_header=>true);
 			"$persistency: test zeroing of invalid block 2,3 in larger read, ZERO_ON_ERROR",
 			qq(SELECT read_rel_block_ll('tbl_zero', 1, nblocks=>4, zero_on_error=>true)),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: WARNING:  zeroing out 2 invalid pages among blocks 1..4 of relation base\/.*\/.*\nDETAIL:  Block 2 held first zeroed page\.\nHINT:[^\n]+$/
+			qr/^psql:<stdin>:\d+: WARNING:  zeroing out 2 invalid pages among blocks 1..4 of relation "base\/.*\/.*\nDETAIL:  Block 2 held the first zeroed page\.\nHINT:[^\n]+$/
 		);
 
 		# Then test zeroing via zero_damaged_pages
@@ -1069,7 +1017,7 @@ SELECT read_rel_block_ll('tbl_zero', 1, nblocks=>4, zero_on_error=>false)
 COMMIT;
 ),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: WARNING:  zeroing out 2 invalid pages among blocks 1..4 of relation base\/.*\/.*\nDETAIL:  Block 2 held first zeroed page\.\nHINT:[^\n]+$/
+			qr/^psql:<stdin>:\d+: WARNING:  zeroing out 2 invalid pages among blocks 1..4 of relation "base\/.*\/.*\nDETAIL:  Block 2 held the first zeroed page\.\nHINT:[^\n]+$/
 		);
 
 		$psql_a->query_safe(qq(COMMIT));
@@ -1091,7 +1039,7 @@ SELECT modify_rel_block('tbl_zero', 3, zero=>true);
 			qq(
 SELECT count(*) FROM tbl_zero),
 			qr/^$/,
-			qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 2 of relation base\/.*\/.*$/
+			qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 2 of relation "base\/.*\/.*$/
 		);
 
 		# Verify that bufmgr.c IO zeroes out pages with page validity errors
@@ -1106,7 +1054,7 @@ SELECT count(*) FROM tbl_zero;
 COMMIT;
 ),
 			qr/^\d+$/,
-			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 2 of relation base\/.*\/.*$/
+			qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 2 of relation "base\/.*\/.*$/
 		);
 
 		# Check that warnings/errors about page validity in an IO started by
@@ -1123,7 +1071,8 @@ COMMIT;
 		{
 			# Create a corruption and then read the block without waiting for
 			# completion.
-			$psql_a->query(qq(
+			$psql_a->query(
+				qq(
 SELECT modify_rel_block('tbl_zero', 1, corrupt_header=>true);
 SELECT read_rel_block_ll('tbl_zero', 1, wait_complete=>false, zero_on_error=>true)
 ));
@@ -1133,7 +1082,8 @@ SELECT read_rel_block_ll('tbl_zero', 1, wait_complete=>false, zero_on_error=>tru
 				$psql_b,
 				"$persistency: test completing read by other session doesn't generate warning",
 				qq(SELECT count(*) > 0 FROM tbl_zero;),
-			qr/^t$/, qr/^$/);
+				qr/^t$/,
+				qr/^$/);
 		}
 
 		# Clean up
@@ -1190,7 +1140,7 @@ SELECT modify_rel_block('pg_shseclabel', 3, corrupt_checksum=>true);
 		qq(
 SELECT read_rel_block_ll('tbl_normal', 3, nblocks=>1, zero_on_error=>false);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 3 of relation base\/\d+\/\d+$/
+		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 3 of relation "base\/\d+\/\d+"$/
 	);
 
 	my ($cs_count_after, $cs_ts_after) =
@@ -1212,7 +1162,7 @@ SELECT read_rel_block_ll('tbl_normal', 3, nblocks=>1, zero_on_error=>false);),
 		qq(
 SELECT read_rel_block_ll('tbl_temp', 4, nblocks=>2, zero_on_error=>false);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 4 of relation base\/\d+\/t\d+_\d+$/
+		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 4 of relation "base\/\d+\/t\d+_\d+"$/
 	);
 
 	($cs_count_after, $cs_ts_after) = checksum_failures($psql_a, 'postgres');
@@ -1233,7 +1183,7 @@ SELECT read_rel_block_ll('tbl_temp', 4, nblocks=>2, zero_on_error=>false);),
 		qq(
 SELECT read_rel_block_ll('pg_shseclabel', 2, nblocks=>2, zero_on_error=>false);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: ERROR:  2 invalid pages among blocks 2..3 of relation global\/\d+\nDETAIL:  Block 2 held first invalid page\.\nHINT:[^\n]+$/
+		qr/^psql:<stdin>:\d+: ERROR:  2 invalid pages among blocks 2..3 of relation "global\/\d+"\nDETAIL:  Block 2 held the first invalid page\.\nHINT:[^\n]+$/
 	);
 
 	($cs_count_after, $cs_ts_after) = checksum_failures($psql_a);
@@ -1298,7 +1248,7 @@ STRATEGY wal_log;
 		"create database w/ wal strategy, invalid source",
 		$createdb_sql,
 		qr/^$/,
-		qr/psql:<stdin>:\d+: ERROR:  invalid page in block 1 of relation base\/\d+\/\d+$/
+		qr/psql:<stdin>:\d+: ERROR:  invalid page in block 1 of relation "base\/\d+\/\d+"$/
 	);
 	my ($cs_count_after, $cs_ts_after) =
 	  checksum_failures($psql, 'regression_createdb_source');
@@ -1355,18 +1305,24 @@ SELECT modify_rel_block('tbl_cs_fail', 6, corrupt_checksum=>true);
 ));
 
 	$psql->query_safe($invalidate_sql);
-	psql_like($io_method, $psql,
+	psql_like(
+		$io_method,
+		$psql,
 		"reading block w/ wrong checksum with ignore_checksum_failure=off fails",
-		$count_sql, qr/^$/, qr/ERROR:  invalid page in block/);
+		$count_sql,
+		qr/^$/,
+		qr/ERROR:  invalid page in block/);
 
 	$psql->query_safe("SET ignore_checksum_failure=on");
 
 	$psql->query_safe($invalidate_sql);
-	psql_like($io_method, $psql,
-			  "reading block w/ wrong checksum with ignore_checksum_failure=off succeeds",
-			  $count_sql,
-			  qr/^$expect$/,
-			  qr/WARNING:  ignoring (checksum failure|\d checksum failures)/);
+	psql_like(
+		$io_method,
+		$psql,
+		"reading block w/ wrong checksum with ignore_checksum_failure=off succeeds",
+		$count_sql,
+		qr/^$expect$/,
+		qr/WARNING:  ignoring (checksum failure|\d checksum failures)/);
 
 
 	# Verify that ignore_checksum_failure=off works in multi-block reads
@@ -1401,7 +1357,7 @@ SELECT read_rel_block_ll('tbl_cs_fail', 3, nblocks=>1, zero_on_error=>false);),
 		qq(
 SELECT read_rel_block_ll('tbl_cs_fail', 2, nblocks=>3, zero_on_error=>false);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 4 of relation base\/\d+\/\d+$/
+		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 4 of relation "base\/\d+\/\d+"$/
 	);
 
 	# Test multi-block read with different problems in different blocks
@@ -1423,7 +1379,7 @@ SELECT modify_rel_block('tbl_cs_fail', 5, corrupt_header=>true);
 		qq(
 SELECT read_rel_block_ll('tbl_cs_fail', 1, nblocks=>5, zero_on_error=>true);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: WARNING:  zeroing 3 page\(s\) and ignoring 2 checksum failure\(s\) among blocks 1..5 of relation/
+		qr/^psql:<stdin>:\d+: WARNING:  zeroing 3 page\(s\) and ignoring 2 checksum failure\(s\) among blocks 1..5 of relation "/
 	);
 
 
@@ -1432,19 +1388,22 @@ SELECT read_rel_block_ll('tbl_cs_fail', 1, nblocks=>5, zero_on_error=>true);),
 	# file.
 
 	$node->wait_for_log(qr/LOG:  ignoring checksum failure in block 2/,
-						$log_location);
+		$log_location);
 	ok(1, "$io_method: found information about checksum failure in block 2");
 
-	$node->wait_for_log(qr/LOG:  invalid page in block 3 of relation base.*; zeroing out page/,
-						$log_location);
+	$node->wait_for_log(
+		qr/LOG:  invalid page in block 3 of relation "base.*"; zeroing out page/,
+		$log_location);
 	ok(1, "$io_method: found information about invalid page in block 3");
 
-	$node->wait_for_log(qr/LOG:  invalid page in block 4 of relation base.*; zeroing out page/,
-						$log_location);
+	$node->wait_for_log(
+		qr/LOG:  invalid page in block 4 of relation "base.*"; zeroing out page/,
+		$log_location);
 	ok(1, "$io_method: found information about checksum failure in block 4");
 
-	$node->wait_for_log(qr/LOG:  invalid page in block 5 of relation base.*; zeroing out page/,
-						$log_location);
+	$node->wait_for_log(
+		qr/LOG:  invalid page in block 5 of relation "base.*"; zeroing out page/,
+		$log_location);
 	ok(1, "$io_method: found information about checksum failure in block 5");
 
 
@@ -1462,8 +1421,7 @@ SELECT modify_rel_block('tbl_cs_fail', 3, corrupt_checksum=>true, corrupt_header
 		qq(
 SELECT read_rel_block_ll('tbl_cs_fail', 3, nblocks=>1, zero_on_error=>false);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 3 of relation/
-	);
+		qr/^psql:<stdin>:\d+: ERROR:  invalid page in block 3 of relation "/);
 
 	psql_like(
 		$io_method,
@@ -1472,7 +1430,7 @@ SELECT read_rel_block_ll('tbl_cs_fail', 3, nblocks=>1, zero_on_error=>false);),
 		qq(
 SELECT read_rel_block_ll('tbl_cs_fail', 3, nblocks=>1, zero_on_error=>true);),
 		qr/^$/,
-		qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 3 of relation base\/.*; zeroing out page/
+		qr/^psql:<stdin>:\d+: WARNING:  invalid page in block 3 of relation "base\/.*"; zeroing out page/
 	);
 
 
@@ -1480,8 +1438,412 @@ SELECT read_rel_block_ll('tbl_cs_fail', 3, nblocks=>1, zero_on_error=>true);),
 }
 
 
-# Run all tests that are supported for all io_methods
-sub test_generic
+# Tests for StartReadBuffers()
+sub test_read_buffers
+{
+	my $io_method = shift;
+	my $node = shift;
+	my ($ret, $output);
+	my $table;
+
+	my $psql_a = $node->background_psql('postgres', on_error_stop => 0);
+	my $psql_b = $node->background_psql('postgres', on_error_stop => 0);
+
+	$psql_a->query_safe(
+		qq(
+CREATE TEMPORARY TABLE tmp_ok(data int not null);
+INSERT INTO tmp_ok SELECT generate_series(1, 5000);
+));
+
+	foreach my $persistency (qw(normal temporary))
+	{
+		$table = $persistency eq 'normal' ? 'tbl_ok' : 'tmp_ok';
+
+		# check that consecutive misses are combined into one read
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, combine, block 0-1",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 2)|,
+			qr/^0\|0\|t\|2$/,
+			qr/^$/);
+
+		# but if we do it again, i.e. it's in the buffer pool, there will be
+		# two operations
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, doesn't combine hits, block 0-1",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 2)|,
+			qr/^0\|0\|f\|1\n1\|1\|f\|1$/,
+			qr/^$/);
+
+		# Check that a larger read interrupted by a hit works
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, prep, block 3",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 3, 1)|,
+			qr/^0\|3\|t\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, interrupted by hit on 3, block 2-5",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 2, 4)|,
+			qr/^0\|2\|t\|1\n1\|3\|f\|1\n2\|4\|t\|2$/,
+			qr/^$/);
+
+
+		# Verify that a read with an initial buffer hit works
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, miss, block 0",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 1)|,
+			qr/^0\|0\|t\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, hit, block 0",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 1)|,
+			qr/^0\|0\|f\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, miss, block 1",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 1, 1)|,
+			qr/^0\|1\|t\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, hit, block 1",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 1, 1)|,
+			qr/^0\|1\|f\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, hit, block 0-1",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 2)|,
+			qr/^0\|0\|f\|1\n1\|1\|f\|1$/,
+			qr/^$/);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, hit 0-1, miss 2",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 3)|,
+			qr/^0\|0\|f\|1\n1\|1\|f\|1\n2\|2\|t\|1$/,
+			qr/^$/);
+
+		# Verify that a read with an initial miss and trailing buffer hit(s) works
+		$psql_a->query_safe(qq|SELECT invalidate_rel_block('$table', 0)|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, miss 0, hit 1-2",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 0, 3)|,
+			qr/^0\|0\|t\|1\n1\|1\|f\|1\n2\|2\|f\|1$/,
+			qr/^$/);
+		$psql_a->query_safe(qq|SELECT invalidate_rel_block('$table', 1)|);
+		$psql_a->query_safe(qq|SELECT invalidate_rel_block('$table', 2)|);
+		$psql_a->query_safe(qq|SELECT * FROM read_buffers('$table', 3, 2)|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, miss 1-2, hit 3-4",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 1, 4)|,
+			qr/^0\|1\|t\|2\n2\|3\|f\|1\n3\|4\|f\|1$/,
+			qr/^$/);
+
+		# Verify that we aren't doing reads larger than
+		# io_combine_limit. That's just enforced in read_buffers() function,
+		# but kinda still worth testing.
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		$psql_a->query_safe(qq|SET io_combine_limit=3|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, io_combine_limit has effect",
+			qq|SELECT blockoff, blocknum, io_reqd, nblocks FROM read_buffers('$table', 1, 5)|,
+			qr/^0\|1\|t\|3\n3\|4\|t\|2$/,
+			qr/^$/);
+		$psql_a->query_safe(qq|RESET io_combine_limit|);
+
+
+		# Test encountering buffer IO we started in the first block of the
+		# range.
+		#
+		# Depending on how quick the IO we start completes, the IO might be
+		# completed or we "join" the foreign IO. To hide that variability, the
+		# query below treats a foreign IO as not having needed to do IO.
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		$psql_a->query_safe(
+			qq|SELECT read_rel_block_ll('$table', 1, wait_complete=>false)|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, in-progress 1, read 1-3",
+			qq|SELECT blockoff, blocknum, io_reqd and not foreign_io, nblocks FROM read_buffers('$table', 1, 3)|,
+			qr/^0\|1\|f\|1\n1\|2\|t\|2$/,
+			qr/^$/);
+
+		# Test in-progress IO in the middle block of the range
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		$psql_a->query_safe(
+			qq|SELECT read_rel_block_ll('$table', 2, wait_complete=>false)|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, in-progress 2, read 1-3",
+			qq|SELECT blockoff, blocknum, io_reqd and not foreign_io, nblocks FROM read_buffers('$table', 1, 3)|,
+			qr/^0\|1\|t\|1\n1\|2\|f\|1\n2\|3\|t\|1$/,
+			qr/^$/);
+
+		# Test in-progress IO on the last block of the range
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		$psql_a->query_safe(
+			qq|SELECT read_rel_block_ll('$table', 3, wait_complete=>false)|);
+		psql_like(
+			$io_method,
+			$psql_a,
+			"$persistency: read buffers, in-progress 3, read 1-3",
+			qq|SELECT blockoff, blocknum, io_reqd and not foreign_io, nblocks FROM read_buffers('$table', 1, 3)|,
+			qr/^0\|1\|t\|2\n2\|3\|f\|1$/,
+			qr/^$/);
+	}
+
+	# The remaining tests don't make sense for temp tables, as they are
+	# concerned with multiple sessions interacting with each other.
+	$table = 'tbl_ok';
+	my $persistency = 'normal';
+
+	# Test start buffer IO will split IO if there's IO in progress. We can't
+	# observe this with sync, as that does not start the IO operation in
+	# StartReadBuffers().
+	if ($io_method ne 'sync')
+	{
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+
+		my $buf_id =
+		  $psql_b->query_safe(qq|SELECT buffer_create_toy('$table', 3)|);
+		$psql_b->query_safe(
+			qq|SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true)|
+		);
+
+		query_wait_block(
+			$io_method,
+			$node,
+			$psql_a,
+			"$persistency: read buffers blocks waiting for concurrent IO",
+			qq|SELECT blockoff, blocknum, io_reqd, foreign_io, nblocks FROM read_buffers('$table', 1, 5);\n|,
+			"BufferIo",
+			1);
+		$psql_b->query_safe(
+			qq|SELECT buffer_call_terminate_io($buf_id, for_input=>true, succeed=>false, io_error=>false, release_aio=>false)|
+		);
+		# Because no IO wref was assigned, block 3 should not report foreign IO
+		pump_until($psql_a->{run}, $psql_a->{timeout}, \$psql_a->{stdout},
+			qr/0\|1\|t\|f\|2\n2\|3\|t\|f\|3/);
+		ok(1,
+			"$io_method: $persistency: IO was split due to concurrent failed IO"
+		);
+
+		# Same as before, except the concurrent IO succeeds this time
+		$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+		$buf_id =
+		  $psql_b->query_safe(qq|SELECT buffer_create_toy('$table', 3)|);
+		$psql_b->query_safe(
+			qq|SELECT buffer_call_start_io($buf_id, for_input=>true, wait=>true)|
+		);
+
+		query_wait_block(
+			$io_method,
+			$node,
+			$psql_a,
+			"$persistency: read buffers blocks waiting for concurrent IO",
+			qq|SELECT blockoff, blocknum, io_reqd, foreign_io, nblocks FROM read_buffers('$table', 1, 5);\n|,
+			"BufferIo",
+			1);
+		$psql_b->query_safe(
+			qq|SELECT buffer_call_terminate_io($buf_id, for_input=>true, succeed=>true, io_error=>false, release_aio=>false)|
+		);
+		# Because no IO wref was assigned, block 3 should not report foreign IO
+		pump_until($psql_a->{run}, $psql_a->{timeout}, \$psql_a->{stdout},
+			qr/0\|1\|t\|f\|2\n2\|3\|f\|f\|1\n3\|4\|t\|f\|2/);
+		ok(1,
+			"$io_method: $persistency: IO was split due to concurrent successful IO"
+		);
+	}
+
+	$psql_a->quit();
+	$psql_b->quit();
+}
+
+
+# Tests for StartReadBuffers() that depend on injection point support
+sub test_read_buffers_inject
+{
+	my $io_method = shift;
+	my $node = shift;
+
+	my $psql_a = $node->background_psql('postgres', on_error_stop => 0);
+	my $psql_b = $node->background_psql('postgres', on_error_stop => 0);
+	my $psql_c = $node->background_psql('postgres', on_error_stop => 0);
+
+	my $expected;
+
+	# We can't easily test waiting for foreign IOs on temporary tables, as the
+	# waiting in the completion hook will just stall the backend. For worker
+	# that is because temporary table IO is executed synchronously, for
+	# io_uring the completion will be executed in the same process, but due to
+	# temporary tables not being shared, we can't do the wait in another
+	# backend.
+	my $table = 'tbl_ok';
+	my $persistency = 'normal';
+
+
+	###
+	# Test if a read buffers encounters AIO in progress by another backend, it
+	# recognizes that other IO as a foreign IO.
+	###
+	$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+
+	# B: Trigger wait in the next AIO read for block 1.
+	$psql_b->query_safe(
+		qq/SELECT inj_io_completion_wait(pid=>pg_backend_pid(),
+		   relfilenode=>pg_relation_filenode('$table'),
+		   blockno=>1);/);
+	ok(1,
+		"$io_method: $persistency: configure wait in completion of block 1");
+
+	# B: Read block 1 and wait for the completion hook to be reached (which could
+	# be in B itself or in an IO worker)
+	query_wait_block(
+		$io_method,
+		$node,
+		$psql_b,
+		"$persistency: wait in completion of block 1",
+		qq|SELECT read_rel_block_ll('$table', blockno=>1, nblocks=>1)|,
+		'completion_wait',
+		0);
+
+	# A: Start read, wait until we're waiting for IO completion
+	query_wait_block(
+		$io_method,
+		$node,
+		$psql_a,
+		"$persistency: read 1-4, blocked on in-progress 1",
+		qq|SELECT blockoff, blocknum, io_reqd, foreign_io, nblocks FROM read_buffers('$table', 1, 4)|,
+		"AioIoCompletion",
+		1);
+
+	# C: Release B from completion hook
+	$psql_c->query_safe(qq|SELECT inj_io_completion_continue()|);
+	ok(1, "$io_method: $persistency: continued completion of block 1");
+
+	# A: Check that we recognized the foreign IO wait, if possible
+	#
+	# Due to sync mode not actually issuing IO below StartReadBuffers(), we
+	# can't observe encountering foreign IO. It still seems worth exercising these
+	# paths however.
+	if ($io_method ne 'sync')
+	{
+		# A foreign IO covering block 1, and one IO covering blocks 2-4.
+		$expected = qr/0\|1\|t\|t\|1\n1\|2\|t\|f\|3/;
+	}
+	else
+	{
+		# One IO covering everything, as that's what StartReadBuffers() will
+		# return for something with misses in sync mode.
+		$expected = qr/0\|1\|t\|f\|4/;
+	}
+	pump_until($psql_a->{run}, $psql_a->{timeout}, \$psql_a->{stdout},
+		$expected);
+	ok(1,
+		"$io_method: $persistency: read 1-3, blocked on in-progress 1, see expected result"
+	);
+	$psql_a->{stdout} = '';
+
+
+	###
+	# Test if a read buffers encounters AIO in progress by another backend, it
+	# recognizes that other IO as a foreign IO. This time we encounter the
+	# foreign IO multiple times.
+	###
+	$psql_a->query_safe(qq|SELECT evict_rel('$table')|);
+
+	# B: Trigger wait in the next AIO read for block 3.
+	$psql_b->query_safe(
+		qq/SELECT inj_io_completion_wait(pid=>pg_backend_pid(),
+		   relfilenode=>pg_relation_filenode('$table'),
+		   blockno=>3);/);
+	ok(1,
+		"$io_method: $persistency: configure wait in completion of block 3");
+
+	# B: Read block 2-3 and wait for the completion hook to be reached (which
+	# could be in B itself or in an IO worker)
+	query_wait_block(
+		$io_method,
+		$node,
+		$psql_b,
+		"$persistency: wait in completion of block 2+3",
+		qq|SELECT read_rel_block_ll('$table', blockno=>2, nblocks=>2)|,
+		'completion_wait',
+		0);
+
+	# A: Start read, wait until we're waiting for IO completion
+	#
+	# Note that we need to defer waiting for IO until the end of
+	# read_buffers(), to be able to see that the IO on 3 is still in progress.
+	query_wait_block(
+		$io_method,
+		$node,
+		$psql_a,
+		"$persistency: read 0-3, blocked on in-progress 2+3",
+		qq|SELECT blockoff, blocknum, io_reqd, foreign_io, nblocks FROM
+read_buffers('$table', 0, 4)|,
+		"AioIoCompletion", 1);
+
+	# C: Release B from completion hook
+	$psql_c->query_safe(qq|SELECT inj_io_completion_continue()|);
+	ok(1, "$io_method: $persistency: continued completion of block 2+3");
+
+	# A: Check that we recognized the foreign IO wait, if possible
+	#
+	# See comment further up about sync mode.
+	if ($io_method ne 'sync')
+	{
+		# One IO covering blocks 0-1, A foreign IO covering block 2, and a
+		# foreign IO covering block 3 (same wref as for block 2).
+		$expected = qr/0\|0\|t\|f\|2\n2\|2\|t\|t\|1\n3\|3\|t\|t\|1/;
+	}
+	else
+	{
+		# One IO covering everything, as that's what StartReadBuffers() will
+		# return for something with misses in sync mode.
+		$expected = qr/0\|0\|t\|f\|4/;
+	}
+	pump_until($psql_a->{run}, $psql_a->{timeout}, \$psql_a->{stdout},
+		$expected);
+	ok(1,
+		"$io_method: $persistency: read 0-3, blocked on in-progress 2+3, see expected result"
+	);
+	$psql_a->{stdout} = '';
+
+
+	$psql_a->quit();
+	$psql_b->quit();
+	$psql_c->quit();
+}
+
+# Run all tests that for the specified node / io_method
+sub test_io_method
 {
 	my $io_method = shift;
 	my $node = shift;
@@ -1515,11 +1877,26 @@ CHECKPOINT;
 	test_checksum($io_method, $node);
 	test_ignore_checksum($io_method, $node);
 	test_checksum_createdb($io_method, $node);
+	test_read_buffers($io_method, $node);
 
+	# generic injection tests
   SKIP:
 	{
 		skip 'Injection points not supported by this build', 1
 		  unless $ENV{enable_injection_points} eq 'yes';
 		test_inject($io_method, $node);
+		test_read_buffers_inject($io_method, $node);
+	}
+
+	# worker specific injection tests
+	if ($io_method eq 'worker')
+	{
+	  SKIP:
+		{
+			skip 'Injection points not supported by this build', 1
+			  unless $ENV{enable_injection_points} eq 'yes';
+
+			test_inject_worker($io_method, $node);
+		}
 	}
 }

@@ -3,7 +3,7 @@
  * nodeTableFuncscan.c
  *	  Support routines for scanning RangeTableFunc (XMLTABLE like functions).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -31,6 +31,7 @@
 #include "utils/jsonpath.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/tuplestore.h"
 #include "utils/xml.h"
 
 static TupleTableSlot *TableFuncNext(TableFuncScanState *node);
@@ -148,7 +149,7 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 								 tf->colcollations);
 	/* and the corresponding scan slot */
 	ExecInitScanTupleSlot(estate, &scanstate->ss, tupdesc,
-						  &TTSOpsMinimalTuple);
+						  &TTSOpsMinimalTuple, 0);
 
 	/*
 	 * Initialize result type and projection.
@@ -192,8 +193,8 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 	scanstate->notnulls = tf->notnulls;
 
 	/* these are allocated now and initialized later */
-	scanstate->in_functions = palloc(sizeof(FmgrInfo) * tupdesc->natts);
-	scanstate->typioparams = palloc(sizeof(Oid) * tupdesc->natts);
+	scanstate->in_functions = palloc_array(FmgrInfo, tupdesc->natts);
+	scanstate->typioparams = palloc_array(Oid, tupdesc->natts);
 
 	/*
 	 * Fill in the necessary fmgr infos.
@@ -363,7 +364,7 @@ tfuncInitialize(TableFuncScanState *tstate, ExprContext *econtext, Datum doc)
 		char	   *ns_uri;
 		char	   *ns_name;
 
-		value = ExecEvalExpr((ExprState *) expr, econtext, &isnull);
+		value = ExecEvalExpr(expr, econtext, &isnull);
 		if (isnull)
 			ereport(ERROR,
 					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),

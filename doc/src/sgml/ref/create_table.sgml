@@ -21,8 +21,8 @@ PostgreSQL documentation
 
  <refsynopsisdiv>
 <synopsis>
-CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable> ( [
-  { <replaceable class="parameter">column_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT } ] [ COMPRESSION <replaceable>compression_method</replaceable> ] [ COLLATE <replaceable>collation</replaceable> ] [ <replaceable class="parameter">column_constraint</replaceable> [ ... ] ]
+CREATE [ <replaceable>persistence_mode</replaceable> ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable> ( [
+  { <replaceable class="parameter">column_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ <replaceable>column_storage</replaceable> ] [ <replaceable>column_compression</replaceable> ] [ COLLATE <replaceable class="parameter">collation</replaceable> ] [ <replaceable>column_constraint</replaceable> [ ... ] ]
     | <replaceable>table_constraint</replaceable>
     | LIKE <replaceable>source_table</replaceable> [ <replaceable>like_option</replaceable> ... ] }
     [, ... ]
@@ -34,7 +34,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
 [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
 [ TABLESPACE <replaceable class="parameter">tablespace_name</replaceable> ]
 
-CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable>
+CREATE [ <replaceable>persistence_mode</replaceable> ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable>
     OF <replaceable class="parameter">type_name</replaceable> [ (
   { <replaceable class="parameter">column_name</replaceable> [ WITH OPTIONS ] [ <replaceable class="parameter">column_constraint</replaceable> [ ... ] ]
     | <replaceable>table_constraint</replaceable> }
@@ -46,7 +46,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
 [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
 [ TABLESPACE <replaceable class="parameter">tablespace_name</replaceable> ]
 
-CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable>
+CREATE [ <replaceable>persistence_mode</replaceable> ] TABLE [ IF NOT EXISTS ] <replaceable class="parameter">table_name</replaceable>
     PARTITION OF <replaceable class="parameter">parent_table</replaceable> [ (
   { <replaceable class="parameter">column_name</replaceable> [ WITH OPTIONS ] [ <replaceable class="parameter">column_constraint</replaceable> [ ... ] ]
     | <replaceable>table_constraint</replaceable> }
@@ -58,7 +58,19 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
 [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
 [ TABLESPACE <replaceable class="parameter">tablespace_name</replaceable> ]
 
-<phrase>where <replaceable class="parameter">column_constraint</replaceable> is:</phrase>
+<phrase>where <replaceable>persistence_mode</replaceable> is:</phrase>
+
+{ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } } | UNLOGGED
+
+<phrase>and <replaceable>column_storage</replaceable> is:</phrase>
+
+STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }
+
+<phrase>and <replaceable>column_compression</replaceable> is:</phrase>
+
+COMPRESSION <replaceable>compression_method</replaceable>
+
+<phrase>and <replaceable class="parameter">column_constraint</replaceable> is:</phrase>
 
 [ CONSTRAINT <replaceable class="parameter">constraint_name</replaceable> ]
 { NOT NULL [ NO INHERIT ]  |
@@ -97,17 +109,17 @@ FROM ( { <replaceable class="parameter">partition_bound_expr</replaceable> | MIN
   TO ( { <replaceable class="parameter">partition_bound_expr</replaceable> | MINVALUE | MAXVALUE } [, ...] ) |
 WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REMAINDER <replaceable class="parameter">numeric_literal</replaceable> )
 
-<phrase><replaceable class="parameter">index_parameters</replaceable> in <literal>UNIQUE</literal>, <literal>PRIMARY KEY</literal>, and <literal>EXCLUDE</literal> constraints are:</phrase>
+<phrase>and <replaceable class="parameter">index_parameters</replaceable> in <literal>UNIQUE</literal>, <literal>PRIMARY KEY</literal>, and <literal>EXCLUDE</literal> constraints are:</phrase>
 
 [ INCLUDE ( <replaceable class="parameter">column_name</replaceable> [, ... ] ) ]
 [ WITH ( <replaceable class="parameter">storage_parameter</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] ) ]
 [ USING INDEX TABLESPACE <replaceable class="parameter">tablespace_name</replaceable> ]
 
-<phrase><replaceable class="parameter">exclude_element</replaceable> in an <literal>EXCLUDE</literal> constraint is:</phrase>
+<phrase>and <replaceable class="parameter">exclude_element</replaceable> in an <literal>EXCLUDE</literal> constraint is:</phrase>
 
 { <replaceable class="parameter">column_name</replaceable> | ( <replaceable class="parameter">expression</replaceable> ) } [ COLLATE <replaceable class="parameter">collation</replaceable> ] [ <replaceable class="parameter">opclass</replaceable> [ ( <replaceable class="parameter">opclass_parameter</replaceable> = <replaceable class="parameter">value</replaceable> [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ]
 
-<phrase><replaceable class="parameter">referential_action</replaceable> in a <literal>FOREIGN KEY</literal>/<literal>REFERENCES</literal> constraint is:</phrase>
+<phrase>and <replaceable class="parameter">referential_action</replaceable> in a <literal>FOREIGN KEY</literal>/<literal>REFERENCES</literal> constraint is:</phrase>
 
 { NO ACTION | RESTRICT | CASCADE | SET NULL [ ( <replaceable class="parameter">column_name</replaceable> [, ... ] ) ] | SET DEFAULT [ ( <replaceable class="parameter">column_name</replaceable> [, ... ] ) ] }
 </synopsis>
@@ -121,6 +133,14 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
    <command>CREATE TABLE</command> will create a new, initially empty table
    in the current database. The table will be owned by the user issuing the
    command.
+  </para>
+
+  <para>
+   The durability characteristics of a table are governed by its persistence
+   mode.  By default, the data will be persistent and crash-safe.
+   For less stringent requirements and better performance, a table can be
+   specified as <link linkend="sql-createtable-temporary">temporary</link>
+   or <link linkend="sql-createtable-unlogged">unlogged</link>.
   </para>
 
   <para>
@@ -312,7 +332,7 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
     </term>
     <listitem>
      <para>
-      This form sets the storage mode for the column. This controls whether this
+      This clause sets the storage mode for the column. This controls whether this
       column is held inline or in a secondary <acronym>TOAST</acronym> table,
       and whether the data should be compressed or not. <literal>PLAIN</literal>
       must be used for fixed-length values such as <type>integer</type> and is
@@ -445,11 +465,6 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       table is routed to a partition based on the value of columns or
       expressions in the partition key.  If no existing partition matches
       the values in the new row, an error will be reported.
-     </para>
-
-     <para>
-      Partitioned tables do not support <literal>EXCLUDE</literal> constraints;
-      however, you can define these constraints on individual partitions.
      </para>
 
      <para>
@@ -677,9 +692,10 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
         <term><literal>INCLUDING COMMENTS</literal></term>
         <listitem>
          <para>
-          Comments for the copied columns, constraints, and indexes will be
+          Comments for the copied columns, check constraints,
+          not-null constraints, indexes, and extended statistics will be
           copied.  The default behavior is to exclude comments, resulting in
-          the copied columns and constraints in the new table having no
+          the corresponding objects in the new table having no
           comments.
          </para>
         </listitem>
@@ -867,7 +883,7 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       Currently, <literal>CHECK</literal> expressions cannot contain
       subqueries nor refer to variables other than columns of the
       current row (see <xref linkend="ddl-constraints-check-constraints"/>).
-      The system column <literal>tableoid</literal>
+      The system column <structfield>tableoid</structfield>
       may be referenced, but not any other system column.
      </para>
 
@@ -928,6 +944,15 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       The generation expression can refer to other columns in the table, but
       not other generated columns.  Any functions and operators used must be
       immutable.  References to other tables are not allowed.
+     </para>
+
+     <para>
+      A virtual generated column cannot have a user-defined type, and the
+      generation expression of a virtual generated column must not reference
+      user-defined functions or types, that is, it can only use built-in
+      functions or types.  This applies also indirectly, such as for functions
+      or types that underlie operators or casts.  (This restriction does not
+      exist for stored generated columns.)
      </para>
     </listitem>
    </varlistentry>
@@ -1162,6 +1187,18 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       exclusion constraint on a subset of the table; internally this creates a
       partial index. Note that parentheses are required around the predicate.
      </para>
+
+     <para>
+      When establishing an exclusion constraint for a multi-level partition
+      hierarchy, all the columns in the partition key of the target
+      partitioned table, as well as those of all its descendant partitioned
+      tables, must be included in the constraint definition.  Additionally,
+      those columns must be compared using the equality operator.  These
+      restrictions ensure that potentially-conflicting rows will exist in the
+      same partition.  The constraint may also refer to other columns which
+      are not a part of any partition key, which can be compared using any
+      appropriate operator.
+     </para>
     </listitem>
    </varlistentry>
 
@@ -1363,8 +1400,8 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       <literal>REFERENCES</literal> (foreign key) constraints accept this
       clause.  <literal>NOT NULL</literal> and <literal>CHECK</literal> constraints are not
       deferrable.  Note that deferrable constraints cannot be used as
-      conflict arbitrators in an <command>INSERT</command> statement that
-      includes an <literal>ON CONFLICT DO UPDATE</literal> clause.
+      conflict arbiters in an <command>INSERT</command> statement that
+      includes an <literal>ON CONFLICT</literal> clause.
      </para>
     </listitem>
    </varlistentry>
@@ -1687,7 +1724,8 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
    <varlistentry id="reloption-vacuum-truncate" xreflabel="vacuum_truncate">
     <term><literal>vacuum_truncate</literal>, <literal>toast.vacuum_truncate</literal> (<type>boolean</type>)
     <indexterm>
-     <primary><varname>vacuum_truncate</varname> storage parameter</primary>
+     <primary><varname>vacuum_truncate</varname></primary>
+     <secondary>storage parameter</secondary>
     </indexterm>
     </term>
     <listitem>
@@ -1696,6 +1734,22 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       <literal>TRUNCATE</literal> parameter of
       <link linkend="sql-vacuum"><command>VACUUM</command></link>, if
       specified, overrides the value of this option.
+     </para>
+    </listitem>
+   </varlistentry>
+
+  <varlistentry id="reloption-autovacuum-parallel-workers" xreflabel="autovacuum_parallel_workers">
+    <term><literal>autovacuum_parallel_workers</literal> (<type>integer</type>)
+    <indexterm>
+     <primary><varname>autovacuum_parallel_workers</varname> storage parameter</primary>
+    </indexterm>
+    </term>
+    <listitem>
+      <para>
+       Per-table value for <xref linkend="guc-autovacuum-max-parallel-workers"/>
+       parameter. If -1 is specified, <varname>autovacuum_max_parallel_workers</varname>
+       value will be used. If set to 0, parallel vacuum is disabled for
+       this table. The default value is -1.
      </para>
     </listitem>
    </varlistentry>
@@ -1944,6 +1998,21 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
     <listitem>
      <para>
       Per-table value for <xref linkend="guc-log-autovacuum-min-duration"/>
+      parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="reloption-log-autoanalyze-min-duration" xreflabel="log_autoanalyze_min_duration">
+    <term><literal>log_autoanalyze_min_duration</literal> (<type>integer</type>)
+    <indexterm>
+     <primary><varname>log_autoanalyze_min_duration</varname></primary>
+     <secondary>storage parameter</secondary>
+    </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Per-table value for <xref linkend="guc-log-autoanalyze-min-duration"/>
       parameter.
      </para>
     </listitem>
@@ -2225,7 +2294,7 @@ CREATE TABLE employees OF employee_type (
    Create a range partitioned table:
 <programlisting>
 CREATE TABLE measurement (
-    logdate         date not null,
+    logdate         date NOT NULL,
     peaktemp        int,
     unitsales       int
 ) PARTITION BY RANGE (logdate);
@@ -2235,7 +2304,7 @@ CREATE TABLE measurement (
    Create a range partitioned table with multiple columns in the partition key:
 <programlisting>
 CREATE TABLE measurement_year_month (
-    logdate         date not null,
+    logdate         date NOT NULL,
     peaktemp        int,
     unitsales       int
 ) PARTITION BY RANGE (EXTRACT(YEAR FROM logdate), EXTRACT(MONTH FROM logdate));
@@ -2245,8 +2314,8 @@ CREATE TABLE measurement_year_month (
    Create a list partitioned table:
 <programlisting>
 CREATE TABLE cities (
-    city_id      bigserial not null,
-    name         text not null,
+    city_id      bigserial NOT NULL,
+    name         text NOT NULL,
     population   bigint
 ) PARTITION BY LIST (left(lower(name), 1));
 </programlisting></para>
@@ -2255,8 +2324,8 @@ CREATE TABLE cities (
    Create a hash partitioned table:
 <programlisting>
 CREATE TABLE orders (
-    order_id     bigint not null,
-    cust_id      bigint not null,
+    order_id     bigint NOT NULL,
+    cust_id      bigint NOT NULL,
     status       text
 ) PARTITION BY HASH (order_id);
 </programlisting></para>

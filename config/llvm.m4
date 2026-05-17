@@ -4,7 +4,7 @@
 # -----------------
 #
 # Look for the LLVM installation, check that it's new enough, set the
-# corresponding LLVM_{CFLAGS,CXXFLAGS,BINPATH} and LDFLAGS
+# corresponding LLVM_{CFLAGS,CXXFLAGS,BINPATH,LIBS}
 # variables. Also verify that CLANG is available, to transform C
 # into bitcode.
 #
@@ -55,7 +55,7 @@ AC_DEFUN([PGAC_LLVM_SUPPORT],
 
   for pgac_option in `$LLVM_CONFIG --ldflags`; do
     case $pgac_option in
-      -L*) LDFLAGS="$LDFLAGS $pgac_option";;
+      -L*) LLVM_LIBS="$LLVM_LIBS $pgac_option";;
     esac
   done
 
@@ -101,20 +101,3 @@ dnl LLVM_CONFIG, CLANG are already output via AC_ARG_VAR
   AC_SUBST(LLVM_BINPATH)
 
 ])# PGAC_LLVM_SUPPORT
-
-
-# PGAC_CHECK_LLVM_FUNCTIONS
-# -------------------------
-#
-# Check presence of some optional LLVM functions.
-# (This shouldn't happen until we're ready to run AC_CHECK_DECLS tests;
-# because PGAC_LLVM_SUPPORT runs very early, it's not an appropriate place.)
-#
-AC_DEFUN([PGAC_CHECK_LLVM_FUNCTIONS],
-[
-  # Check which functionality is present
-  SAVE_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $LLVM_CPPFLAGS"
-  AC_CHECK_DECLS([LLVMCreateGDBRegistrationListener, LLVMCreatePerfJITEventListener], [], [], [[#include <llvm-c/ExecutionEngine.h>]])
-  CPPFLAGS="$SAVE_CPPFLAGS"
-])# PGAC_CHECK_LLVM_FUNCTIONS

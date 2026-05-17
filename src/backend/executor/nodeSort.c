@@ -3,7 +3,7 @@
  * nodeSort.c
  *	  Routines to handle sorting of relations.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -175,7 +175,7 @@ ExecSort(PlanState *pstate)
 			TuplesortInstrumentation *si;
 
 			Assert(IsParallelWorker());
-			Assert(ParallelWorkerNumber <= node->shared_info->num_workers);
+			Assert(ParallelWorkerNumber < node->shared_info->num_workers);
 			si = &node->shared_info->sinstrument[ParallelWorkerNumber];
 			tuplesort_get_stats(tuplesortstate, si);
 		}

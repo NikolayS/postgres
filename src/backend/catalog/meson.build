@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'aclchk.c',
@@ -31,6 +31,7 @@ backend_sources += files(
   'pg_range.c',
   'pg_shdepend.c',
   'pg_subscription.c',
+  'pg_tablespace.c',
   'pg_type.c',
   'storage.c',
   'toasting.c',

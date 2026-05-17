@@ -7,7 +7,7 @@
  *	  stuff - checking the qualification and projecting the tuple
  *	  appropriately.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -134,7 +134,7 @@ ExecScanReScan(ScanState *node)
 
 			/*
 			 * If an FDW or custom scan provider has replaced the join with a
-			 * scan, there are multiple RTIs; reset the epqScanDone flag for
+			 * scan, there are multiple RTIs; reset the relsubs_done flag for
 			 * all of them.
 			 */
 			if (IsA(node->ps.plan, ForeignScan))

@@ -3,7 +3,7 @@
  * Assorted utility functions to work on files.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/common/file_utils.h
@@ -55,9 +55,9 @@ extern int	compute_remaining_iovec(struct iovec *destination,
 extern ssize_t pg_pwritev_with_retry(int fd,
 									 const struct iovec *iov,
 									 int iovcnt,
-									 off_t offset);
+									 pgoff_t offset);
 
-extern ssize_t pg_pwrite_zeros(int fd, size_t size, off_t offset);
+extern ssize_t pg_pwrite_zeros(int fd, size_t size, pgoff_t offset);
 
 /* Filename components */
 #define PG_TEMP_FILES_DIR "pgsql_tmp"

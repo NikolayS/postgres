@@ -5,7 +5,7 @@
  *	cumulative statistics system.  Can be included in backend or
  *	frontend code.
  *
- *	Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  *	src/include/utils/pgstat_kind.h
  * ----------
@@ -18,7 +18,7 @@
 
 /* Range of IDs allowed, for built-in and custom kinds */
 #define PGSTAT_KIND_MIN	1		/* Minimum ID allowed */
-#define PGSTAT_KIND_MAX	256		/* Maximum ID allowed */
+#define PGSTAT_KIND_MAX	32		/* Maximum ID allowed */
 
 /* use 0 for INVALID, to catch zero-initialized data */
 #define PGSTAT_KIND_INVALID 0
@@ -36,8 +36,9 @@
 #define PGSTAT_KIND_BGWRITER	8
 #define PGSTAT_KIND_CHECKPOINTER	9
 #define PGSTAT_KIND_IO	10
-#define PGSTAT_KIND_SLRU	11
-#define PGSTAT_KIND_WAL	12
+#define PGSTAT_KIND_LOCK	11
+#define PGSTAT_KIND_SLRU	12
+#define PGSTAT_KIND_WAL	13
 
 #define PGSTAT_KIND_BUILTIN_MIN PGSTAT_KIND_DATABASE
 #define PGSTAT_KIND_BUILTIN_MAX PGSTAT_KIND_WAL
@@ -46,7 +47,7 @@
 /* Custom stats kinds */
 
 /* Range of IDs allowed for custom stats kinds */
-#define PGSTAT_KIND_CUSTOM_MIN	128
+#define PGSTAT_KIND_CUSTOM_MIN	24
 #define PGSTAT_KIND_CUSTOM_MAX	PGSTAT_KIND_MAX
 #define PGSTAT_KIND_CUSTOM_SIZE	(PGSTAT_KIND_CUSTOM_MAX - PGSTAT_KIND_CUSTOM_MIN + 1)
 
@@ -55,7 +56,7 @@
  * development and have not reserved their own unique kind ID yet. See:
  * https://wiki.postgresql.org/wiki/CustomCumulativeStats
  */
-#define PGSTAT_KIND_EXPERIMENTAL	128
+#define PGSTAT_KIND_EXPERIMENTAL	24
 
 static inline bool
 pgstat_is_kind_builtin(PgStat_Kind kind)

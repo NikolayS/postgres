@@ -23,7 +23,7 @@
  * EQ_CRC32C(c1, c2)
  *		Check for equality of two CRCs.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/port/pg_crc32c.h
@@ -72,7 +72,7 @@ pg_comp_crc32c_dispatch(pg_crc32c crc, const void *data, size_t len)
 {
 	if (__builtin_constant_p(len) && len < 32)
 	{
-		const unsigned char *p = data;
+		const unsigned char *p = (const unsigned char *) data;
 
 		/*
 		 * For small constant inputs, inline the computation to avoid a
@@ -104,20 +104,37 @@ pg_comp_crc32c_dispatch(pg_crc32c crc, const void *data, size_t len)
 #define FIN_CRC32C(crc) ((crc) ^= 0xFFFFFFFF)
 
 extern pg_crc32c pg_comp_crc32c_sb8(pg_crc32c crc, const void *data, size_t len);
-extern PGDLLIMPORT pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
+extern pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
 extern pg_crc32c pg_comp_crc32c_sse42(pg_crc32c crc, const void *data, size_t len);
 #ifdef USE_AVX512_CRC32C_WITH_RUNTIME_CHECK
 extern pg_crc32c pg_comp_crc32c_avx512(pg_crc32c crc, const void *data, size_t len);
 #endif
 
 #elif defined(USE_ARMV8_CRC32C)
-/* Use ARMv8 CRC Extension instructions. */
-
+/*
+ * Use either ARMv8 CRC Extension or CRYPTO Extension (PMULL) instructions.
+ */
+#ifdef HAVE_PG_INTEGER_CONSTANT_P
+/*
+ * We don't need a runtime check for CRC, so for constant inputs, where
+ * we assume the input is small, we can avoid an indirect function call.
+ */
 #define COMP_CRC32C(crc, data, len)							\
-	((crc) = pg_comp_crc32c_armv8((crc), (data), (len)))
+	((crc) = pg_integer_constant_p(len) ? 					\
+		pg_comp_crc32c_armv8((crc), (data), (len)) : 		\
+		pg_comp_crc32c((crc), (data), (len)))
+#else
+#define COMP_CRC32C(crc, data, len)							\
+		((crc) = pg_comp_crc32c((crc), (data), (len)))
+#endif							/* HAVE_PG_INTEGER_CONSTANT_P */
+
 #define FIN_CRC32C(crc) ((crc) ^= 0xFFFFFFFF)
 
+extern pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
 extern pg_crc32c pg_comp_crc32c_armv8(pg_crc32c crc, const void *data, size_t len);
+#ifdef USE_PMULL_CRC32C_WITH_RUNTIME_CHECK
+extern pg_crc32c pg_comp_crc32c_pmull(pg_crc32c crc, const void *data, size_t len);
+#endif
 
 #elif defined(USE_LOONGARCH_CRC32C)
 /* Use LoongArch CRCC instructions. */
@@ -131,8 +148,8 @@ extern pg_crc32c pg_comp_crc32c_loongarch(pg_crc32c crc, const void *data, size_
 #elif defined(USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK)
 
 /*
- * Use ARMv8 instructions, but perform a runtime check first
- * to check that they are available.
+ * Use either ARMv8 CRC Extension or CRYPTO Extension (PMULL) instructions,
+ * but perform a runtime check first to check that they are available.
  */
 #define COMP_CRC32C(crc, data, len) \
 	((crc) = pg_comp_crc32c((crc), (data), (len)))
@@ -141,6 +158,9 @@ extern pg_crc32c pg_comp_crc32c_loongarch(pg_crc32c crc, const void *data, size_
 extern pg_crc32c pg_comp_crc32c_sb8(pg_crc32c crc, const void *data, size_t len);
 extern pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
 extern pg_crc32c pg_comp_crc32c_armv8(pg_crc32c crc, const void *data, size_t len);
+#ifdef USE_PMULL_CRC32C_WITH_RUNTIME_CHECK
+extern pg_crc32c pg_comp_crc32c_pmull(pg_crc32c crc, const void *data, size_t len);
+#endif
 
 #else
 /*

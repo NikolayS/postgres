@@ -3,7 +3,7 @@
  * jsonapi.h
  *	  Declarations for JSON API support.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/common/jsonapi.h
@@ -108,7 +108,7 @@ typedef struct JsonLexContext
 	bool		incremental;
 	JsonTokenType token_type;
 	int			lex_level;
-	bits32		flags;
+	uint32		flags;
 	int			line_number;	/* line number, starting from 1 */
 	const char *line_start;		/* where that line starts within input */
 	JsonParserStack *pstack;

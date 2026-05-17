@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025, PostgreSQL Global Development Group
+# Copyright (c) 2023-2026, PostgreSQL Global Development Group
 #
 # Test XID wraparound limits.
 #
@@ -90,7 +90,7 @@ for my $i (1 .. 15)
 		last;
 	}
 }
-ok($warn_limit == 1, "warn-limit reached");
+is($warn_limit, 1, "warn-limit reached");
 
 # We can still INSERT, despite the warnings.
 $node->safe_psql('postgres',

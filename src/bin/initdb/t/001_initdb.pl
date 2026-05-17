@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # To test successful data directory creation with an additional feature, first
 # try to elaborate the "successful creation" test instead of adding a test.
@@ -76,7 +76,8 @@ command_like(
 	'checksums are enabled in control file');
 
 command_ok([ 'initdb', '--sync-only', $datadir ], 'sync only');
-command_ok([ 'initdb', '--sync-only', '--no-sync-data-files', $datadir ], '--no-sync-data-files');
+command_ok([ 'initdb', '--sync-only', '--no-sync-data-files', $datadir ],
+	'--no-sync-data-files');
 command_fails([ 'initdb', $datadir ], 'existing data directory');
 
 if ($supports_syncfs)
@@ -307,9 +308,9 @@ command_ok(
 	'multiple --set options with different case');
 
 my $conf = slurp_file("$tempdir/dataY/postgresql.conf");
-ok($conf !~ qr/^WORK_MEM = /m, "WORK_MEM should not be configured");
-ok($conf !~ qr/^Work_Mem = /m, "Work_Mem should not be configured");
-ok($conf =~ qr/^work_mem = 512/m, "work_mem should be in config");
+unlike($conf, qr/^WORK_MEM = /m, "WORK_MEM should not be configured");
+unlike($conf, qr/^Work_Mem = /m, "Work_Mem should not be configured");
+like($conf, qr/^work_mem = 512/m, "work_mem should be in config");
 
 # Test the no-data-checksums flag
 my $datadir_nochecksums = "$tempdir/data_no_checksums";

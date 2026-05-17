@@ -3,7 +3,7 @@
  * reconstruct.c
  *		Reconstruct full file from incremental file and backup chain.
  *
- * Copyright (c) 2017-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2017-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/bin/pg_combinebackup/reconstruct.c
@@ -120,7 +120,7 @@ reconstruct_from_incremental_file(char *input_filename,
 	 * Every block must come either from the latest version of the file or
 	 * from one of the prior backups.
 	 */
-	source = pg_malloc0(sizeof(rfile *) * (1 + n_prior_backups));
+	source = pg_malloc0_array(rfile *, 1 + n_prior_backups);
 
 	/*
 	 * Use the information from the latest incremental file to figure out how
@@ -135,8 +135,8 @@ reconstruct_from_incremental_file(char *input_filename,
 	 * need to obtain it and at what offset in that file it's stored.
 	 * sourcemap gives us the first of these things, and offsetmap the latter.
 	 */
-	sourcemap = pg_malloc0(sizeof(rfile *) * block_length);
-	offsetmap = pg_malloc0(sizeof(off_t) * block_length);
+	sourcemap = pg_malloc0_array(rfile *, block_length);
+	offsetmap = pg_malloc0_array(off_t, block_length);
 
 	/*
 	 * Every block that is present in the newest incremental file should be
@@ -370,6 +370,7 @@ reconstruct_from_incremental_file(char *input_filename,
 		if (s->relative_block_numbers != NULL)
 			pfree(s->relative_block_numbers);
 		pg_free(s->filename);
+		pg_free(s);
 	}
 	pfree(sourcemap);
 	pfree(offsetmap);
@@ -482,7 +483,7 @@ make_incremental_rfile(char *filename)
 	if (rf->num_blocks > 0)
 	{
 		rf->relative_block_numbers =
-			pg_malloc0(sizeof(BlockNumber) * rf->num_blocks);
+			pg_malloc0_array(BlockNumber, rf->num_blocks);
 		read_bytes(rf, rf->relative_block_numbers,
 				   sizeof(BlockNumber) * rf->num_blocks);
 	}
@@ -511,12 +512,13 @@ make_rfile(char *filename, bool missing_ok)
 {
 	rfile	   *rf;
 
-	rf = pg_malloc0(sizeof(rfile));
+	rf = pg_malloc0_object(rfile);
 	rf->filename = pstrdup(filename);
 	if ((rf->fd = open(filename, O_RDONLY | PG_BINARY, 0)) < 0)
 	{
 		if (missing_ok && errno == ENOENT)
 		{
+			pg_free(rf->filename);
 			pg_free(rf);
 			return NULL;
 		}

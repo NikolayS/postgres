@@ -9,7 +9,7 @@
  *	  more likely to break across PostgreSQL releases than code that uses
  *	  only the official API.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/interfaces/libpq/libpq-int.h
@@ -357,7 +357,8 @@ typedef struct pg_conn_host
 	pg_conn_host_type type;		/* type of host address */
 	char	   *host;			/* host name or socket path */
 	char	   *hostaddr;		/* host numeric IP address */
-	char	   *port;			/* port number (always provided) */
+	char	   *port;			/* port number (if NULL or empty, use
+								 * DEF_PGPORT[_STR]) */
 	char	   *password;		/* password for this host, read from the
 								 * password file; NULL if not sought or not
 								 * found in password file. */
@@ -389,6 +390,8 @@ struct pg_conn
 	char	   *dbName;			/* database name */
 	char	   *replication;	/* connect as the replication standby? */
 	char	   *pgservice;		/* Postgres service, if any */
+	char	   *pgservicefile;	/* path to a service file containing
+								 * service(s) */
 	char	   *pguser;			/* Postgres username and password, if any */
 	char	   *pgpass;
 	char	   *pgpassfile;		/* path to a file containing password(s) */
@@ -441,6 +444,7 @@ struct pg_conn
 	char	   *oauth_client_secret;	/* client secret */
 	char	   *oauth_scope;	/* access token scope */
 	char	   *oauth_token;	/* access token */
+	char	   *oauth_ca_file;	/* CA file path */
 	bool		oauth_want_retry;	/* should we retry on failure? */
 
 	/* Optional file to write trace info to */
@@ -560,7 +564,16 @@ struct pg_conn
 	pg_prng_state prng_state;	/* prng state for load balancing connections */
 
 
-	/* Buffer for data received from backend and not yet processed */
+	/*
+	 * Buffer for data received from backend and not yet processed.
+	 *
+	 * NB: We rely on a maximum inBufSize/outBufSize of INT_MAX (and therefore
+	 * an INT_MAX upper bound on the size of any and all packet contents) to
+	 * avoid overflow; for example in reportErrorPosition(). Changing the type
+	 * would require not only an adjustment to the overflow protection in
+	 * pqCheck{In,Out}BufferSpace(), but also a careful audit of all libpq
+	 * code that uses ints during size calculations.
+	 */
 	char	   *inBuffer;		/* currently allocated buffer */
 	int			inBufSize;		/* allocated size of buffer */
 	int			inStart;		/* offset to first unconsumed data in buffer */
@@ -743,7 +756,7 @@ extern PGresult *pqPrepareAsyncResult(PGconn *conn);
 extern void pqInternalNotice(const PGNoticeHooks *hooks, const char *fmt,...) pg_attribute_printf(2, 3);
 extern void pqSaveMessageField(PGresult *res, char code,
 							   const char *value);
-extern void pqSaveParameterStatus(PGconn *conn, const char *name,
+extern int	pqSaveParameterStatus(PGconn *conn, const char *name,
 								  const char *value);
 extern int	pqRowProcessor(PGconn *conn, const char **errmsgp);
 extern void pqCommandQueueAdvance(PGconn *conn, bool isReadyForQuery,
@@ -946,6 +959,7 @@ extern char *libpq_ngettext(const char *msgid, const char *msgid_plural, unsigne
 
 extern void libpq_append_error(PQExpBuffer errorMessage, const char *fmt,...) pg_attribute_printf(2, 3);
 extern void libpq_append_conn_error(PGconn *conn, const char *fmt,...) pg_attribute_printf(2, 3);
+extern void libpq_append_grease_info(PGconn *conn);
 
 /*
  * These macros are needed to let error-handling code be portable between

@@ -5,6 +5,7 @@
 #include "btree_gist.h"
 #include "btree_utils_num.h"
 #include "common/int.h"
+#include "utils/rel.h"
 #include "utils/sortsupport.h"
 
 typedef struct int32key
@@ -136,8 +137,9 @@ gbt_int4_consistent(PG_FUNCTION_ARGS)
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	int32		query = PG_GETARG_INT32(1);
 	StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	bool	   *recheck = (bool *) PG_GETARG_POINTER(4);
 	int32KEY   *kkk = (int32KEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;
@@ -157,8 +159,9 @@ gbt_int4_distance(PG_FUNCTION_ARGS)
 {
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
 	int32		query = PG_GETARG_INT32(1);
-
-	/* Oid		subtype = PG_GETARG_OID(3); */
+#ifdef NOT_USED
+	Oid			subtype = PG_GETARG_OID(3);
+#endif
 	int32KEY   *kkk = (int32KEY *) DatumGetPointer(entry->key);
 	GBT_NUMKEY_R key;
 

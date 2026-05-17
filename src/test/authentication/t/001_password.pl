@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Set of tests for authentication and pg_hba.conf. The following password
 # methods are checked through this test:
@@ -68,7 +68,23 @@ $node->init;
 $node->append_conf('postgresql.conf', "log_connections = on\n");
 # Needed to allow connect_fails to inspect postmaster log:
 $node->append_conf('postgresql.conf', "log_min_messages = debug2");
+$node->append_conf('postgresql.conf', "password_expiration_warning_threshold = '1100d'");
 $node->start;
+
+# Set up roles for password_expiration_warning_threshold test
+my $current_year = 1900 + ${ [ localtime(time) ] }[5];
+my $expire_year = $current_year - 1;
+$node->safe_psql(
+	'postgres',
+	"CREATE ROLE expired LOGIN VALID UNTIL '$expire_year-01-01' PASSWORD 'pass'");
+$expire_year = $current_year + 2;
+$node->safe_psql(
+	'postgres',
+	"CREATE ROLE expiration_warnings LOGIN VALID UNTIL '$expire_year-01-01' PASSWORD 'pass'");
+$expire_year = $current_year + 5;
+$node->safe_psql(
+	'postgres',
+	"CREATE ROLE no_warnings LOGIN VALID UNTIL '$expire_year-01-01' PASSWORD 'pass'");
 
 # Test behavior of log_connections GUC
 #
@@ -79,39 +95,40 @@ $node->start;
 # other tests are added to this file in the future
 $node->safe_psql('postgres', "CREATE DATABASE test_log_connections");
 
-my $log_connections = $node->safe_psql('test_log_connections', q(SHOW log_connections;));
+my $log_connections =
+  $node->safe_psql('test_log_connections', q(SHOW log_connections;));
 is($log_connections, 'on', qq(check log connections has expected value 'on'));
 
-$node->connect_ok('test_log_connections',
+$node->connect_ok(
+	'test_log_connections',
 	qq(log_connections 'on' works as expected for backwards compatibility),
 	log_like => [
 		qr/connection received/,
 		qr/connection authenticated/,
 		qr/connection authorized: user=\S+ database=test_log_connections/,
 	],
-	log_unlike => [
-		qr/connection ready/,
-	],);
+	log_unlike => [ qr/connection ready/, ],);
 
-$node->safe_psql('test_log_connections',
+$node->safe_psql(
+	'test_log_connections',
 	q[ALTER SYSTEM SET log_connections = receipt,authorization,setup_durations;
 				   SELECT pg_reload_conf();]);
 
-$node->connect_ok('test_log_connections',
+$node->connect_ok(
+	'test_log_connections',
 	q(log_connections with subset of specified options logs only those aspects),
 	log_like => [
 		qr/connection received/,
 		qr/connection authorized: user=\S+ database=test_log_connections/,
 		qr/connection ready/,
 	],
-	log_unlike => [
-		qr/connection authenticated/,
-	],);
+	log_unlike => [ qr/connection authenticated/, ],);
 
 $node->safe_psql('test_log_connections',
 	qq(ALTER SYSTEM SET log_connections = 'all'; SELECT pg_reload_conf();));
 
-$node->connect_ok('test_log_connections',
+$node->connect_ok(
+	'test_log_connections',
 	qq(log_connections 'all' logs all available connection aspects),
 	log_like => [
 		qr/connection received/,
@@ -482,6 +499,8 @@ SKIP:
 {
 	skip "MD5 not supported" unless $md5_works;
 	test_conn($node, 'user=md5_role', 'md5', 0,
+		expected_stderr =>
+		  qr/authenticated with an MD5-encrypted password/,
 		log_like =>
 		  [qr/connection authenticated: identity="md5_role" method=md5/]);
 }
@@ -528,6 +547,24 @@ $node->connect_fails(
 	"multiple authentication types forbidden, fails with SCRAM auth",
 	expected_stderr =>
 	  qr/authentication method requirement "!password,!md5,!scram-sha-256" failed: server requested SCRAM-SHA-256 authentication/
+);
+
+# Test password_expiration_warning_threshold
+$node->connect_fails(
+	"user=expired dbname=postgres",
+	"connection fails due to expired password",
+	expected_stderr =>
+	  qr/password authentication failed for user "expired"/
+);
+$node->connect_ok(
+	"user=expiration_warnings dbname=postgres",
+	"connection succeeds with password expiration warning",
+	expected_stderr =>
+	  qr/role password will expire soon/
+);
+$node->connect_ok(
+	"user=no_warnings dbname=postgres",
+	"connection succeeds with no password expiration warning"
 );
 
 # Test SYSTEM_USER <> NULL with parallel workers.

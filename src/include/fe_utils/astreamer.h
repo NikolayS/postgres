@@ -21,7 +21,7 @@
  * make further decisions about how to process the data; for example,
  * it might choose to modify the archive contents.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/include/fe_utils/astreamer.h
@@ -83,8 +83,10 @@ typedef struct
 	mode_t		mode;
 	uid_t		uid;
 	gid_t		gid;
+	/* note: special filetypes will set none of these flags */
+	bool		is_regular;
 	bool		is_directory;
-	bool		is_link;
+	bool		is_symlink;
 	char		linktarget[MAXPGPATH];
 } astreamer_member;
 

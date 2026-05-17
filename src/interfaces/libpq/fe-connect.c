@@ -3,7 +3,7 @@
  * fe-connect.c
  *	  functions related to setting up a connection to the backend
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <limits.h>
 #include <netdb.h>
 #include <time.h>
 #include <unistd.h>
@@ -90,8 +91,9 @@ static int	ldapServiceLookup(const char *purl, PQconninfoOption *options,
 
 /* This is part of the protocol so just define it */
 #define ERRCODE_INVALID_PASSWORD "28P01"
-/* This too */
+/* These too */
 #define ERRCODE_CANNOT_CONNECT_NOW "57P03"
+#define ERRCODE_PROTOCOL_VIOLATION "08P01"
 
 /*
  * Cope with the various platform-specific ways to spell TCP keepalive socket
@@ -200,6 +202,10 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
 	{"service", "PGSERVICE", NULL, NULL,
 		"Database-Service", "", 20,
 	offsetof(struct pg_conn, pgservice)},
+
+	{"servicefile", "PGSERVICEFILE", NULL, NULL,
+		"Database-Service-File", "", 64,
+	offsetof(struct pg_conn, pgservicefile)},
 
 	{"user", "PGUSER", NULL, NULL,
 		"Database-User", "", 20,
@@ -407,6 +413,10 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
 		"OAuth-Scope", "", 15,
 	offsetof(struct pg_conn, oauth_scope)},
 
+	{"oauth_ca_file", "PGOAUTHCAFILE", NULL, NULL,
+		"OAuth-CA-File", "", 64,
+	offsetof(struct pg_conn, oauth_ca_file)},
+
 	{"sslkeylogfile", NULL, NULL, NULL,
 		"SSL-Key-Log-File", "D", 64,
 	offsetof(struct pg_conn, sslkeylogfile)},
@@ -497,8 +507,9 @@ static int	parseServiceFile(const char *serviceFile,
 							 PQExpBuffer errorMessage,
 							 bool *group_found);
 static char *pwdfMatchesString(char *buf, const char *token);
-static char *passwordFromFile(const char *hostname, const char *port, const char *dbname,
-							  const char *username, const char *pgpassfile);
+static char *passwordFromFile(const char *hostname, const char *port,
+							  const char *dbname, const char *username,
+							  const char *pgpassfile, const char **errmsg);
 static void pgpassfileWarning(PGconn *conn);
 static void default_threadlock(int acquire);
 static bool sslVerifyProtocolVersion(const char *version);
@@ -1135,7 +1146,7 @@ parse_comma_separated_list(char **startptr, bool *more)
 	char	   *p;
 	char	   *s = *startptr;
 	char	   *e;
-	int			len;
+	size_t		len;
 
 	/*
 	 * Search for the end of the current element; a comma or end-of-string
@@ -1450,6 +1461,7 @@ pqConnectOptions2(PGconn *conn)
 				 * least one of them is guaranteed nonempty by now).
 				 */
 				const char *pwhost = conn->connhost[i].host;
+				const char *password_errmsg = NULL;
 
 				if (pwhost == NULL || pwhost[0] == '\0')
 					pwhost = conn->connhost[i].hostaddr;
@@ -1459,7 +1471,15 @@ pqConnectOptions2(PGconn *conn)
 									 conn->connhost[i].port,
 									 conn->dbName,
 									 conn->pguser,
-									 conn->pgpassfile);
+									 conn->pgpassfile,
+									 &password_errmsg);
+
+				if (password_errmsg != NULL)
+				{
+					conn->status = CONNECTION_BAD;
+					libpq_append_conn_error(conn, "%s", password_errmsg);
+					return false;
+				}
 			}
 		}
 	}
@@ -2127,21 +2147,19 @@ pqConnectOptions2(PGconn *conn)
 	else
 	{
 		/*
-		 * To not break connecting to older servers/poolers that do not yet
-		 * support NegotiateProtocolVersion, default to the 3.0 protocol at
-		 * least for a while longer. Except when min_protocol_version is set
-		 * to something larger, then we might as well default to the latest.
+		 * Default to PG_PROTOCOL_GREASE, which is larger than all real
+		 * versions, to test negotiation. The server should automatically
+		 * downgrade to a supported version.
+		 *
+		 * This behavior is for 19beta only. It will be reverted before RC1.
 		 */
-		if (conn->min_pversion > PG_PROTOCOL(3, 0))
-			conn->max_pversion = PG_PROTOCOL_LATEST;
-		else
-			conn->max_pversion = PG_PROTOCOL(3, 0);
+		conn->max_pversion = PG_PROTOCOL_GREASE;
 	}
 
 	if (conn->min_pversion > conn->max_pversion)
 	{
 		conn->status = CONNECTION_BAD;
-		libpq_append_conn_error(conn, "min_protocol_version is greater than max_protocol_version");
+		libpq_append_conn_error(conn, "\"%s\" is greater than \"%s\"", "min_protocol_version", "max_protocol_version");
 		return false;
 	}
 
@@ -3079,9 +3097,9 @@ keep_going:						/* We will come back to here until there is
 				UNIXSOCK_PATH(portstr, thisport, ch->host);
 				if (strlen(portstr) >= UNIXSOCK_PATH_BUFLEN)
 				{
-					libpq_append_conn_error(conn, "Unix-domain socket path \"%s\" is too long (maximum %d bytes)",
+					libpq_append_conn_error(conn, "Unix-domain socket path \"%s\" is too long (maximum %zu bytes)",
 											portstr,
-											(int) (UNIXSOCK_PATH_BUFLEN - 1));
+											(UNIXSOCK_PATH_BUFLEN - 1));
 					goto keep_going;
 				}
 
@@ -4141,6 +4159,32 @@ keep_going:						/* We will come back to here until there is
 					/* Check to see if we should mention pgpassfile */
 					pgpassfileWarning(conn);
 
+					/*
+					 * ...and whether we should mention grease. If the error
+					 * message contains the PG_PROTOCOL_GREASE number (in
+					 * major.minor, decimal, or hex format) or a complaint
+					 * about a protocol violation before we've even started an
+					 * authentication exchange, it's probably caused by a
+					 * grease interaction.
+					 */
+					if (conn->max_pversion == PG_PROTOCOL_GREASE &&
+						!conn->auth_req_received)
+					{
+						const char *sqlstate = PQresultErrorField(conn->result,
+																  PG_DIAG_SQLSTATE);
+
+						if ((sqlstate &&
+							 strcmp(sqlstate, ERRCODE_PROTOCOL_VIOLATION) == 0) ||
+							(conn->errorMessage.len > 0 &&
+							 (strstr(conn->errorMessage.data, "3.9999") ||
+							  strstr(conn->errorMessage.data, "206607") ||
+							  strstr(conn->errorMessage.data, "3270F") ||
+							  strstr(conn->errorMessage.data, "3270f"))))
+						{
+							libpq_append_grease_info(conn);
+						}
+					}
+
 					CONNECTION_FAILED();
 				}
 				/* Handle NegotiateProtocolVersion */
@@ -4368,6 +4412,14 @@ keep_going:						/* We will come back to here until there is
 						conn->errorMessage.data[conn->errorMessage.len - 1] != '\n')
 						appendPQExpBufferChar(&conn->errorMessage, '\n');
 					PQclear(res);
+					goto error_return;
+				}
+
+				if (conn->max_pversion == PG_PROTOCOL_GREASE &&
+					conn->pversion == PG_PROTOCOL_GREASE)
+				{
+					libpq_append_conn_error(conn, "server incorrectly accepted \"grease\" protocol version 3.9999 without negotiation");
+					libpq_append_grease_info(conn);
 					goto error_return;
 				}
 
@@ -5062,6 +5114,7 @@ freePGconn(PGconn *conn)
 	free(conn->dbName);
 	free(conn->replication);
 	free(conn->pgservice);
+	free(conn->pgservicefile);
 	free(conn->pguser);
 	if (conn->pgpass)
 	{
@@ -5109,6 +5162,7 @@ freePGconn(PGconn *conn)
 	free(conn->oauth_discovery_uri);
 	free(conn->oauth_client_id);
 	free(conn->oauth_client_secret);
+	free(conn->oauth_ca_file);
 	free(conn->oauth_scope);
 	/* Note that conn->Pfdebug is not ours to close or free */
 	free(conn->events);
@@ -5489,6 +5543,7 @@ ldapServiceLookup(const char *purl, PQconninfoOption *options,
 			   *entry;
 	struct berval **values;
 	LDAP_TIMEVAL time = {PGLDAP_TIMEOUT, 0};
+	int			ldapversion = LDAP_VERSION3;
 
 	if ((url = strdup(purl)) == NULL)
 	{
@@ -5620,6 +5675,15 @@ ldapServiceLookup(const char *purl, PQconninfoOption *options,
 		return 3;
 	}
 
+	if ((rc = ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &ldapversion)) != LDAP_SUCCESS)
+	{
+		libpq_append_error(errorMessage, "could not set LDAP protocol version: %s",
+						   ldap_err2string(rc));
+		free(url);
+		ldap_unbind(ld);
+		return 3;
+	}
+
 	/*
 	 * Perform an explicit anonymous bind.
 	 *
@@ -5744,7 +5808,21 @@ ldapServiceLookup(const char *purl, PQconninfoOption *options,
 	/* concatenate values into a single string with newline terminators */
 	size = 1;					/* for the trailing null */
 	for (i = 0; values[i] != NULL; i++)
+	{
+		if (values[i]->bv_len >= INT_MAX ||
+			size > (INT_MAX - (values[i]->bv_len + 1)))
+		{
+			libpq_append_error(errorMessage,
+							   "connection info string size exceeds the maximum allowed (%d)",
+							   INT_MAX);
+			ldap_value_free_len(values);
+			ldap_unbind(ld);
+			return 3;
+		}
+
 		size += values[i]->bv_len + 1;
+	}
+
 	if ((result = malloc(size)) == NULL)
 	{
 		libpq_append_error(errorMessage, "out of memory");
@@ -5914,6 +5992,7 @@ static int
 parseServiceInfo(PQconninfoOption *options, PQExpBuffer errorMessage)
 {
 	const char *service = conninfo_getval(options, "service");
+	const char *service_fname = conninfo_getval(options, "servicefile");
 	char		serviceFile[MAXPGPATH];
 	char	   *env;
 	bool		group_found = false;
@@ -5933,10 +6012,13 @@ parseServiceInfo(PQconninfoOption *options, PQExpBuffer errorMessage)
 		return 0;
 
 	/*
-	 * Try PGSERVICEFILE if specified, else try ~/.pg_service.conf (if that
-	 * exists).
+	 * First, try the "servicefile" option in connection string.  Then, try
+	 * the PGSERVICEFILE environment variable.  Finally, check
+	 * ~/.pg_service.conf (if that exists).
 	 */
-	if ((env = getenv("PGSERVICEFILE")) != NULL)
+	if (service_fname != NULL)
+		strlcpy(serviceFile, service_fname, sizeof(serviceFile));
+	else if ((env = getenv("PGSERVICEFILE")) != NULL)
 		strlcpy(serviceFile, env, sizeof(serviceFile));
 	else
 	{
@@ -6092,7 +6174,17 @@ parseServiceFile(const char *serviceFile,
 				if (strcmp(key, "service") == 0)
 				{
 					libpq_append_error(errorMessage,
-									   "nested service specifications not supported in service file \"%s\", line %d",
+									   "nested \"service\" specifications not supported in service file \"%s\", line %d",
+									   serviceFile,
+									   linenr);
+					result = 3;
+					goto exit;
+				}
+
+				if (strcmp(key, "servicefile") == 0)
+				{
+					libpq_append_error(errorMessage,
+									   "nested \"servicefile\" specifications not supported in service file \"%s\", line %d",
 									   serviceFile,
 									   linenr);
 					result = 3;
@@ -6135,6 +6227,33 @@ parseServiceFile(const char *serviceFile,
 	}
 
 exit:
+
+	/*
+	 * If a service has been successfully found, set the "servicefile" option
+	 * if not already set.  This matters when we use a default service file or
+	 * PGSERVICEFILE, where we want to be able track the value.
+	 */
+	if (*group_found && result == 0)
+	{
+		for (i = 0; options[i].keyword; i++)
+		{
+			if (strcmp(options[i].keyword, "servicefile") != 0)
+				continue;
+
+			/* If value is already set, nothing to do */
+			if (options[i].val != NULL)
+				break;
+
+			options[i].val = strdup(serviceFile);
+			if (options[i].val == NULL)
+			{
+				libpq_append_error(errorMessage, "out of memory");
+				result = 3;
+			}
+			break;
+		}
+	}
+
 	fclose(f);
 
 	return result;
@@ -7462,14 +7581,6 @@ PQdb(const PGconn *conn)
 }
 
 char *
-PQservice(const PGconn *conn)
-{
-	if (!conn)
-		return NULL;
-	return conn->pgservice;
-}
-
-char *
 PQuser(const PGconn *conn)
 {
 	if (!conn)
@@ -7536,10 +7647,12 @@ PQport(const PGconn *conn)
 	if (!conn)
 		return NULL;
 
-	if (conn->connhost != NULL)
+	if (conn->connhost != NULL &&
+		conn->connhost[conn->whichhost].port != NULL &&
+		conn->connhost[conn->whichhost].port[0] != '\0')
 		return conn->connhost[conn->whichhost].port;
 
-	return "";
+	return DEF_PGPORT_STR;
 }
 
 /*
@@ -7892,16 +8005,24 @@ pwdfMatchesString(char *buf, const char *token)
 	return NULL;
 }
 
-/* Get a password from the password file. Return value is malloc'd. */
+/*
+ * Get a password from the password file. Return value is malloc'd.
+ *
+ * On failure, *errmsg is set to an error to be returned.  It is
+ * left NULL on success, or if no password could be found.
+ */
 static char *
-passwordFromFile(const char *hostname, const char *port, const char *dbname,
-				 const char *username, const char *pgpassfile)
+passwordFromFile(const char *hostname, const char *port,
+				 const char *dbname, const char *username,
+				 const char *pgpassfile, const char **errmsg)
 {
 	FILE	   *fp;
 #ifndef WIN32
 	struct stat stat_buf;
 #endif
 	PQExpBufferData buf;
+
+	*errmsg = NULL;
 
 	if (dbname == NULL || dbname[0] == '\0')
 		return NULL;
@@ -7969,7 +8090,10 @@ passwordFromFile(const char *hostname, const char *port, const char *dbname,
 	{
 		/* Make sure there's a reasonable amount of room in the buffer */
 		if (!enlargePQExpBuffer(&buf, 128))
+		{
+			*errmsg = libpq_gettext("out of memory");
 			break;
+		}
 
 		/* Read some data, appending it to what we already have */
 		if (fgets(buf.data + buf.len, buf.maxlen - buf.len, fp) == NULL)
@@ -8008,7 +8132,7 @@ passwordFromFile(const char *hostname, const char *port, const char *dbname,
 
 				if (!ret)
 				{
-					/* Out of memory. XXX: an error message would be nice. */
+					*errmsg = libpq_gettext("out of memory");
 					return NULL;
 				}
 
@@ -8294,4 +8418,11 @@ PQregisterThreadLock(pgthreadlock_t newhandler)
 		pg_g_threadlock = default_threadlock;
 
 	return prev;
+}
+
+pgthreadlock_t
+PQgetThreadLock(void)
+{
+	Assert(pg_g_threadlock);
+	return pg_g_threadlock;
 }

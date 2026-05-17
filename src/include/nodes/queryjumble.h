@@ -3,7 +3,7 @@
  * queryjumble.h
  *	  Query normalization and fingerprinting.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -24,11 +24,11 @@ typedef struct LocationLen
 	int			location;		/* start offset in query text */
 	int			length;			/* length in bytes, or -1 to ignore */
 
-	/*
-	 * Indicates that this location represents the beginning or end of a run
-	 * of squashed constants.
-	 */
+	/* Does this location represent a squashed list? */
 	bool		squashed;
+
+	/* Is this location a PARAM_EXTERN parameter? */
+	bool		extern_param;
 } LocationLen;
 
 /*
@@ -52,8 +52,17 @@ typedef struct JumbleState
 	/* Current number of valid entries in clocations array */
 	int			clocations_count;
 
-	/* highest Param id we've seen, in order to start normalization correctly */
+	/*
+	 * ID of the highest PARAM_EXTERN parameter we've seen in the query; used
+	 * to start normalization correctly.  However, if there are any squashed
+	 * lists in the query, we disregard query-supplied parameter numbers and
+	 * renumber everything.  This is to avoid possible gaps caused by
+	 * squashing in case any params are in squashed lists.
+	 */
 	int			highest_extern_param_id;
+
+	/* Whether squashable lists are present */
+	bool		has_squashed_lists;
 
 	/*
 	 * Count of the number of NULL nodes seen since last appending a value.
@@ -82,6 +91,9 @@ extern PGDLLIMPORT int compute_query_id;
 
 
 extern const char *CleanQuerytext(const char *query, int *location, int *len);
+extern LocationLen *ComputeConstantLengths(const JumbleState *jstate,
+										   const char *query,
+										   int query_loc);
 extern JumbleState *JumbleQuery(Query *query);
 extern void EnableQueryId(void);
 
