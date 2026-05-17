@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 pg_config_os = configure_file(
   output: 'pg_config_os.h',
@@ -36,9 +36,15 @@ config_paths_data.set_quoted('MANDIR', dir_prefix / dir_man)
 var_cc = ' '.join(cc.cmd_array())
 var_cpp = ' '.join(cc.cmd_array() + ['-E'])
 var_cflags = ' '.join(cflags + cflags_builtin + cflags_warn + get_option('c_args'))
-if llvm.found()
+if have_cxx
+  var_cxx = ' '.join(cxx.cmd_array())
   var_cxxflags = ' '.join(cxxflags + cxxflags_builtin + cxxflags_warn + get_option('cpp_args'))
 else
+  # Default to 'g++' so that PGXS users get a clear "g++ not found"
+  # error when building C++ extensions.  Otherwise, they'd get a
+  # confusing error because no binary is specified in the build
+  # commands and the first flag would be interpreted as the program.
+  var_cxx = 'g++'
   var_cxxflags = ''
 endif
 var_cppflags = ' '.join(cppflags)
@@ -167,6 +173,7 @@ install_subdir('catalog',
   exclude_files: [
     '.gitignore',
     'Makefile',
+    'README',
     'duplicate_oids',
     'meson.build',
     'reformat_dat_file.pl',
@@ -177,3 +184,24 @@ install_subdir('catalog',
 
 # autoconf generates the file there, ensure we get a conflict
 generated_sources_ac += {'src/include': ['stamp-h']}
+
+
+# Instead of having targets depending directly on a list of all generated
+# headers, have them depend on a stamp files for all of them. Dependencies on
+# headers are implemented as order-only dependencies in meson (and then using
+# compiler generated dependencies during incremental rebuilds ). The benefit
+# of using a stamp file is that it makes ninja.build considerably smaller and
+# meson setup faster, as otherwise the list of headers is repeated for every C
+# file, bloating build.ninja by ~2x.
+generated_headers_stamp = custom_target('generated-headers-stamp.h',
+  output: 'generated-headers-stamp.h',
+  input: generated_headers,
+  command: stamp_cmd,
+)
+
+generated_backend_headers_stamp = custom_target('generated-backend-headers-stamp.h',
+  output: 'generated-backend-headers-stamp.h',
+  input: generated_backend_headers,
+  depends: generated_headers_stamp,
+  command: stamp_cmd,
+)

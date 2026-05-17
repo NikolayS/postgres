@@ -7,7 +7,7 @@
  * --- ie, rule names are only unique among the rules of a given table.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_rewrite.h
@@ -29,6 +29,8 @@
  *		typedef struct FormData_pg_rewrite
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_rewrite,2618,RewriteRelationId)
 {
 	Oid			oid;			/* oid */
@@ -43,6 +45,8 @@ CATALOG(pg_rewrite,2618,RewriteRelationId)
 	pg_node_tree ev_action BKI_FORCE_NOT_NULL;
 #endif
 } FormData_pg_rewrite;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_rewrite corresponds to a pointer to a tuple with

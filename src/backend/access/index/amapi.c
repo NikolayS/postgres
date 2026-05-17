@@ -3,7 +3,7 @@
  * amapi.c
  *	  Support routines for API for Postgres index access methods.
  *
- * Copyright (c) 2015-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2015-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -23,24 +23,37 @@
 
 /*
  * GetIndexAmRoutine - call the specified access method handler routine to get
- * its IndexAmRoutine struct, which will be palloc'd in the caller's context.
+ * its IndexAmRoutine struct, which we expect to be statically allocated.
  *
  * Note that if the amhandler function is built-in, this will not involve
  * any catalog access.  It's therefore safe to use this while bootstrapping
  * indexes for the system catalogs.  relcache.c relies on that.
  */
-IndexAmRoutine *
+const IndexAmRoutine *
 GetIndexAmRoutine(Oid amhandler)
 {
 	Datum		datum;
-	IndexAmRoutine *routine;
+	const IndexAmRoutine *routine;
 
 	datum = OidFunctionCall0(amhandler);
-	routine = (IndexAmRoutine *) DatumGetPointer(datum);
+	routine = (const IndexAmRoutine *) DatumGetPointer(datum);
 
 	if (routine == NULL || !IsA(routine, IndexAmRoutine))
 		elog(ERROR, "index access method handler function %u did not return an IndexAmRoutine struct",
 			 amhandler);
+
+	/* Assert that all required callbacks are present. */
+	Assert(routine->ambuild != NULL);
+	Assert(routine->ambuildempty != NULL);
+	Assert(routine->aminsert != NULL);
+	Assert(routine->ambulkdelete != NULL);
+	Assert(routine->amvacuumcleanup != NULL);
+	Assert(routine->amcostestimate != NULL);
+	Assert(routine->amoptions != NULL);
+	Assert(routine->amvalidate != NULL);
+	Assert(routine->ambeginscan != NULL);
+	Assert(routine->amrescan != NULL);
+	Assert(routine->amendscan != NULL);
 
 	return routine;
 }
@@ -52,7 +65,7 @@ GetIndexAmRoutine(Oid amhandler)
  * If the given OID isn't a valid index access method, returns NULL if
  * noerror is true, else throws error.
  */
-IndexAmRoutine *
+const IndexAmRoutine *
 GetIndexAmRoutineByAmId(Oid amoid, bool noerror)
 {
 	HeapTuple	tuple;
@@ -118,7 +131,7 @@ CompareType
 IndexAmTranslateStrategy(StrategyNumber strategy, Oid amoid, Oid opfamily, bool missing_ok)
 {
 	CompareType result;
-	IndexAmRoutine *amroutine;
+	const IndexAmRoutine *amroutine;
 
 	/* shortcut for common case */
 	if (amoid == BTREE_AM_OID &&
@@ -148,7 +161,7 @@ StrategyNumber
 IndexAmTranslateCompareType(CompareType cmptype, Oid amoid, Oid opfamily, bool missing_ok)
 {
 	StrategyNumber result;
-	IndexAmRoutine *amroutine;
+	const IndexAmRoutine *amroutine;
 
 	/* shortcut for common case */
 	if (amoid == BTREE_AM_OID &&
@@ -178,7 +191,7 @@ amvalidate(PG_FUNCTION_ARGS)
 	HeapTuple	classtup;
 	Form_pg_opclass classform;
 	Oid			amoid;
-	IndexAmRoutine *amroutine;
+	const IndexAmRoutine *amroutine;
 
 	classtup = SearchSysCache1(CLAOID, ObjectIdGetDatum(opclassoid));
 	if (!HeapTupleIsValid(classtup))
@@ -196,8 +209,6 @@ amvalidate(PG_FUNCTION_ARGS)
 			 amoid);
 
 	result = amroutine->amvalidate(opclassoid);
-
-	pfree(amroutine);
 
 	PG_RETURN_BOOL(result);
 }

@@ -91,7 +91,7 @@
  * WaitLatchOrSocket.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/latch.h
@@ -104,6 +104,8 @@
 #include <signal.h>
 
 #include "storage/waiteventset.h"	/* for WL_* arguments to WaitLatch */
+#include "utils/wait_classes.h"  /* for backward compatibility */	/* IWYU pragma: keep */
+
 
 /*
  * Latch structure should be treated as opaque and only accessed through

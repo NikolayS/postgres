@@ -3,7 +3,7 @@
  * nodeIndexonlyscan.c
  *	  Routines to support index-only scans
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -37,9 +37,11 @@
 #include "access/visibilitymap.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
+#include "executor/instrument.h"
 #include "executor/nodeIndexonlyscan.h"
 #include "executor/nodeIndexscan.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
 #include "utils/builtins.h"
@@ -92,9 +94,11 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		scandesc = index_beginscan(node->ss.ss_currentRelation,
 								   node->ioss_RelationDesc,
 								   estate->es_snapshot,
-								   &node->ioss_Instrument,
+								   node->ioss_Instrument,
 								   node->ioss_NumScanKeys,
-								   node->ioss_NumOrderByKeys);
+								   node->ioss_NumOrderByKeys,
+								   ScanRelIsReadOnly(&node->ss) ?
+								   SO_HINT_REL_READ_ONLY : SO_NONE);
 
 		node->ioss_ScanDesc = scandesc;
 
@@ -121,6 +125,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	while ((tid = index_getnext_tid(scandesc, direction)) != NULL)
 	{
 		bool		tuple_from_heap = false;
+
+		pgstat_count_index_only_tuples(scandesc->indexRelation, 1);
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -165,6 +171,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 			/*
 			 * Rats, we have to visit the heap to check visibility.
 			 */
+			pgstat_count_index_only_heap_fetch(scandesc->indexRelation);
 			InstrCountTuples2(node, 1);
 			if (!index_fetch_heap(scandesc, node->ioss_TableSlot))
 				continue;		/* no visible tuple, try next index entry */
@@ -419,11 +426,15 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 	 * worker back into shared memory so that it can be picked up by the main
 	 * process to report in EXPLAIN ANALYZE
 	 */
+	if (node->ioss_Instrument != NULL && node->ioss_Instrument->nsearches > 0)
+		pgstat_count_index_only_scan(indexRelationDesc,
+									 node->ioss_Instrument->nsearches);
+
 	if (node->ioss_SharedInfo != NULL && IsParallelWorker())
 	{
 		IndexScanInstrumentation *winstrument;
 
-		Assert(ParallelWorkerNumber <= node->ioss_SharedInfo->num_workers);
+		Assert(ParallelWorkerNumber < node->ioss_SharedInfo->num_workers);
 		winstrument = &node->ioss_SharedInfo->winstrument[ParallelWorkerNumber];
 
 		/*
@@ -432,7 +443,7 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 		 * shutdown on the workers.  On rescan it will spin up new workers
 		 * which will have a new IndexOnlyScanState and zeroed stats.
 		 */
-		winstrument->nsearches += node->ioss_Instrument.nsearches;
+		winstrument->nsearches += node->ioss_Instrument->nsearches;
 	}
 
 	/*
@@ -567,7 +578,8 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	 */
 	tupDesc = ExecTypeFromTL(node->indextlist);
 	ExecInitScanTupleSlot(estate, &indexstate->ss, tupDesc,
-						  &TTSOpsVirtual);
+						  &TTSOpsVirtual,
+						  0);
 
 	/*
 	 * We need another slot, in a format that's suitable for the table AM, for
@@ -576,7 +588,7 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	indexstate->ioss_TableSlot =
 		ExecAllocTableSlot(&estate->es_tupleTable,
 						   RelationGetDescr(currentRelation),
-						   table_slot_callbacks(currentRelation));
+						   table_slot_callbacks(currentRelation), 0);
 
 	/*
 	 * Initialize result type and projection info.  The node's targetlist will
@@ -603,6 +615,12 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	 */
 	if (eflags & EXEC_FLAG_EXPLAIN_ONLY)
 		return indexstate;
+
+	/*
+	 * Set up instrumentation of index-only scans.  Besides EXPLAIN ANALYZE,
+	 * this is used to count index-only searches for cumulative statistics.
+	 */
+	indexstate->ioss_Instrument = palloc0_object(IndexScanInstrumentation);
 
 	/* Open the index relation. */
 	lockmode = exec_rt_fetch(node->scan.scanrelid, estate)->rellockmode;
@@ -693,8 +711,7 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 		 * Now create an array to mark the attribute numbers of the keys that
 		 * need to be converted from cstring to name.
 		 */
-		indexstate->ioss_NameCStringAttNums = (AttrNumber *)
-			palloc(sizeof(AttrNumber) * namecount);
+		indexstate->ioss_NameCStringAttNums = palloc_array(AttrNumber, namecount);
 
 		for (int attnum = 0; attnum < indnkeyatts; attnum++)
 		{
@@ -729,21 +746,11 @@ ExecIndexOnlyScanEstimate(IndexOnlyScanState *node,
 						  ParallelContext *pcxt)
 {
 	EState	   *estate = node->ss.ps.state;
-	bool		instrument = (node->ss.ps.instrument != NULL);
-	bool		parallel_aware = node->ss.ps.plan->parallel_aware;
-
-	if (!instrument && !parallel_aware)
-	{
-		/* No DSM required by the scan */
-		return;
-	}
 
 	node->ioss_PscanLen = index_parallelscan_estimate(node->ioss_RelationDesc,
 													  node->ioss_NumScanKeys,
 													  node->ioss_NumOrderByKeys,
-													  estate->es_snapshot,
-													  instrument, parallel_aware,
-													  pcxt->nworkers);
+													  estate->es_snapshot);
 	shm_toc_estimate_chunk(&pcxt->estimator, node->ioss_PscanLen);
 	shm_toc_estimate_keys(&pcxt->estimator, 1);
 }
@@ -760,36 +767,23 @@ ExecIndexOnlyScanInitializeDSM(IndexOnlyScanState *node,
 {
 	EState	   *estate = node->ss.ps.state;
 	ParallelIndexScanDesc piscan;
-	bool		instrument = node->ss.ps.instrument != NULL;
-	bool		parallel_aware = node->ss.ps.plan->parallel_aware;
-
-	if (!instrument && !parallel_aware)
-	{
-		/* No DSM required by the scan */
-		return;
-	}
 
 	piscan = shm_toc_allocate(pcxt->toc, node->ioss_PscanLen);
 	index_parallelscan_initialize(node->ss.ss_currentRelation,
 								  node->ioss_RelationDesc,
 								  estate->es_snapshot,
-								  instrument, parallel_aware, pcxt->nworkers,
-								  &node->ioss_SharedInfo, piscan);
+								  piscan);
 	shm_toc_insert(pcxt->toc, node->ss.ps.plan->plan_node_id, piscan);
-
-	if (!parallel_aware)
-	{
-		/* Only here to initialize SharedInfo in DSM */
-		return;
-	}
 
 	node->ioss_ScanDesc =
 		index_beginscan_parallel(node->ss.ss_currentRelation,
 								 node->ioss_RelationDesc,
-								 &node->ioss_Instrument,
+								 node->ioss_Instrument,
 								 node->ioss_NumScanKeys,
 								 node->ioss_NumOrderByKeys,
-								 piscan);
+								 piscan,
+								 ScanRelIsReadOnly(&node->ss) ?
+								 SO_HINT_REL_READ_ONLY : SO_NONE);
 	node->ioss_ScanDesc->xs_want_itup = true;
 	node->ioss_VMBuffer = InvalidBuffer;
 
@@ -828,34 +822,18 @@ ExecIndexOnlyScanInitializeWorker(IndexOnlyScanState *node,
 								  ParallelWorkerContext *pwcxt)
 {
 	ParallelIndexScanDesc piscan;
-	bool		instrument = node->ss.ps.instrument != NULL;
-	bool		parallel_aware = node->ss.ps.plan->parallel_aware;
-
-	if (!instrument && !parallel_aware)
-	{
-		/* No DSM required by the scan */
-		return;
-	}
 
 	piscan = shm_toc_lookup(pwcxt->toc, node->ss.ps.plan->plan_node_id, false);
-
-	if (instrument)
-		node->ioss_SharedInfo = (SharedIndexScanInstrumentation *)
-			OffsetToPointer(piscan, piscan->ps_offset_ins);
-
-	if (!parallel_aware)
-	{
-		/* Only here to set up worker node's SharedInfo */
-		return;
-	}
 
 	node->ioss_ScanDesc =
 		index_beginscan_parallel(node->ss.ss_currentRelation,
 								 node->ioss_RelationDesc,
-								 &node->ioss_Instrument,
+								 node->ioss_Instrument,
 								 node->ioss_NumScanKeys,
 								 node->ioss_NumOrderByKeys,
-								 piscan);
+								 piscan,
+								 ScanRelIsReadOnly(&node->ss) ?
+								 SO_HINT_REL_READ_ONLY : SO_NONE);
 	node->ioss_ScanDesc->xs_want_itup = true;
 
 	/*
@@ -866,6 +844,73 @@ ExecIndexOnlyScanInitializeWorker(IndexOnlyScanState *node,
 		index_rescan(node->ioss_ScanDesc,
 					 node->ioss_ScanKeys, node->ioss_NumScanKeys,
 					 node->ioss_OrderByKeys, node->ioss_NumOrderByKeys);
+}
+
+/*
+ * Compute the amount of space we'll need for the shared instrumentation and
+ * inform pcxt->estimator.
+ */
+void
+ExecIndexOnlyScanInstrumentEstimate(IndexOnlyScanState *node,
+									ParallelContext *pcxt)
+{
+	Size		size;
+
+	if (!node->ss.ps.instrument || pcxt->nworkers == 0)
+		return;
+
+	/*
+	 * This size calculation is trivial enough that we don't bother saving it
+	 * in the IndexOnlyScanState. We'll recalculate the needed size in
+	 * ExecIndexOnlyScanInstrumentInitDSM().
+	 */
+	size = add_size(offsetof(SharedIndexScanInstrumentation, winstrument),
+					mul_size(pcxt->nworkers, sizeof(IndexScanInstrumentation)));
+	shm_toc_estimate_chunk(&pcxt->estimator, size);
+	shm_toc_estimate_keys(&pcxt->estimator, 1);
+}
+
+/*
+ * Set up parallel index-only scan instrumentation.
+ */
+void
+ExecIndexOnlyScanInstrumentInitDSM(IndexOnlyScanState *node,
+								   ParallelContext *pcxt)
+{
+	Size		size;
+
+	if (!node->ss.ps.instrument || pcxt->nworkers == 0)
+		return;
+
+	size = add_size(offsetof(SharedIndexScanInstrumentation, winstrument),
+					mul_size(pcxt->nworkers, sizeof(IndexScanInstrumentation)));
+	node->ioss_SharedInfo =
+		(SharedIndexScanInstrumentation *) shm_toc_allocate(pcxt->toc, size);
+
+	/* Each per-worker area must start out as zeroes */
+	memset(node->ioss_SharedInfo, 0, size);
+	node->ioss_SharedInfo->num_workers = pcxt->nworkers;
+	shm_toc_insert(pcxt->toc,
+				   node->ss.ps.plan->plan_node_id +
+				   PARALLEL_KEY_SCAN_INSTRUMENT_OFFSET,
+				   node->ioss_SharedInfo);
+}
+
+/*
+ * Look up and save the location of the shared instrumentation.
+ */
+void
+ExecIndexOnlyScanInstrumentInitWorker(IndexOnlyScanState *node,
+									  ParallelWorkerContext *pwcxt)
+{
+	if (!node->ss.ps.instrument)
+		return;
+
+	node->ioss_SharedInfo = (SharedIndexScanInstrumentation *)
+		shm_toc_lookup(pwcxt->toc,
+					   node->ss.ps.plan->plan_node_id +
+					   PARALLEL_KEY_SCAN_INSTRUMENT_OFFSET,
+					   false);
 }
 
 /* ----------------------------------------------------------------

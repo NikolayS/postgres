@@ -13,7 +13,7 @@
  *
  * Author: Andreas Pflug <pgadmin@pse-consulting.de>
  *
- * Copyright (c) 2004-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2004-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -51,6 +51,7 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
+#include "utils/wait_event.h"
 
 /*
  * We read() into a temp buffer twice as big as a chunk, so that any fragment
@@ -206,7 +207,6 @@ SysLoggerMain(const void *startup_data, size_t startup_data_len)
 
 	now = MyStartTime;
 
-	MyBackendType = B_LOGGER;
 	init_ps_display(NULL);
 
 	/*
@@ -276,18 +276,18 @@ SysLoggerMain(const void *startup_data, size_t startup_data_len)
 
 	pqsignal(SIGHUP, SignalHandlerForConfigReload); /* set flag to read config
 													 * file */
-	pqsignal(SIGINT, SIG_IGN);
-	pqsignal(SIGTERM, SIG_IGN);
-	pqsignal(SIGQUIT, SIG_IGN);
-	pqsignal(SIGALRM, SIG_IGN);
-	pqsignal(SIGPIPE, SIG_IGN);
+	pqsignal(SIGINT, PG_SIG_IGN);
+	pqsignal(SIGTERM, PG_SIG_IGN);
+	pqsignal(SIGQUIT, PG_SIG_IGN);
+	pqsignal(SIGALRM, PG_SIG_IGN);
+	pqsignal(SIGPIPE, PG_SIG_IGN);
 	pqsignal(SIGUSR1, sigUsr1Handler);	/* request log rotation */
-	pqsignal(SIGUSR2, SIG_IGN);
+	pqsignal(SIGUSR2, PG_SIG_IGN);
 
 	/*
 	 * Reset some signals that are accepted by postmaster but not here
 	 */
-	pqsignal(SIGCHLD, SIG_DFL);
+	pqsignal(SIGCHLD, PG_SIG_DFL);
 
 	sigprocmask(SIG_SETMASK, &UnBlockSig, NULL);
 
@@ -887,7 +887,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 	{
 		PipeProtoHeader p;
 		int			chunklen;
-		bits8		dest_flags;
+		uint8		dest_flags;
 
 		/* Do we have a valid header? */
 		memcpy(&p, cursor, offsetof(PipeProtoHeader, data));
@@ -960,7 +960,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 						 * Need a free slot, but there isn't one in the list,
 						 * so create a new one and extend the list with it.
 						 */
-						free_slot = palloc(sizeof(save_buffer));
+						free_slot = palloc_object(save_buffer);
 						buffer_list = lappend(buffer_list, free_slot);
 						buffer_lists[p.pid % NBUFFER_LISTS] = buffer_list;
 					}

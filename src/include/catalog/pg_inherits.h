@@ -4,7 +4,7 @@
  *	  definition of the "inherits" system catalog (pg_inherits)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_inherits.h
@@ -22,13 +22,15 @@
 #include "catalog/pg_inherits_d.h"	/* IWYU pragma: export */
 
 #include "nodes/pg_list.h"
-#include "storage/lock.h"
+#include "storage/lockdefs.h"
 
 /* ----------------
  *		pg_inherits definition.  cpp turns this into
  *		typedef struct FormData_pg_inherits
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_inherits,2611,InheritsRelationId)
 {
 	Oid			inhrelid BKI_LOOKUP(pg_class);
@@ -36,6 +38,8 @@ CATALOG(pg_inherits,2611,InheritsRelationId)
 	int32		inhseqno;
 	bool		inhdetachpending;
 } FormData_pg_inherits;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_inherits corresponds to a pointer to a tuple with

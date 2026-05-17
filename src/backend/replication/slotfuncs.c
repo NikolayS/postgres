@@ -3,7 +3,7 @@
  * slotfuncs.c
  *	   Support functions for replication slots
  *
- * Copyright (c) 2012-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/replication/slotfuncs.c
@@ -20,9 +20,21 @@
 #include "replication/logical.h"
 #include "replication/slot.h"
 #include "replication/slotsync.h"
+#include "storage/proc.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/pg_lsn.h"
+
+/*
+ * Map SlotSyncSkipReason enum values to human-readable names.
+ */
+static const char *SlotSyncSkipReasonNames[] = {
+	[SS_SKIP_NONE] = "none",
+	[SS_SKIP_WAL_NOT_FLUSHED] = "wal_not_flushed",
+	[SS_SKIP_WAL_OR_ROWS_REMOVED] = "wal_or_rows_removed",
+	[SS_SKIP_NO_CONSISTENT_SNAPSHOT] = "no_consistent_snapshot",
+	[SS_SKIP_INVALID] = "slot_invalidated"
+};
 
 /*
  * Helper function for creating a new physical replication slot with
@@ -41,12 +53,12 @@ create_physical_replication_slot(char *name, bool immediately_reserve,
 	/* acquire replication slot, this will check for conflicting names */
 	ReplicationSlotCreate(name, false,
 						  temporary ? RS_TEMPORARY : RS_PERSISTENT, false,
-						  false, false);
+						  false, false, false);
 
 	if (immediately_reserve)
 	{
 		/* Reserve WAL as the user asked for it */
-		if (XLogRecPtrIsInvalid(restart_lsn))
+		if (!XLogRecPtrIsValid(restart_lsn))
 			ReplicationSlotReserveWal();
 		else
 			MyReplicationSlot->data.restart_lsn = restart_lsn;
@@ -78,7 +90,7 @@ pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 
 	CheckSlotPermissions();
 
-	CheckSlotRequirements();
+	CheckSlotRequirements(false);
 
 	create_physical_replication_slot(NameStr(*name),
 									 immediately_reserve,
@@ -134,7 +146,14 @@ create_logical_replication_slot(char *name, char *plugin,
 	 */
 	ReplicationSlotCreate(name, true,
 						  temporary ? RS_TEMPORARY : RS_EPHEMERAL, two_phase,
-						  failover, false);
+						  false, failover, false);
+
+	/*
+	 * Ensure the logical decoding is enabled before initializing the logical
+	 * decoding context.
+	 */
+	EnsureLogicalDecodingEnabled();
+	Assert(IsLogicalDecodingEnabled());
 
 	/*
 	 * Create logical decoding context to find start point or, if we don't
@@ -145,6 +164,7 @@ create_logical_replication_slot(char *name, char *plugin,
 	 */
 	ctx = CreateInitDecodingContext(plugin, NIL,
 									false,	/* just catalogs is OK */
+									false,	/* not repack */
 									restart_lsn,
 									XL_ROUTINE(.page_read = read_local_xlog_page,
 											   .segment_open = wal_segment_open,
@@ -184,7 +204,7 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 
 	CheckSlotPermissions();
 
-	CheckLogicalDecodingRequirements();
+	CheckLogicalDecodingRequirements(false);
 
 	create_logical_replication_slot(NameStr(*name),
 									NameStr(*plugin),
@@ -221,7 +241,7 @@ pg_drop_replication_slot(PG_FUNCTION_ARGS)
 
 	CheckSlotPermissions();
 
-	CheckSlotRequirements();
+	CheckSlotRequirements(false);
 
 	ReplicationSlotDrop(NameStr(*name), true);
 
@@ -235,7 +255,7 @@ pg_drop_replication_slot(PG_FUNCTION_ARGS)
 Datum
 pg_get_replication_slots(PG_FUNCTION_ARGS)
 {
-#define PG_GET_REPLICATION_SLOTS_COLS 20
+#define PG_GET_REPLICATION_SLOTS_COLS 21
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	XLogRecPtr	currlsn;
 	int			slotno;
@@ -251,7 +271,7 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 	currlsn = GetXLogWriteRecPtr();
 
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
-	for (slotno = 0; slotno < max_replication_slots; slotno++)
+	for (slotno = 0; slotno < max_replication_slots + max_repack_replication_slots; slotno++)
 	{
 		ReplicationSlot *slot = &ReplicationSlotCtl->replication_slots[slotno];
 		ReplicationSlot slot_contents;
@@ -291,10 +311,10 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 			values[i++] = ObjectIdGetDatum(slot_contents.data.database);
 
 		values[i++] = BoolGetDatum(slot_contents.data.persistency == RS_TEMPORARY);
-		values[i++] = BoolGetDatum(slot_contents.active_pid != 0);
+		values[i++] = BoolGetDatum(slot_contents.active_proc != INVALID_PROC_NUMBER);
 
-		if (slot_contents.active_pid != 0)
-			values[i++] = Int32GetDatum(slot_contents.active_pid);
+		if (slot_contents.active_proc != INVALID_PROC_NUMBER)
+			values[i++] = Int32GetDatum(GetPGProcByNumber(slot_contents.active_proc)->pid);
 		else
 			nulls[i++] = true;
 
@@ -308,12 +328,12 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		else
 			nulls[i++] = true;
 
-		if (slot_contents.data.restart_lsn != InvalidXLogRecPtr)
+		if (XLogRecPtrIsValid(slot_contents.data.restart_lsn))
 			values[i++] = LSNGetDatum(slot_contents.data.restart_lsn);
 		else
 			nulls[i++] = true;
 
-		if (slot_contents.data.confirmed_flush != InvalidXLogRecPtr)
+		if (XLogRecPtrIsValid(slot_contents.data.confirmed_flush))
 			values[i++] = LSNGetDatum(slot_contents.data.confirmed_flush);
 		else
 			nulls[i++] = true;
@@ -357,15 +377,15 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 				 *
 				 * If we do change it, save the state for safe_wal_size below.
 				 */
-				if (!XLogRecPtrIsInvalid(slot_contents.data.restart_lsn))
+				if (XLogRecPtrIsValid(slot_contents.data.restart_lsn))
 				{
-					int			pid;
+					ProcNumber	procno;
 
 					SpinLockAcquire(&slot->mutex);
-					pid = slot->active_pid;
+					procno = slot->active_proc;
 					slot_contents.data.restart_lsn = slot->data.restart_lsn;
 					SpinLockRelease(&slot->mutex);
-					if (pid != 0)
+					if (procno != INVALID_PROC_NUMBER)
 					{
 						values[i++] = CStringGetTextDatum("unreserved");
 						walstate = WALAVAIL_UNRESERVED;
@@ -407,7 +427,7 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		values[i++] = BoolGetDatum(slot_contents.data.two_phase);
 
 		if (slot_contents.data.two_phase &&
-			!XLogRecPtrIsInvalid(slot_contents.data.two_phase_at))
+			XLogRecPtrIsValid(slot_contents.data.two_phase_at))
 			values[i++] = LSNGetDatum(slot_contents.data.two_phase_at);
 		else
 			nulls[i++] = true;
@@ -443,6 +463,11 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 
 		values[i++] = BoolGetDatum(slot_contents.data.synced);
 
+		if (slot_contents.slotsync_skip_reason == SS_SKIP_NONE)
+			nulls[i++] = true;
+		else
+			values[i++] = CStringGetTextDatum(SlotSyncSkipReasonNames[slot_contents.slotsync_skip_reason]);
+
 		Assert(i == PG_GET_REPLICATION_SLOTS_COLS);
 
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc,
@@ -467,7 +492,7 @@ pg_physical_replication_slot_advance(XLogRecPtr moveto)
 	XLogRecPtr	startlsn = MyReplicationSlot->data.restart_lsn;
 	XLogRecPtr	retlsn = startlsn;
 
-	Assert(moveto != InvalidXLogRecPtr);
+	Assert(XLogRecPtrIsValid(moveto));
 
 	if (startlsn < moveto)
 	{
@@ -523,7 +548,7 @@ pg_replication_slot_advance(PG_FUNCTION_ARGS)
 
 	CheckSlotPermissions();
 
-	if (XLogRecPtrIsInvalid(moveto))
+	if (!XLogRecPtrIsValid(moveto))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("invalid target WAL LSN")));
@@ -545,7 +570,7 @@ pg_replication_slot_advance(PG_FUNCTION_ARGS)
 	ReplicationSlotAcquire(NameStr(*slotname), true, true);
 
 	/* A slot whose restart_lsn has never been reserved cannot be advanced */
-	if (XLogRecPtrIsInvalid(MyReplicationSlot->data.restart_lsn))
+	if (!XLogRecPtrIsValid(MyReplicationSlot->data.restart_lsn))
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("replication slot \"%s\" cannot be advanced",
@@ -566,7 +591,7 @@ pg_replication_slot_advance(PG_FUNCTION_ARGS)
 	if (moveto < minlsn)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot advance replication slot to %X/%X, minimum is %X/%X",
+				 errmsg("cannot advance replication slot to %X/%08X, minimum is %X/%08X",
 						LSN_FORMAT_ARGS(moveto), LSN_FORMAT_ARGS(minlsn))));
 
 	/* Do the actual slot update, depending on the slot type */
@@ -624,9 +649,9 @@ copy_replication_slot(FunctionCallInfo fcinfo, bool logical_slot)
 	CheckSlotPermissions();
 
 	if (logical_slot)
-		CheckLogicalDecodingRequirements();
+		CheckLogicalDecodingRequirements(false);
 	else
-		CheckSlotRequirements();
+		CheckSlotRequirements(false);
 
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 
@@ -641,7 +666,7 @@ copy_replication_slot(FunctionCallInfo fcinfo, bool logical_slot)
 	 * managed to create the new slot, we advance the new slot's restart_lsn
 	 * to the source slot's updated restart_lsn the second time we lock it.
 	 */
-	for (int i = 0; i < max_replication_slots; i++)
+	for (int i = 0; i < max_replication_slots + max_repack_replication_slots; i++)
 	{
 		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
 
@@ -679,7 +704,7 @@ copy_replication_slot(FunctionCallInfo fcinfo, bool logical_slot)
 						NameStr(*src_name))));
 
 	/* Copying non-reserved slot doesn't make sense */
-	if (XLogRecPtrIsInvalid(src_restart_lsn))
+	if (!XLogRecPtrIsValid(src_restart_lsn))
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot copy a replication slot that doesn't reserve WAL")));
@@ -785,7 +810,7 @@ copy_replication_slot(FunctionCallInfo fcinfo, bool logical_slot)
 					 errdetail("The source replication slot was modified incompatibly during the copy operation.")));
 
 		/* The source slot must have a consistent snapshot */
-		if (src_islogical && XLogRecPtrIsInvalid(copy_confirmed_flush))
+		if (src_islogical && !XLogRecPtrIsValid(copy_confirmed_flush))
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot copy unfinished logical replication slot \"%s\"",
@@ -840,7 +865,7 @@ copy_replication_slot(FunctionCallInfo fcinfo, bool logical_slot)
 	/* All done.  Set up the return values */
 	values[0] = NameGetDatum(dst_name);
 	nulls[0] = false;
-	if (!XLogRecPtrIsInvalid(MyReplicationSlot->data.confirmed_flush))
+	if (XLogRecPtrIsValid(MyReplicationSlot->data.confirmed_flush))
 	{
 		values[1] = LSNGetDatum(MyReplicationSlot->data.confirmed_flush);
 		nulls[1] = false;
@@ -921,13 +946,14 @@ pg_sync_replication_slots(PG_FUNCTION_ARGS)
 	/* Connect to the primary server. */
 	wrconn = walrcv_connect(PrimaryConnInfo, false, false, false,
 							app_name.data, &err);
-	pfree(app_name.data);
 
 	if (!wrconn)
 		ereport(ERROR,
 				errcode(ERRCODE_CONNECTION_FAILURE),
 				errmsg("synchronization worker \"%s\" could not connect to the primary server: %s",
 					   app_name.data, err));
+
+	pfree(app_name.data);
 
 	SyncReplicationSlots(wrconn);
 

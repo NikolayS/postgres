@@ -4,7 +4,7 @@
  *	  definition of the "replication origin" system catalog
  *	  (pg_replication_origin)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_replication_origin.h
@@ -27,6 +27,8 @@
  *		typedef struct FormData_pg_replication_origin
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_replication_origin,6000,ReplicationOriginRelationId) BKI_SHARED_RELATION
 {
 	/*
@@ -51,6 +53,8 @@ CATALOG(pg_replication_origin,6000,ReplicationOriginRelationId) BKI_SHARED_RELAT
 #ifdef CATALOG_VARLEN			/* further variable-length fields */
 #endif
 } FormData_pg_replication_origin;
+
+END_CATALOG_STRUCT
 
 typedef FormData_pg_replication_origin *Form_pg_replication_origin;
 

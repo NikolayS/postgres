@@ -3,7 +3,7 @@
  * xlogdesc.c
  *	  rmgr descriptor routines for access/transam/xlog.c
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,6 +18,7 @@
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
+#include "storage/checksum.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
 
@@ -54,6 +55,40 @@ get_wal_level_string(int wal_level)
 	return wal_level_str;
 }
 
+const char *
+get_checksum_state_string(uint32 state)
+{
+	switch (state)
+	{
+		case PG_DATA_CHECKSUM_VERSION:
+			return "on";
+		case PG_DATA_CHECKSUM_INPROGRESS_OFF:
+			return "inprogress-off";
+		case PG_DATA_CHECKSUM_INPROGRESS_ON:
+			return "inprogress-on";
+		case PG_DATA_CHECKSUM_OFF:
+			return "off";
+	}
+
+	Assert(false);
+	return "?";
+}
+
+void
+xlog2_desc(StringInfo buf, XLogReaderState *record)
+{
+	char	   *rec = XLogRecGetData(record);
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+
+	if (info == XLOG2_CHECKSUMS)
+	{
+		xl_checksum_state xlrec;
+
+		memcpy(&xlrec, rec, sizeof(xl_checksum_state));
+		appendStringInfoString(buf, get_checksum_state_string(xlrec.new_checksum_state));
+	}
+}
+
 void
 xlog_desc(StringInfo buf, XLogReaderState *record)
 {
@@ -65,16 +100,18 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 	{
 		CheckPoint *checkpoint = (CheckPoint *) rec;
 
-		appendStringInfo(buf, "redo %X/%X; "
-						 "tli %u; prev tli %u; fpw %s; wal_level %s; xid %u:%u; oid %u; multi %u; offset %u; "
+		appendStringInfo(buf, "redo %X/%08X; "
+						 "tli %u; prev tli %u; fpw %s; wal_level %s; logical decoding %s; xid %u:%u; oid %u; multi %u; offset %" PRIu64 "; "
 						 "oldest xid %u in DB %u; oldest multi %u in DB %u; "
 						 "oldest/newest commit timestamp xid: %u/%u; "
-						 "oldest running xid %u; %s",
+						 "oldest running xid %u; "
+						 "checksums %s; %s",
 						 LSN_FORMAT_ARGS(checkpoint->redo),
 						 checkpoint->ThisTimeLineID,
 						 checkpoint->PrevTimeLineID,
 						 checkpoint->fullPageWrites ? "true" : "false",
 						 get_wal_level_string(checkpoint->wal_level),
+						 checkpoint->logicalDecodingEnabled ? "true" : "false",
 						 EpochFromFullTransactionId(checkpoint->nextXid),
 						 XidFromFullTransactionId(checkpoint->nextXid),
 						 checkpoint->nextOid,
@@ -87,6 +124,7 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 						 checkpoint->oldestCommitTsXid,
 						 checkpoint->newestCommitTsXid,
 						 checkpoint->oldestActiveXid,
+						 get_checksum_state_string(checkpoint->dataChecksumState),
 						 (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online");
 	}
 	else if (info == XLOG_NEXTOID)
@@ -111,7 +149,7 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 		XLogRecPtr	startpoint;
 
 		memcpy(&startpoint, rec, sizeof(XLogRecPtr));
-		appendStringInfo(buf, "%X/%X", LSN_FORMAT_ARGS(startpoint));
+		appendStringInfo(buf, "%X/%08X", LSN_FORMAT_ARGS(startpoint));
 	}
 	else if (info == XLOG_PARAMETER_CHANGE)
 	{
@@ -156,16 +194,29 @@ xlog_desc(StringInfo buf, XLogReaderState *record)
 		xl_overwrite_contrecord xlrec;
 
 		memcpy(&xlrec, rec, sizeof(xl_overwrite_contrecord));
-		appendStringInfo(buf, "lsn %X/%X; time %s",
+		appendStringInfo(buf, "lsn %X/%08X; time %s",
 						 LSN_FORMAT_ARGS(xlrec.overwritten_lsn),
 						 timestamptz_to_str(xlrec.overwrite_time));
 	}
 	else if (info == XLOG_CHECKPOINT_REDO)
 	{
-		int			wal_level;
+		xl_checkpoint_redo xlrec;
 
-		memcpy(&wal_level, rec, sizeof(int));
-		appendStringInfo(buf, "wal_level %s", get_wal_level_string(wal_level));
+		memcpy(&xlrec, rec, sizeof(xl_checkpoint_redo));
+		appendStringInfo(buf, "wal_level %s; checksums %s",
+						 get_wal_level_string(xlrec.wal_level),
+						 get_checksum_state_string(xlrec.data_checksum_version));
+	}
+	else if (info == XLOG_LOGICAL_DECODING_STATUS_CHANGE)
+	{
+		bool		enabled;
+
+		memcpy(&enabled, rec, sizeof(bool));
+		appendStringInfoString(buf, enabled ? "true" : "false");
+	}
+	else if (info == XLOG_ASSIGN_LSN)
+	{
+		/* no further information to print */
 	}
 }
 
@@ -217,6 +268,27 @@ xlog_identify(uint8 info)
 			break;
 		case XLOG_CHECKPOINT_REDO:
 			id = "CHECKPOINT_REDO";
+			break;
+		case XLOG_LOGICAL_DECODING_STATUS_CHANGE:
+			id = "LOGICAL_DECODING_STATUS_CHANGE";
+			break;
+		case XLOG_ASSIGN_LSN:
+			id = "ASSIGN_LSN";
+			break;
+	}
+
+	return id;
+}
+
+const char *
+xlog2_identify(uint8 info)
+{
+	const char *id = NULL;
+
+	switch (info & ~XLR_INFO_MASK)
+	{
+		case XLOG2_CHECKSUMS:
+			id = "CHECKSUMS";
 			break;
 	}
 

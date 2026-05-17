@@ -3,7 +3,7 @@
  * nodeCustom.c
  *		Routines to handle execution of custom scan node
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * ------------------------------------------------------------------------
@@ -79,14 +79,14 @@ ExecInitCustomScan(CustomScan *cscan, EState *estate, int eflags)
 		TupleDesc	scan_tupdesc;
 
 		scan_tupdesc = ExecTypeFromTL(cscan->custom_scan_tlist);
-		ExecInitScanTupleSlot(estate, &css->ss, scan_tupdesc, slotOps);
+		ExecInitScanTupleSlot(estate, &css->ss, scan_tupdesc, slotOps, 0);
 		/* Node's targetlist will contain Vars with varno = INDEX_VAR */
 		tlistvarno = INDEX_VAR;
 	}
 	else
 	{
 		ExecInitScanTupleSlot(estate, &css->ss, RelationGetDescr(scan_rel),
-							  slotOps);
+							  slotOps, 0);
 		/* Node's targetlist will contain Vars with varno = scanrelid */
 		tlistvarno = scanrelid;
 	}

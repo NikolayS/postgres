@@ -3,7 +3,7 @@
  * test_resowner_many.c
  *		Test ResourceOwner functionality with lots of resources
  *
- * Copyright (c) 2022-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2022-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_resowner/test_resowner_many.c
@@ -121,7 +121,7 @@ RememberManyTestResources(ResourceOwner owner,
 
 	for (int i = 0; i < nresources; i++)
 	{
-		ManyTestResource *mres = palloc(sizeof(ManyTestResource));
+		ManyTestResource *mres = palloc_object(ManyTestResource);
 
 		mres->kind = &kinds[kind_idx];
 		dlist_node_init(&mres->node);

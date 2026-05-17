@@ -17,7 +17,10 @@
 <!ENTITY datatype   SYSTEM "datatype.sgml">
 <!ENTITY ddl        SYSTEM "ddl.sgml">
 <!ENTITY dml        SYSTEM "dml.sgml">
-<!ENTITY func       SYSTEM "func.sgml">
+
+<!ENTITY % allfiles_func   SYSTEM "func/allfiles.sgml">
+%allfiles_func;
+
 <!ENTITY indices    SYSTEM "indices.sgml">
 <!ENTITY json       SYSTEM "json.sgml">
 <!ENTITY mvcc       SYSTEM "mvcc.sgml">
@@ -141,11 +144,13 @@
 <!ENTITY oid2name        SYSTEM "oid2name.sgml">
 <!ENTITY pageinspect     SYSTEM "pageinspect.sgml">
 <!ENTITY passwordcheck   SYSTEM "passwordcheck.sgml">
+<!ENTITY pgstashadvice   SYSTEM "pgstashadvice.sgml">
 <!ENTITY pgbuffercache   SYSTEM "pgbuffercache.sgml">
 <!ENTITY pgcrypto        SYSTEM "pgcrypto.sgml">
 <!ENTITY pgfreespacemap  SYSTEM "pgfreespacemap.sgml">
 <!ENTITY pglogicalinspect  SYSTEM "pglogicalinspect.sgml">
 <!ENTITY pgoverexplain   SYSTEM "pgoverexplain.sgml">
+<!ENTITY pgplanadvice    SYSTEM "pgplanadvice.sgml">
 <!ENTITY pgprewarm       SYSTEM "pgprewarm.sgml">
 <!ENTITY pgrowlocks      SYSTEM "pgrowlocks.sgml">
 <!ENTITY pgstatstatements SYSTEM "pgstatstatements.sgml">
@@ -180,7 +185,7 @@
 <!ENTITY sourcerepo SYSTEM "sourcerepo.sgml">
 
 <!ENTITY release    SYSTEM "release.sgml">
-<!ENTITY release-18 SYSTEM "release-18.sgml">
+<!ENTITY release-19 SYSTEM "release-19.sgml">
 
 <!ENTITY limits     SYSTEM "limits.sgml">
 <!ENTITY acronyms   SYSTEM "acronyms.sgml">
@@ -203,3 +208,4 @@
 <!ENTITY obsolete-pgxlogdump SYSTEM "appendix-obsolete-pgxlogdump.sgml">
 <!ENTITY obsolete-pgresetxlog SYSTEM "appendix-obsolete-pgresetxlog.sgml">
 <!ENTITY obsolete-pgreceivexlog SYSTEM "appendix-obsolete-pgreceivexlog.sgml">
+<!ENTITY obsolete-auth-radius SYSTEM "appendix-obsolete-auth-radius.sgml">

@@ -4,7 +4,7 @@
  *	  prototypes for costsize.c and clausesel.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/cost.h
@@ -118,14 +118,14 @@ extern void cost_incremental_sort(Path *path,
 								  Cost input_startup_cost, Cost input_total_cost,
 								  double input_tuples, int width, Cost comparison_cost, int sort_mem,
 								  double limit_tuples);
-extern void cost_append(AppendPath *apath);
+extern void cost_append(AppendPath *apath, PlannerInfo *root);
 extern void cost_merge_append(Path *path, PlannerInfo *root,
 							  List *pathkeys, int n_streams,
 							  int input_disabled_nodes,
 							  Cost input_startup_cost, Cost input_total_cost,
 							  double tuples);
 extern void cost_material(Path *path,
-						  int input_disabled_nodes,
+						  bool enabled, int input_disabled_nodes,
 						  Cost input_startup_cost, Cost input_total_cost,
 						  double tuples, int width);
 extern void cost_agg(Path *path, PlannerInfo *root,
@@ -148,7 +148,7 @@ extern void cost_group(Path *path, PlannerInfo *root,
 					   double input_tuples);
 extern void initial_cost_nestloop(PlannerInfo *root,
 								  JoinCostWorkspace *workspace,
-								  JoinType jointype,
+								  JoinType jointype, uint64 enable_mask,
 								  Path *outer_path, Path *inner_path,
 								  JoinPathExtraData *extra);
 extern void final_cost_nestloop(PlannerInfo *root, NestPath *path,

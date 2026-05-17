@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, PostgreSQL Global Development Group
+# Copyright (c) 2024-2026, PostgreSQL Global Development Group
 
 #
 # Test using a standby server as the subscriber.
@@ -14,6 +14,7 @@ program_version_ok('pg_createsubscriber');
 program_options_handling_ok('pg_createsubscriber');
 
 my $datadir = PostgreSQL::Test::Utils::tempdir;
+my $logdir = PostgreSQL::Test::Utils::tempdir;
 
 # Generate a database with a name made of a range of ASCII characters.
 # Extracted from 002_pg_upgrade.pl.
@@ -160,6 +161,7 @@ primary_slot_name = '$slotname'
 primary_conninfo = '$pconnstr dbname=postgres'
 hot_standby_feedback = on
 ]);
+my $sconnstr = $node_s->connstr;
 $node_s->set_standby_mode();
 $node_s->start;
 
@@ -240,7 +242,6 @@ command_fails(
 # Check some unmet conditions on node P
 $node_p->append_conf(
 	'postgresql.conf', q{
-wal_level = replica
 max_replication_slots = 1
 max_wal_senders = 1
 max_worker_processes = 2
@@ -265,7 +266,6 @@ command_fails(
 # standby settings should not be a lower setting than on the primary.
 $node_p->append_conf(
 	'postgresql.conf', q{
-wal_level = logical
 max_replication_slots = 10
 max_wal_senders = 10
 max_worker_processes = 8
@@ -331,7 +331,7 @@ $node_p->safe_psql($db1,
 $node_p->wait_for_replay_catchup($node_s);
 
 # Create user-defined publications, wait for streaming replication to sync them
-# to the standby, then verify that '--remove'
+# to the standby, then verify that '--clean'
 # removes them.
 $node_p->safe_psql(
 	$db1, qq(
@@ -341,8 +341,8 @@ $node_p->safe_psql(
 
 $node_p->wait_for_replay_catchup($node_s);
 
-ok($node_s->safe_psql($db1, "SELECT COUNT(*) = 2 FROM pg_publication"),
-	'two pre-existing publications on subscriber');
+is($node_s->safe_psql($db1, "SELECT COUNT(*) FROM pg_publication"),
+	'2', 'two pre-existing publications on subscriber');
 
 $node_s->stop;
 
@@ -363,8 +363,34 @@ command_ok(
 		'--subscription' => 'sub2',
 		'--database' => $db1,
 		'--database' => $db2,
+		'--logdir' => $logdir,
 	],
 	'run pg_createsubscriber --dry-run on node S');
+
+# Check that the log files were created
+my @server_log_files = glob "$logdir/*/pg_createsubscriber_server.log";
+is(scalar(@server_log_files),
+	1, "pg_createsubscriber_server.log file was created");
+my $server_log_file_size = -s $server_log_files[0];
+isnt($server_log_file_size, 0,
+	"pg_createsubscriber_server.log file not empty");
+my $server_log = slurp_file($server_log_files[0]);
+like(
+	$server_log,
+	qr/consistent recovery state reached/,
+	"server reached consistent recovery state");
+
+my @internal_log_files = glob "$logdir/*/pg_createsubscriber_internal.log";
+is(scalar(@internal_log_files),
+	1, "pg_createsubscriber_internal.log file was created");
+my $internal_log_file_size = -s $internal_log_files[0];
+isnt($internal_log_file_size, 0,
+	"pg_createsubscriber_internal.log file not empty");
+my $internal_log = slurp_file($internal_log_files[0]);
+like(
+	$internal_log,
+	qr/target server reached the consistent state/,
+	"log shows consistent state reached");
 
 # Check if node S is still a standby
 $node_s->start;
@@ -399,7 +425,7 @@ command_fails_like(
 		'--database' => $db1,
 		'--all',
 	],
-	qr/--database cannot be used with -a\/--all/,
+	qr/options --database and -a\/--all cannot be used together/,
 	'fail if --database is used with --all');
 
 # run pg_createsubscriber with '--publication' and '--all' and verify
@@ -416,7 +442,7 @@ command_fails_like(
 		'--all',
 		'--publication' => 'pub1',
 	],
-	qr/--publication cannot be used with -a\/--all/,
+	qr/options --publication and -a\/--all cannot be used together/,
 	'fail if --publication is used with --all');
 
 # run pg_createsubscriber with '--all' option
@@ -436,17 +462,25 @@ my ($stdout, $stderr) = run_command(
 
 # Verify that the required logical replication objects are output.
 # The expected count 3 refers to postgres, $db1 and $db2 databases.
-is(scalar(() = $stderr =~ /creating publication/g),
+is(scalar(() = $stderr =~ /would create publication/g),
 	3, "verify publications are created for all databases");
-is(scalar(() = $stderr =~ /creating the replication slot/g),
+is(scalar(() = $stderr =~ /would create the replication slot/g),
 	3, "verify replication slots are created for all databases");
-is(scalar(() = $stderr =~ /creating subscription/g),
+is(scalar(() = $stderr =~ /would create subscription/g),
 	3, "verify subscriptions are created for all databases");
+
+# Create a user-defined publication, and a table that is not a member of that
+# publication.
+$node_p->safe_psql(
+	$db1, qq(
+	CREATE PUBLICATION test_pub3 FOR TABLE tbl1;
+	CREATE TABLE not_replicated (a int);
+));
 
 # Run pg_createsubscriber on node S.  --verbose is used twice
 # to show more information.
-# In passing, also test the --enable-two-phase option and
-# --remove option
+#
+# Test two phase and clean options. Use pre-existing publication.
 command_ok(
 	[
 		'pg_createsubscriber',
@@ -456,16 +490,21 @@ command_ok(
 		'--publisher-server' => $node_p->connstr($db1),
 		'--socketdir' => $node_s->host,
 		'--subscriber-port' => $node_s->port,
-		'--publication' => 'pub1',
+		'--publication' => 'test_pub3',
 		'--publication' => 'pub2',
 		'--replication-slot' => 'replslot1',
 		'--replication-slot' => 'replslot2',
 		'--database' => $db1,
 		'--database' => $db2,
 		'--enable-two-phase',
-		'--remove' => 'publications',
+		'--clean' => 'publications',
 	],
 	'run pg_createsubscriber on node S');
+
+# Check that included file is renamed after success.
+my $node_s_datadir = $node_s->data_dir;
+ok( -f "$node_s_datadir/pg_createsubscriber.conf.disabled",
+	"pg_createsubscriber.conf.disabled exists in node S");
 
 # Confirm the physical replication slot has been removed
 $result = $node_p->safe_psql($db1,
@@ -478,13 +517,16 @@ is($result, qq(0),
 # Insert rows on P
 $node_p->safe_psql($db1, "INSERT INTO tbl1 VALUES('third row')");
 $node_p->safe_psql($db2, "INSERT INTO tbl2 VALUES('row 1')");
+$node_p->safe_psql($db1, "INSERT INTO not_replicated VALUES(0)");
 
 # Start subscriber
 $node_s->start;
 
 # Confirm publications are removed from the subscriber node
-is($node_s->safe_psql($db1, "SELECT COUNT(*) FROM pg_publication;"),
-	'0', 'all publications on subscriber have been removed');
+is($node_s->safe_psql($db1, 'SELECT COUNT(*) FROM pg_publication'),
+	'0', 'all publications were removed from db1');
+is($node_s->safe_psql($db2, 'SELECT COUNT(*) FROM pg_publication'),
+	'0', 'all publications were removed from db2');
 
 # Verify that all subtwophase states are pending or enabled,
 # e.g. there are no subscriptions where subtwophase is disabled ('d')
@@ -525,6 +567,8 @@ is( $result, qq(first row
 second row
 third row),
 	"logical replication works in database $db1");
+$result = $node_s->safe_psql($db1, 'SELECT * FROM not_replicated');
+is($result, qq(), "table is not replicated in database $db1");
 
 # Check result in database $db2
 $result = $node_s->safe_psql($db2, 'SELECT * FROM tbl2');
@@ -535,7 +579,84 @@ my $sysid_p = $node_p->safe_psql('postgres',
 	'SELECT system_identifier FROM pg_control_system()');
 my $sysid_s = $node_s->safe_psql('postgres',
 	'SELECT system_identifier FROM pg_control_system()');
-ok($sysid_p != $sysid_s, 'system identifier was changed');
+isnt($sysid_p, $sysid_s, 'system identifier was changed');
+
+# Verify that pub2 was created in $db2
+is( $node_p->safe_psql(
+		$db2, "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'pub2'"),
+	'1',
+	"publication pub2 was created in $db2");
+
+# Get subscription and publication names
+$result = $node_s->safe_psql(
+	'postgres', qq(
+    SELECT subname, subpublications FROM pg_subscription WHERE subname ~ '^pg_createsubscriber_'
+	ORDER BY subpublications;
+));
+like(
+	$result,
+	qr/^pg_createsubscriber_\d+_[0-9a-f]+ \|\{pub2\}\n
+        pg_createsubscriber_\d+_[0-9a-f]+ \|\{test_pub3\}$/x,
+	'subscription and publication names are ok');
+
+# Verify that the correct publications are being used
+$result = $node_s->safe_psql(
+	'postgres', qq(
+		SELECT d.datname, s.subpublications
+		FROM pg_subscription s
+		JOIN pg_database d ON d.oid = s.subdbid
+		WHERE subname ~ '^pg_createsubscriber_'
+		ORDER BY s.subdbid
+    )
+);
+
+is( $result, qq($db1|{test_pub3}
+$db2|{pub2}),
+	"subscriptions use the correct publications");
+
+# Verify that node K, set as a standby, is able to start correctly without
+# the recovery configuration written by pg_createsubscriber interfering.
+# This node is created from node S, where pg_createsubscriber has been run.
+
+# Create a physical standby from the promoted subscriber
+$node_s->safe_psql('postgres',
+	"SELECT pg_create_physical_replication_slot('$slotname');");
+
+# Create backup from promoted subscriber
+$node_s->backup('backup_3');
+
+# Initialize new physical standby
+my $node_k = PostgreSQL::Test::Cluster->new('node_k');
+$node_k->init_from_backup($node_s, 'backup_3', has_streaming => 1);
+
+my $node_k_datadir = $node_k->data_dir;
+ok( -f "$node_k_datadir/pg_createsubscriber.conf.disabled",
+	"pg_createsubscriber.conf.disabled exists in node K");
+
+# Configure the new standby
+$node_k->append_conf(
+	'postgresql.conf', qq[
+primary_slot_name = '$slotname'
+primary_conninfo = '$sconnstr dbname=postgres'
+hot_standby_feedback = on
+]);
+
+$node_k->set_standby_mode();
+my $node_k_name = $node_s->name;
+command_ok(
+	[
+		'pg_ctl', '--wait',
+		'--pgdata' => $node_k->data_dir,
+		'--log' => $node_k->logfile,
+		'--options' => "--cluster-name=$node_k_name",
+		'start'
+	],
+	"node K has started");
+
+# Note that this uses a direct pg_ctl command rather than a teardown(),
+# because $node->stop() would not work due to the node's postmaster PID
+# not being tracked, something that is set within $node->start().
+system_log('pg_ctl', 'stop', '--pgdata', $node_k->data_dir);
 
 # clean up
 $node_p->teardown_node;

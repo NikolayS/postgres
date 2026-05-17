@@ -3,7 +3,7 @@
  * jsonfuncs.h
  *	  Functions to process JSON data types.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/jsonfuncs.h
@@ -83,6 +83,8 @@ typedef enum
 
 extern void json_categorize_type(Oid typoid, bool is_jsonb,
 								 JsonTypeCategory *tcategory, Oid *outfuncoid);
+extern void json_check_mutability(Oid typoid, bool is_jsonb,
+								  bool *has_mutable);
 extern Datum datum_to_json(Datum val, JsonTypeCategory tcategory,
 						   Oid outfuncoid);
 extern Datum datum_to_jsonb(Datum val, JsonTypeCategory tcategory,

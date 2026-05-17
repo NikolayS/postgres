@@ -53,6 +53,9 @@ CREATE INDEX hash_txt_index ON hash_txt_heap USING hash (random text_ops);
 CREATE INDEX hash_f8_index ON hash_f8_heap USING hash (random float8_ops)
   WITH (fillfactor=60);
 
+CREATE INDEX hash_i4_partial_index ON hash_i4_heap USING hash (seqno)
+  WHERE seqno = 9999;
+
 --
 -- Also try building functional, expressional, and partial indexes on
 -- tables that already contain data.
@@ -116,6 +119,16 @@ SELECT * FROM hash_f8_heap
 --
 SELECT * FROM hash_f8_heap
    WHERE hash_f8_heap.random = '88888888'::float8;
+
+--
+-- partial hash index
+--
+EXPLAIN (COSTS OFF)
+SELECT * FROM hash_i4_heap
+   WHERE seqno = 9999;
+
+SELECT * FROM hash_i4_heap
+   WHERE seqno = 9999;
 
 --
 -- hash index
@@ -300,6 +313,23 @@ INSERT INTO hash_cleanup_heap SELECT 1 FROM generate_series(1, 50) as i;
 
 CHECKPOINT;
 VACUUM hash_cleanup_heap;
+
+-- Test cleanup of dead index tuples on single page with INSERT.
+TRUNCATE hash_cleanup_heap;
+INSERT INTO hash_cleanup_heap SELECT 1 FROM generate_series(1, 1000) as i;
+-- This relies on a rollbacked INSERT instead of a DELETE to make the creation
+-- of the dead tuples concurrent-safe.
+BEGIN;
+INSERT INTO hash_cleanup_heap SELECT 1 FROM generate_series(1, 500) as i;
+ROLLBACK;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SELECT count(*) FROM hash_cleanup_heap WHERE keycol = 1;
+-- This query checks the hash index pages for dead tuples where the data
+-- is inserted, and performs a local VACUUM on a single page.
+INSERT INTO hash_cleanup_heap SELECT 1 FROM generate_series(1, 200) as i;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
 
 -- Clean up.
 DROP TABLE hash_cleanup_heap;

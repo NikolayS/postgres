@@ -106,6 +106,12 @@ INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT (a) DO UPDATE set a = excluded.
 SELECT * FROM rw_view15;
 INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT (a) DO UPDATE set upper = 'blarg'; -- fails
 SELECT * FROM rw_view15;
+INSERT INTO rw_view15 (a) VALUES (3)
+  ON CONFLICT (a) DO UPDATE SET a = excluded.a WHERE excluded.upper = 'UNSPECIFIED'
+  RETURNING old, new;
+INSERT INTO rw_view15 (a) VALUES (3)
+  ON CONFLICT (a) DO SELECT WHERE excluded.upper = 'UNSPECIFIED' RETURNING old, new;
+
 SELECT * FROM rw_view15;
 ALTER VIEW rw_view15 ALTER COLUMN upper SET DEFAULT 'NOT SET';
 INSERT INTO rw_view15 (a) VALUES (4); -- should fail
@@ -1850,7 +1856,7 @@ insert into wcowrtest_v2 values (2, 'no such row in sometable');
 drop view wcowrtest_v, wcowrtest_v2;
 drop table wcowrtest, sometable;
 
--- Check INSERT .. ON CONFLICT DO UPDATE works correctly when the view's
+-- Check INSERT .. ON CONFLICT DO SELECT/UPDATE works correctly when the view's
 -- columns are named and ordered differently than the underlying table's.
 create table uv_iocu_tab (a text unique, b float);
 insert into uv_iocu_tab values ('xyxyxy', 0);
@@ -1863,6 +1869,8 @@ select * from uv_iocu_tab;
 insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
    on conflict (a) do update set b = excluded.b;
 select * from uv_iocu_tab;
+insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
+   on conflict (a) do select where uv_iocu_view.c = 2 and excluded.c = 2 returning *;
 
 -- OK to access view columns that are not present in underlying base
 -- relation in the ON CONFLICT portion of the query
@@ -1880,6 +1888,20 @@ select * from uv_iocu_tab;
 
 drop view uv_iocu_view;
 drop table uv_iocu_tab;
+
+-- Check UPDATE FOR PORTION OF works correctly
+create table uv_fpo_tab (id int4range, valid_at tsrange, b float,
+    constraint pk_uv_fpo_tab primary key (id, valid_at without overlaps));
+insert into uv_fpo_tab values ('[1,1]', '[2020-01-01, 2030-01-01)', 0);
+create view uv_fpo_view as
+    select b, b+1 as c, valid_at, id, '2.0'::text as two from uv_fpo_tab;
+
+insert into uv_fpo_view (id, valid_at, b) values ('[1,1]', '[2010-01-01, 2020-01-01)', 1);
+select * from uv_fpo_view order by id, valid_at;
+update uv_fpo_view for portion of valid_at from '2015-01-01' to '2020-01-01' set b = 2 where id = '[1,1]';
+select * from uv_fpo_view order by id, valid_at;
+delete from uv_fpo_view for portion of valid_at from '2017-01-01' to '2022-01-01' where id = '[1,1]';
+select * from uv_fpo_view order by id, valid_at;
 
 -- Test whole-row references to the view
 create table uv_iocu_tab (a int unique, b text);
@@ -1899,6 +1921,11 @@ insert into uv_iocu_view (aa,bb) values (1,'y')
    and excluded.bb != ''
    and excluded.cc is not null;
 select * from uv_iocu_view;
+explain (costs off)
+insert into uv_iocu_view (aa,bb) values (1,'Rejected: (y,1,"(1,y)")')
+   on conflict (aa) do select where uv_iocu_view.* = excluded.* returning *;
+insert into uv_iocu_view (aa,bb) values (1,'Rejected: (y,1,"(1,y)")')
+   on conflict (aa) do select where uv_iocu_view.* = excluded.* returning *;
 
 -- Test omitting a column of the base relation
 delete from uv_iocu_view;
@@ -1911,11 +1938,15 @@ alter table uv_iocu_tab alter column b set default 'table default';
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*;
 select * from uv_iocu_view;
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do select returning *;
 
 alter view uv_iocu_view alter column bb set default 'view default';
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*;
 select * from uv_iocu_view;
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do select returning *;
 
 -- Should fail to update non-updatable columns
 insert into uv_iocu_view (aa) values (1)
@@ -1924,7 +1955,7 @@ insert into uv_iocu_view (aa) values (1)
 drop view uv_iocu_view;
 drop table uv_iocu_tab;
 
--- ON CONFLICT DO UPDATE permissions checks
+-- ON CONFLICT DO SELECT/UPDATE permissions checks
 create user regress_view_user1;
 create user regress_view_user2;
 
@@ -1948,6 +1979,10 @@ insert into rw_view1 values ('zzz',2.0,1)
   on conflict (aa) do update set bb = rw_view1.bb||'xxx'; -- OK
 insert into rw_view1 values ('zzz',2.0,1)
   on conflict (aa) do update set cc = 3.0; -- Not allowed
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do select for update returning cc; -- Not allowed
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do select for update returning aa, bb;
 reset session authorization;
 select * from base_tbl;
 
@@ -1960,9 +1995,13 @@ set session authorization regress_view_user2;
 create view rw_view2 as select b as bb, c as cc, a as aa from base_tbl;
 insert into rw_view2 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb; -- Not allowed
+insert into rw_view2 (aa,bb) values (1,'xxx')
+  on conflict (aa) do select returning 1;          -- Not allowed
 create view rw_view3 as select b as bb, a as aa from base_tbl;
 insert into rw_view3 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb; -- OK
+insert into rw_view3 (aa,bb) values (1,'xxx')
+  on conflict (aa) do select returning aa, bb;     -- OK
 reset session authorization;
 select * from base_tbl;
 
@@ -1970,6 +2009,8 @@ set session authorization regress_view_user2;
 create view rw_view4 as select aa, bb, cc FROM rw_view1;
 insert into rw_view4 (aa,bb) values (1,'yyy')
   on conflict (aa) do update set bb = excluded.bb; -- Not allowed
+insert into rw_view4 (aa,bb) values (1,'yyy')
+  on conflict (aa) do select returning 1; -- Not allowed
 create view rw_view5 as select aa, bb FROM rw_view1;
 insert into rw_view5 (aa,bb) values (1,'yyy')
   on conflict (aa) do update set bb = excluded.bb; -- OK

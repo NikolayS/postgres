@@ -3,7 +3,7 @@
  * copydir.c
  *	  copies a directory
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	While "xcopy /e /i /q" works fine for copying directories, on Windows XP
@@ -29,6 +29,7 @@
 #include "pgstat.h"
 #include "storage/copydir.h"
 #include "storage/fd.h"
+#include "utils/wait_event.h"
 
 /* GUCs */
 int			file_copy_method = FILE_COPY_METHOD_COPY;

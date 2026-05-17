@@ -7,7 +7,7 @@
  *	  transfer pending entries into the regular index structure.  This
  *	  wins because bulk insertion is much more efficient than retail.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -57,7 +57,7 @@ typedef struct KeyArray
  */
 static int32
 writeListPage(Relation index, Buffer buffer,
-			  IndexTuple *tuples, int32 ntuples, BlockNumber rightlink)
+			  const IndexTuple *tuples, int32 ntuples, BlockNumber rightlink)
 {
 	Page		page = BufferGetPage(buffer);
 	int32		i,
@@ -83,7 +83,7 @@ writeListPage(Relation index, Buffer buffer,
 		ptr += this_size;
 		size += this_size;
 
-		l = PageAddItem(page, (Item) tuples[i], this_size, off, false, false);
+		l = PageAddItem(page, tuples[i], this_size, off, false, false);
 
 		if (l == InvalidOffsetNumber)
 			elog(ERROR, "failed to add item to index page in \"%s\"",
@@ -134,9 +134,9 @@ writeListPage(Relation index, Buffer buffer,
 	/* get free space before releasing buffer */
 	freesize = PageGetExactFreeSpace(page);
 
-	UnlockReleaseBuffer(buffer);
-
 	END_CRIT_SECTION();
+
+	UnlockReleaseBuffer(buffer);
 
 	return freesize;
 }
@@ -384,7 +384,7 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 		for (i = 0; i < collector->ntuples; i++)
 		{
 			tupsize = IndexTupleSize(collector->tuples[i]);
-			l = PageAddItem(page, (Item) collector->tuples[i], tupsize, off, false, false);
+			l = PageAddItem(page, collector->tuples[i], tupsize, off, false, false);
 
 			if (l == InvalidOffsetNumber)
 				elog(ERROR, "failed to add item to index page in \"%s\"",
@@ -459,9 +459,9 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 	if (metadata->nPendingPages * GIN_PAGE_FREESIZE > cleanupSize * (Size) 1024)
 		needCleanup = true;
 
-	UnlockReleaseBuffer(metabuffer);
-
 	END_CRIT_SECTION();
+
+	UnlockReleaseBuffer(metabuffer);
 
 	/*
 	 * Since it could contend with concurrent cleanup process we cleanup
@@ -659,10 +659,10 @@ shiftList(Relation index, Buffer metabuffer, BlockNumber newHead,
 			}
 		}
 
+		END_CRIT_SECTION();
+
 		for (i = 0; i < data.ndeleted; i++)
 			UnlockReleaseBuffer(buffers[i]);
-
-		END_CRIT_SECTION();
 
 		for (i = 0; fill_fsm && i < data.ndeleted; i++)
 			RecordFreeIndexPage(index, freespace[i]);

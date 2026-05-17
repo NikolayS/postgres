@@ -8,7 +8,7 @@
  * include aio_types.h. Initialization related functions are in the dedicated
  * aio_init.h.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/aio.h
@@ -36,7 +36,7 @@ typedef enum IoMethod
 #ifdef IOMETHOD_IO_URING_ENABLED
 	IOMETHOD_IO_URING,
 #endif
-} IoMethod;
+}			IoMethod;
 
 /* We'll default to worker based execution. */
 #define DEFAULT_IO_METHOD IOMETHOD_WORKER
@@ -201,7 +201,7 @@ typedef enum PgAioHandleCallbackID
 } PgAioHandleCallbackID;
 
 #define PGAIO_HCB_MAX	PGAIO_HCB_LOCAL_BUFFER_READV
-StaticAssertDecl(PGAIO_HCB_MAX <= (1 << PGAIO_RESULT_ID_BITS),
+StaticAssertDecl(PGAIO_HCB_MAX < (1 << PGAIO_RESULT_ID_BITS),
 				 "PGAIO_HCB_MAX is too big for PGAIO_RESULT_ID_BITS");
 
 

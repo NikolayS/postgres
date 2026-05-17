@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Copyright (c) 2021-2025, PostgreSQL Global Development Group
+# Copyright (c) 2021-2026, PostgreSQL Global Development Group
 
 # Program to maintain uniform layout style in our C code.
 # Exit codes:
@@ -18,6 +18,21 @@ use File::Spec;
 use File::Temp;
 use IO::Handle;
 use Getopt::Long;
+
+# By default Perl's SIGINT/SIGTERM kill the process without running
+# END blocks, so File::Temp never gets to clean up.  Converting the
+# signal into an exit() makes END-block cleanup run.  See:
+# <http://www.perlmonks.org/?node_id=714225>.  Exit codes use the
+# 128+signum convention so callers can tell the process was killed by
+# a signal.
+$SIG{INT} = sub { exit 130; };     # 128 + 2 (SIGINT)
+$SIG{TERM} = sub { exit 143; };    # 128 + 15 (SIGTERM)
+
+# pg_bsd_indent creates a .BAK file that File::Temp doesn't know about. This
+# END block makes sure that that file is cleaned up in case someone presses
+# Ctrl+C during pgindent.
+my $bak_to_cleanup;
+END { unlink $bak_to_cleanup if defined $bak_to_cleanup; }
 
 # Update for pg_bsd_indent version
 my $INDENT_VERSION = "2.1.2";
@@ -73,11 +88,14 @@ if ($sourcedir)
 # might make them so.  For the moment we just hardwire a list of names
 # to add and a list of names to exclude; eventually this may need to be
 # easier to configure.  Note that the typedefs need trailing newlines.
-my @additional = ("bool\n");
+my @additional = map { "$_\n" } qw(
+  bool regex_t regmatch_t regoff
+);
 
 my %excluded = map { +"$_\n" => 1 } qw(
-  ANY FD_SET U abs allocfunc boolean date digit ilist interval iterator other
-  pointer printfunc reference string timestamp type wrap
+  FD_SET LookupSet boolean date duration
+  element_type inquiry iterator other
+  pointer reference rep string timestamp type wrap
 );
 
 # globals
@@ -221,6 +239,9 @@ sub pre_indent
 {
 	my $source = shift;
 
+	## Ensure file ends with a newline (pg_bsd_indent messes up otherwise)
+	$source .= "\n" unless substr($source, -1) eq "\n";
+
 	## Comments
 
 	# Convert // comments to /* */
@@ -242,14 +263,6 @@ sub pre_indent
 	# Protect wrapping in CATALOG()
 	$source =~ s!^(CATALOG\(.*)$!/*$1*/!gm;
 
-	# Treat a CURL_IGNORE_DEPRECATION() as braces for the purposes of
-	# indentation. (The recursive regex comes from the perlre documentation; it
-	# matches balanced parentheses as group $1 and the contents as group $2.)
-	my $curlopen = '{ /* CURL_IGNORE_DEPRECATION */';
-	my $curlclose = '} /* CURL_IGNORE_DEPRECATION */';
-	$source =~
-	  s!^[ \t]+CURL_IGNORE_DEPRECATION(\(((?:(?>[^()]+)|(?1))*)\))!$curlopen$2$curlclose!gms;
-
 	return $source;
 }
 
@@ -263,12 +276,6 @@ sub post_indent
 	# Put back braces for extern "C"
 	$source =~ s!^/\* Open extern "C" \*/$!{!gm;
 	$source =~ s!^/\* Close extern "C" \*/$!}!gm;
-
-	# Restore the CURL_IGNORE_DEPRECATION() macro, keeping in mind that our
-	# markers may have been re-indented.
-	$source =~
-	  s!{[ \t]+/\* CURL_IGNORE_DEPRECATION \*/!CURL_IGNORE_DEPRECATION(!gm;
-	$source =~ s!}[ \t]+/\* CURL_IGNORE_DEPRECATION \*/!)!gm;
 
 	## Comments
 
@@ -298,11 +305,14 @@ sub run_indent
 	print $tmp_fh $source;
 	$tmp_fh->close();
 
+	$bak_to_cleanup = "$filename.BAK";
+
 	$$error_message = `$cmd $filename 2>&1`;
 
 	return "" if ($? || length($$error_message) > 0);
 
-	unlink "$filename.BAK";
+	unlink $bak_to_cleanup;
+	$bak_to_cleanup = undef;
 
 	open(my $src_out, '<', $filename) || die $!;
 	local ($/) = undef;

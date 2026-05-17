@@ -29,7 +29,7 @@
  * intentional denormalization of the catalogs to buy lookup speed.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_amop.h
@@ -51,6 +51,8 @@
  *		typedef struct FormData_pg_amop
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_amop,2602,AccessMethodOperatorRelationId)
 {
 	Oid			oid;			/* oid */
@@ -79,6 +81,8 @@ CATALOG(pg_amop,2602,AccessMethodOperatorRelationId)
 	/* ordering opfamily OID, or 0 if search op */
 	Oid			amopsortfamily BKI_DEFAULT(0) BKI_LOOKUP_OPT(pg_opfamily);
 } FormData_pg_amop;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_amop corresponds to a pointer to a tuple with

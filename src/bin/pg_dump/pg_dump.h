@@ -3,7 +3,7 @@
  * pg_dump.h
  *	  Common header file for the pg_dump utility
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/pg_dump.h
@@ -222,7 +222,9 @@ typedef struct _typeInfo
 	bool		isDefined;		/* true if typisdefined */
 	/* If needed, we'll create a "shell type" entry for it; link that here: */
 	struct _shellTypeInfo *shellType;	/* shell-type entry, or NULL */
-	/* If it's a domain, we store links to its constraints here: */
+	/* If it's a domain, its not-null constraint is here: */
+	struct _constraintInfo *notnull;
+	/* If it's a domain, we store links to its CHECK constraints here: */
 	int			nDomChecks;
 	struct _constraintInfo *domChecks;
 } TypeInfo;
@@ -258,6 +260,8 @@ typedef struct _oprInfo
 	DumpableObject dobj;
 	const char *rolname;
 	char		oprkind;
+	Oid			oprleft;
+	Oid			oprright;
 	Oid			oprcode;
 } OprInfo;
 
@@ -271,12 +275,14 @@ typedef struct _accessMethodInfo
 typedef struct _opclassInfo
 {
 	DumpableObject dobj;
+	Oid			opcmethod;
 	const char *rolname;
 } OpclassInfo;
 
 typedef struct _opfamilyInfo
 {
 	DumpableObject dobj;
+	Oid			opfmethod;
 	const char *rolname;
 } OpfamilyInfo;
 
@@ -284,6 +290,7 @@ typedef struct _collInfo
 {
 	DumpableObject dobj;
 	const char *rolname;
+	int			collencoding;
 } CollInfo;
 
 typedef struct _convInfo
@@ -365,6 +372,7 @@ typedef struct _tableInfo
 									 * there isn't one on this column. If
 									 * empty string, unnamed constraint
 									 * (pre-v17) */
+	char	  **notnull_comment;	/* comment thereof */
 	bool	   *notnull_invalid;	/* true for NOT NULL NOT VALID */
 	bool	   *notnull_noinh;	/* NOT NULL is NO INHERIT */
 	bool	   *notnull_islocal;	/* true if NOT NULL has local definition */
@@ -440,6 +448,7 @@ typedef struct _indexAttachInfo
 typedef struct _relStatsInfo
 {
 	DumpableObject dobj;
+	Oid			relid;
 	int32		relpages;
 	char	   *reltuples;
 	int32		relallvisible;
@@ -596,6 +605,7 @@ typedef struct _fdwInfo
 	const char *rolname;
 	char	   *fdwhandler;
 	char	   *fdwvalidator;
+	char	   *fdwconnection;
 	char	   *fdwoptions;
 } FdwInfo;
 
@@ -661,12 +671,14 @@ typedef struct _PublicationInfo
 	DumpableObject dobj;
 	const char *rolname;
 	bool		puballtables;
+	bool		puballsequences;
 	bool		pubinsert;
 	bool		pubupdate;
 	bool		pubdelete;
 	bool		pubtruncate;
 	bool		pubviaroot;
 	PublishGencolsType pubgencols_type;
+	SimplePtrList except_tables;
 } PublicationInfo;
 
 /*
@@ -708,9 +720,13 @@ typedef struct _SubscriptionInfo
 	bool		subpasswordrequired;
 	bool		subrunasowner;
 	bool		subfailover;
+	bool		subretaindeadtuples;
+	int			submaxretention;
+	char	   *subservername;
 	char	   *subconninfo;
 	char	   *subslotname;
 	char	   *subsynccommit;
+	char	   *subwalrcvtimeout;
 	char	   *subpublications;
 	char	   *suborigin;
 	char	   *suboriginremotelsn;
@@ -756,6 +772,7 @@ extern TableInfo *findTableByOid(Oid oid);
 extern TypeInfo *findTypeByOid(Oid oid);
 extern FuncInfo *findFuncByOid(Oid oid);
 extern OprInfo *findOprByOid(Oid oid);
+extern AccessMethodInfo *findAccessMethodByOid(Oid oid);
 extern CollInfo *findCollationByOid(Oid oid);
 extern NamespaceInfo *findNamespaceByOid(Oid oid);
 extern ExtensionInfo *findExtensionByOid(Oid oid);
@@ -817,6 +834,6 @@ extern void getPublicationNamespaces(Archive *fout);
 extern void getPublicationTables(Archive *fout, TableInfo tblinfo[],
 								 int numTables);
 extern void getSubscriptions(Archive *fout);
-extern void getSubscriptionTables(Archive *fout);
+extern void getSubscriptionRelations(Archive *fout);
 
 #endif							/* PG_DUMP_H */

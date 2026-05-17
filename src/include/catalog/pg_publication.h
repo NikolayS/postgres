@@ -3,7 +3,7 @@
  * pg_publication.h
  *	  definition of the "publication" system catalog (pg_publication)
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_publication.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_publication
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_publication,6104,PublicationRelationId)
 {
 	Oid			oid;			/* oid */
@@ -39,6 +41,12 @@ CATALOG(pg_publication,6104,PublicationRelationId)
 	 * tables in the database (except for the unlogged and temp ones)
 	 */
 	bool		puballtables;
+
+	/*
+	 * indicates that this is special publication which should encompass all
+	 * sequences in the database (except for the unlogged and temp ones)
+	 */
+	bool		puballsequences;
 
 	/* true if inserts are published */
 	bool		pubinsert;
@@ -61,6 +69,8 @@ CATALOG(pg_publication,6104,PublicationRelationId)
 	 */
 	char		pubgencols;
 } FormData_pg_publication;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_publication corresponds to a pointer to a tuple with
@@ -129,6 +139,7 @@ typedef struct Publication
 	Oid			oid;
 	char	   *name;
 	bool		alltables;
+	bool		allsequences;
 	bool		pubviaroot;
 	PublishGencolsType pubgencols_type;
 	PublicationActions pubactions;
@@ -139,16 +150,19 @@ typedef struct PublicationRelInfo
 	Relation	relation;
 	Node	   *whereClause;
 	List	   *columns;
+	bool		except;
 } PublicationRelInfo;
 
 extern Publication *GetPublication(Oid pubid);
 extern Publication *GetPublicationByName(const char *pubname, bool missing_ok);
-extern List *GetRelationPublications(Oid relid);
+extern List *GetRelationIncludedPublications(Oid relid);
+extern List *GetRelationExcludedPublications(Oid relid);
 
 /*---------
- * Expected values for pub_partopt parameter of GetRelationPublications(),
- * which allows callers to specify which partitions of partitioned tables
- * mentioned in the publication they expect to see.
+ * Expected values for pub_partopt parameter of
+ * GetIncludedPublicationRelations(), which allows callers to specify which
+ * partitions of partitioned tables mentioned in the publication they expect to
+ * see.
  *
  *	ROOT:	only the table explicitly mentioned in the publication
  *	LEAF:	only leaf partitions in given tree
@@ -161,9 +175,12 @@ typedef enum PublicationPartOpt
 	PUBLICATION_PART_ALL,
 } PublicationPartOpt;
 
-extern List *GetPublicationRelations(Oid pubid, PublicationPartOpt pub_partopt);
+extern List *GetIncludedPublicationRelations(Oid pubid,
+											 PublicationPartOpt pub_partopt);
+extern List *GetExcludedPublicationTables(Oid pubid,
+										  PublicationPartOpt pub_partopt);
 extern List *GetAllTablesPublications(void);
-extern List *GetAllTablesPublicationRelations(bool pubviaroot);
+extern List *GetAllPublicationRelations(Oid pubid, char relkind, bool pubviaroot);
 extern List *GetPublicationSchemas(Oid pubid);
 extern List *GetSchemaPublications(Oid schemaid);
 extern List *GetSchemaPublicationRelations(Oid schemaid,
@@ -178,10 +195,12 @@ extern Oid	GetTopMostAncestorInPublication(Oid puboid, List *ancestors,
 
 extern bool is_publishable_relation(Relation rel);
 extern bool is_schema_publication(Oid pubid);
+extern bool is_table_publication(Oid pubid);
 extern bool check_and_fetch_column_list(Publication *pub, Oid relid,
 										MemoryContext mcxt, Bitmapset **cols);
 extern ObjectAddress publication_add_relation(Oid pubid, PublicationRelInfo *pri,
-											  bool if_not_exists);
+											  bool if_not_exists,
+											  AlterPublicationStmt *alter_stmt);
 extern Bitmapset *pub_collist_validate(Relation targetrel, List *columns);
 extern ObjectAddress publication_add_schema(Oid pubid, Oid schemaid,
 											bool if_not_exists);

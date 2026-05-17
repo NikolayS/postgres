@@ -3,7 +3,7 @@
  * rewriteDefine.c
  *	  routines for defining a rewrite rule
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -725,10 +725,9 @@ EnableDisableRule(Relation rel, const char *rulename,
 	/*
 	 * Change ev_enabled if it is different from the desired new state.
 	 */
-	if (DatumGetChar(ruleform->ev_enabled) !=
-		fires_when)
+	if (ruleform->ev_enabled != fires_when)
 	{
-		ruleform->ev_enabled = CharGetDatum(fires_when);
+		ruleform->ev_enabled = fires_when;
 		CatalogTupleUpdate(pg_rewrite_desc, &ruletup->t_self, ruletup);
 
 		changed = true;

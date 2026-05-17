@@ -23,7 +23,7 @@
  * the result is validly encoded according to the destination encoding.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -38,6 +38,7 @@
 #include "catalog/namespace.h"
 #include "mb/pg_wchar.h"
 #include "utils/fmgrprotos.h"
+#include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/relcache.h"
 #include "varatt.h"
@@ -96,6 +97,13 @@ static int	pending_client_encoding = PG_SQL_ASCII;
 static char *perform_default_encoding_conversion(const char *src,
 												 int len, bool is_client_to_server);
 static int	cliplen(const char *str, int len, int limit);
+
+pg_noreturn
+static void report_invalid_encoding_int(int encoding, const char *mbstr,
+										int mblen, int len);
+
+pg_noreturn
+static void report_invalid_encoding_db(const char *mbstr, int mblen, int len);
 
 
 /*
@@ -497,7 +505,8 @@ pg_do_encoding_conversion_buf(Oid proc,
  * Convert string to encoding encoding_name. The source
  * encoding is the DB encoding.
  *
- * BYTEA convert_to(TEXT string, NAME encoding_name) */
+ * BYTEA convert_to(TEXT string, NAME encoding_name)
+ */
 Datum
 pg_convert_to(PG_FUNCTION_ARGS)
 {
@@ -522,7 +531,8 @@ pg_convert_to(PG_FUNCTION_ARGS)
  * Convert string from encoding encoding_name. The destination
  * encoding is the DB encoding.
  *
- * TEXT convert_from(BYTEA string, NAME encoding_name) */
+ * TEXT convert_from(BYTEA string, NAME encoding_name)
+ */
 Datum
 pg_convert_from(PG_FUNCTION_ARGS)
 {
@@ -862,7 +872,7 @@ perform_default_encoding_conversion(const char *src, int len,
  * may call this outside any transaction, or in an aborted transaction.
  */
 void
-pg_unicode_to_server(pg_wchar c, unsigned char *s)
+pg_unicode_to_server(char32_t c, unsigned char *s)
 {
 	unsigned char c_as_utf8[MAX_MULTIBYTE_CHAR_LEN + 1];
 	int			c_as_utf8_len;
@@ -924,7 +934,7 @@ pg_unicode_to_server(pg_wchar c, unsigned char *s)
  * but simply return false on conversion failure.
  */
 bool
-pg_unicode_to_server_noerror(pg_wchar c, unsigned char *s)
+pg_unicode_to_server_noerror(char32_t c, unsigned char *s)
 {
 	unsigned char c_as_utf8[MAX_MULTIBYTE_CHAR_LEN + 1];
 	int			c_as_utf8_len;
@@ -1019,11 +1029,128 @@ pg_encoding_wchar2mb_with_len(int encoding,
 	return pg_wchar_table[encoding].wchar2mb_with_len(from, (unsigned char *) to, len);
 }
 
-/* returns the byte length of a multibyte character */
+/*
+ * Returns the byte length of a multibyte character sequence in a
+ * null-terminated string.  Raises an illegal byte sequence error if the
+ * sequence would hit a null terminator.
+ *
+ * The caller is expected to have checked for a terminator at *mbstr == 0
+ * before calling, but some callers want 1 in that case, so this function
+ * continues that tradition.
+ *
+ * This must only be used for strings that have a null-terminator to enable
+ * bounds detection.
+ */
+int
+pg_mblen_cstr(const char *mbstr)
+{
+	int			length = pg_wchar_table[DatabaseEncoding->encoding].mblen((const unsigned char *) mbstr);
+
+	/*
+	 * The .mblen functions return 1 when given a pointer to a terminator.
+	 * Some callers depend on that, so we tolerate it for now.  Well-behaved
+	 * callers check the leading byte for a terminator *before* calling.
+	 */
+	for (int i = 1; i < length; ++i)
+		if (unlikely(mbstr[i] == 0))
+			report_invalid_encoding_db(mbstr, length, i);
+
+	/*
+	 * String should be NUL-terminated, but checking that would make typical
+	 * callers O(N^2), tripling Valgrind check-world time.  Unless
+	 * VALGRIND_EXPENSIVE, check 1 byte after each actual character.  (If we
+	 * found a character, not a terminator, the next byte must be a terminator
+	 * or the start of the next character.)  If the caller iterates the whole
+	 * string, the last call will diagnose a missing terminator.
+	 */
+	if (mbstr[0] != '\0')
+	{
+#ifdef VALGRIND_EXPENSIVE
+		VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, strlen(mbstr));
+#else
+		VALGRIND_CHECK_MEM_IS_DEFINED(mbstr + length, 1);
+#endif
+	}
+
+	return length;
+}
+
+/*
+ * Returns the byte length of a multibyte character sequence bounded by a range
+ * [mbstr, end) of at least one byte in size.  Raises an illegal byte sequence
+ * error if the sequence would exceed the range.
+ */
+int
+pg_mblen_range(const char *mbstr, const char *end)
+{
+	int			length = pg_wchar_table[DatabaseEncoding->encoding].mblen((const unsigned char *) mbstr);
+
+	Assert(end > mbstr);
+
+	if (unlikely(mbstr + length > end))
+		report_invalid_encoding_db(mbstr, length, end - mbstr);
+
+#ifdef VALGRIND_EXPENSIVE
+	VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, end - mbstr);
+#else
+	VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, length);
+#endif
+
+	return length;
+}
+
+/*
+ * Returns the byte length of a multibyte character sequence bounded by a range
+ * extending for 'limit' bytes, which must be at least one.  Raises an illegal
+ * byte sequence error if the sequence would exceed the range.
+ */
+int
+pg_mblen_with_len(const char *mbstr, int limit)
+{
+	int			length = pg_wchar_table[DatabaseEncoding->encoding].mblen((const unsigned char *) mbstr);
+
+	Assert(limit >= 1);
+
+	if (unlikely(length > limit))
+		report_invalid_encoding_db(mbstr, length, limit);
+
+#ifdef VALGRIND_EXPENSIVE
+	VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, limit);
+#else
+	VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, length);
+#endif
+
+	return length;
+}
+
+
+/*
+ * Returns the length of a multibyte character sequence, without any
+ * validation of bounds.
+ *
+ * PLEASE NOTE:  This function can only be used safely if the caller has
+ * already verified the input string, since otherwise there is a risk of
+ * overrunning the buffer if the string is invalid.  A prior call to a
+ * pg_mbstrlen* function suffices.
+ */
+int
+pg_mblen_unbounded(const char *mbstr)
+{
+	int			length = pg_wchar_table[DatabaseEncoding->encoding].mblen((const unsigned char *) mbstr);
+
+	VALGRIND_CHECK_MEM_IS_DEFINED(mbstr, length);
+
+	return length;
+}
+
+/*
+ * Historical name for pg_mblen_unbounded().  Should not be used and will be
+ * removed in a later version.
+ */
 int
 pg_mblen(const char *mbstr)
 {
-	return pg_wchar_table[DatabaseEncoding->encoding].mblen((const unsigned char *) mbstr);
+	return pg_mblen_unbounded(mbstr);
 }
 
 /* returns the display length of a multibyte character */
@@ -1045,14 +1172,14 @@ pg_mbstrlen(const char *mbstr)
 
 	while (*mbstr)
 	{
-		mbstr += pg_mblen(mbstr);
+		mbstr += pg_mblen_cstr(mbstr);
 		len++;
 	}
 	return len;
 }
 
 /* returns the length (counted in wchars) of a multibyte string
- * (not necessarily NULL terminated)
+ * (stops at the first of "limit" or a NUL)
  */
 int
 pg_mbstrlen_with_len(const char *mbstr, int limit)
@@ -1065,7 +1192,7 @@ pg_mbstrlen_with_len(const char *mbstr, int limit)
 
 	while (limit > 0 && *mbstr)
 	{
-		int			l = pg_mblen(mbstr);
+		int			l = pg_mblen_with_len(mbstr, limit);
 
 		limit -= l;
 		mbstr += l;
@@ -1135,7 +1262,7 @@ pg_mbcharcliplen(const char *mbstr, int len, int limit)
 
 	while (len > 0 && *mbstr)
 	{
-		l = pg_mblen(mbstr);
+		l = pg_mblen_with_len(mbstr, len);
 		nch++;
 		if (nch > limit)
 			break;
@@ -1181,8 +1308,7 @@ SetMessageEncoding(int encoding)
 #ifdef ENABLE_NLS
 /*
  * Make one bind_textdomain_codeset() call, translating a pg_enc to a gettext
- * codeset.  Fails for MULE_INTERNAL, an encoding unknown to gettext; can also
- * fail for gettext-internal causes like out-of-memory.
+ * codeset.  Can fail for gettext-internal causes like out-of-memory.
  */
 static bool
 raw_pg_bind_textdomain_codeset(const char *domainname, int encoding)
@@ -1302,8 +1428,7 @@ PG_encoding_to_char(PG_FUNCTION_ARGS)
 /*
  * gettext() returns messages in this encoding.  This often matches the
  * database encoding, but it differs for SQL_ASCII databases, for processes
- * not attached to a database, and under a database encoding lacking iconv
- * support (MULE_INTERNAL).
+ * not attached to a database.
  */
 int
 GetMessageEncoding(void)
@@ -1374,7 +1499,7 @@ pg_utf8_increment(unsigned char *charptr, int length)
 				charptr[3]++;
 				break;
 			}
-			/* FALL THRU */
+			pg_fallthrough;
 		case 3:
 			a = charptr[2];
 			if (a < 0xBF)
@@ -1382,7 +1507,7 @@ pg_utf8_increment(unsigned char *charptr, int length)
 				charptr[2]++;
 				break;
 			}
-			/* FALL THRU */
+			pg_fallthrough;
 		case 2:
 			a = charptr[1];
 			switch (*charptr)
@@ -1402,7 +1527,7 @@ pg_utf8_increment(unsigned char *charptr, int length)
 				charptr[1]++;
 				break;
 			}
-			/* FALL THRU */
+			pg_fallthrough;
 		case 1:
 			a = *charptr;
 			if (a == 0x7F || a == 0xDF || a == 0xEF || a == 0xF4)
@@ -1699,12 +1824,19 @@ void
 report_invalid_encoding(int encoding, const char *mbstr, int len)
 {
 	int			l = pg_encoding_mblen_or_incomplete(encoding, mbstr, len);
+
+	report_invalid_encoding_int(encoding, mbstr, l, len);
+}
+
+static void
+report_invalid_encoding_int(int encoding, const char *mbstr, int mblen, int len)
+{
 	char		buf[8 * 5 + 1];
 	char	   *p = buf;
 	int			j,
 				jlimit;
 
-	jlimit = Min(l, len);
+	jlimit = Min(mblen, len);
 	jlimit = Min(jlimit, 8);	/* prevent buffer overrun */
 
 	for (j = 0; j < jlimit; j++)
@@ -1719,6 +1851,12 @@ report_invalid_encoding(int encoding, const char *mbstr, int len)
 			 errmsg("invalid byte sequence for encoding \"%s\": %s",
 					pg_enc2name_tbl[encoding].name,
 					buf)));
+}
+
+static void
+report_invalid_encoding_db(const char *mbstr, int mblen, int len)
+{
+	report_invalid_encoding_int(GetDatabaseEncoding(), mbstr, mblen, len);
 }
 
 /*
@@ -1792,7 +1930,7 @@ pgwin32_message_to_UTF16(const char *str, int len, int *utf16len)
 	 */
 	if (codepage != 0)
 	{
-		utf16 = (WCHAR *) palloc(sizeof(WCHAR) * (len + 1));
+		utf16 = palloc_array(WCHAR, len + 1);
 		dstlen = MultiByteToWideChar(codepage, 0, str, len, utf16, len);
 		utf16[dstlen] = (WCHAR) 0;
 	}
@@ -1816,7 +1954,7 @@ pgwin32_message_to_UTF16(const char *str, int len, int *utf16len)
 		else
 			utf8 = (char *) str;
 
-		utf16 = (WCHAR *) palloc(sizeof(WCHAR) * (len + 1));
+		utf16 = palloc_array(WCHAR, len + 1);
 		dstlen = MultiByteToWideChar(CP_UTF8, 0, utf8, len, utf16, len);
 		utf16[dstlen] = (WCHAR) 0;
 

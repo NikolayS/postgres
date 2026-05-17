@@ -4,7 +4,7 @@
  *	  Support routines for accelerated sorting.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -57,7 +57,7 @@ comparison_shim(Datum x, Datum y, SortSupport ssup)
 	if (extra->fcinfo.isnull)
 		elog(ERROR, "function %u returned NULL", extra->flinfo.fn_oid);
 
-	return result;
+	return DatumGetInt32(result);
 }
 
 /*

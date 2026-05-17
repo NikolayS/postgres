@@ -3,7 +3,7 @@
  * test_decoding.c
  *		  example logical decoding output plugin
  *
- * Copyright (c) 2012-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  contrib/test_decoding/test_decoding.c
@@ -70,7 +70,7 @@ static void pg_decode_truncate(LogicalDecodingContext *ctx,
 							   int nrelations, Relation relations[],
 							   ReorderBufferChange *change);
 static bool pg_decode_filter(LogicalDecodingContext *ctx,
-							 RepOriginId origin_id);
+							 ReplOriginId origin_id);
 static void pg_decode_message(LogicalDecodingContext *ctx,
 							  ReorderBufferTXN *txn, XLogRecPtr lsn,
 							  bool transactional, const char *prefix,
@@ -163,7 +163,7 @@ pg_decode_startup(LogicalDecodingContext *ctx, OutputPluginOptions *opt,
 	TestDecodingData *data;
 	bool		enable_streaming = false;
 
-	data = palloc0(sizeof(TestDecodingData));
+	data = palloc0_object(TestDecodingData);
 	data->context = AllocSetContextCreate(ctx->context,
 										  "text conversion context",
 										  ALLOCSET_DEFAULT_SIZES);
@@ -340,7 +340,7 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.commit_time));
+						 timestamptz_to_str(txn->commit_time));
 
 	OutputPluginWrite(ctx, true);
 }
@@ -391,7 +391,7 @@ pg_decode_prepare_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.prepare_time));
+						 timestamptz_to_str(txn->prepare_time));
 
 	OutputPluginWrite(ctx, true);
 }
@@ -413,7 +413,7 @@ pg_decode_commit_prepared_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.commit_time));
+						 timestamptz_to_str(txn->commit_time));
 
 	OutputPluginWrite(ctx, true);
 }
@@ -437,7 +437,7 @@ pg_decode_rollback_prepared_txn(LogicalDecodingContext *ctx,
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.commit_time));
+						 timestamptz_to_str(txn->commit_time));
 
 	OutputPluginWrite(ctx, true);
 }
@@ -461,11 +461,11 @@ pg_decode_filter_prepare(LogicalDecodingContext *ctx, TransactionId xid,
 
 static bool
 pg_decode_filter(LogicalDecodingContext *ctx,
-				 RepOriginId origin_id)
+				 ReplOriginId origin_id)
 {
 	TestDecodingData *data = ctx->output_plugin_private;
 
-	if (data->only_local && origin_id != InvalidRepOriginId)
+	if (data->only_local && origin_id != InvalidReplOriginId)
 		return true;
 	return false;
 }
@@ -474,8 +474,8 @@ pg_decode_filter(LogicalDecodingContext *ctx,
  * Print literal `outputstr' already represented as string of type `typid'
  * into stringbuf `s'.
  *
- * Some builtin types aren't quoted, the rest is quoted. Escaping is done as
- * if standard_conforming_strings were enabled.
+ * Some builtin types aren't quoted, the rest is quoted. Escaping is done
+ * per standard SQL rules.
  */
 static void
 print_literal(StringInfo s, Oid typid, char *outputstr)
@@ -581,7 +581,7 @@ tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_
 		/* print data */
 		if (isnull)
 			appendStringInfoString(s, "null");
-		else if (typisvarlena && VARATT_IS_EXTERNAL_ONDISK(origval))
+		else if (typisvarlena && VARATT_IS_EXTERNAL_ONDISK(DatumGetPointer(origval)))
 			appendStringInfoString(s, "unchanged-toast-datum");
 		else if (!typisvarlena)
 			print_literal(s, typid,
@@ -874,7 +874,7 @@ pg_decode_stream_prepare(LogicalDecodingContext *ctx,
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.prepare_time));
+						 timestamptz_to_str(txn->prepare_time));
 
 	OutputPluginWrite(ctx, true);
 }
@@ -903,7 +903,7 @@ pg_decode_stream_commit(LogicalDecodingContext *ctx,
 
 	if (data->include_timestamp)
 		appendStringInfo(ctx->out, " (at %s)",
-						 timestamptz_to_str(txn->xact_time.commit_time));
+						 timestamptz_to_str(txn->commit_time));
 
 	OutputPluginWrite(ctx, true);
 }

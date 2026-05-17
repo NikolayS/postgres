@@ -3,7 +3,7 @@
  * tupdesc.c
  *	  POSTGRES tuple descriptor support code
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -86,25 +86,8 @@ populate_compact_attribute_internal(Form_pg_attribute src,
 		IsCatalogRelationOid(src->attrelid) ? ATTNULLABLE_VALID :
 		ATTNULLABLE_UNKNOWN;
 
-	switch (src->attalign)
-	{
-		case TYPALIGN_INT:
-			dst->attalignby = ALIGNOF_INT;
-			break;
-		case TYPALIGN_CHAR:
-			dst->attalignby = sizeof(char);
-			break;
-		case TYPALIGN_DOUBLE:
-			dst->attalignby = ALIGNOF_DOUBLE;
-			break;
-		case TYPALIGN_SHORT:
-			dst->attalignby = ALIGNOF_SHORT;
-			break;
-		default:
-			dst->attalignby = 0;
-			elog(ERROR, "invalid attalign value: %c", src->attalign);
-			break;
-	}
+	/* Compute numeric alignment requirement, too */
+	dst->attalignby = typalign_to_alignby(src->attalign);
 }
 
 /*
@@ -142,9 +125,16 @@ void
 verify_compact_attribute(TupleDesc tupdesc, int attnum)
 {
 #ifdef USE_ASSERT_CHECKING
-	CompactAttribute *cattr = &tupdesc->compact_attrs[attnum];
+	CompactAttribute cattr;
 	Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum);
 	CompactAttribute tmp;
+
+	/*
+	 * Make a temp copy of the TupleDesc's CompactAttribute.  This may be a
+	 * shared TupleDesc and the attcacheoff might get changed by another
+	 * backend.
+	 */
+	memcpy(&cattr, &tupdesc->compact_attrs[attnum], sizeof(CompactAttribute));
 
 	/*
 	 * Populate the temporary CompactAttribute from the corresponding
@@ -156,11 +146,11 @@ verify_compact_attribute(TupleDesc tupdesc, int attnum)
 	 * Make the attcacheoff match since it's been reset to -1 by
 	 * populate_compact_attribute_internal.  Same with attnullability.
 	 */
-	tmp.attcacheoff = cattr->attcacheoff;
-	tmp.attnullability = cattr->attnullability;
+	tmp.attcacheoff = cattr.attcacheoff;
+	tmp.attnullability = cattr.attnullability;
 
 	/* Check the freshly populated CompactAttribute matches the TupleDesc's */
-	Assert(memcmp(&tmp, cattr, sizeof(CompactAttribute)) == 0);
+	Assert(memcmp(&tmp, &cattr, sizeof(CompactAttribute)) == 0);
 #endif
 }
 
@@ -207,6 +197,10 @@ CreateTemplateTupleDesc(int natts)
 	desc->tdtypmod = -1;
 	desc->tdrefcount = -1;		/* assume not reference-counted */
 
+	/* This will be set to the correct value by TupleDescFinalize() */
+	desc->firstNonCachedOffsetAttr = -1;
+	desc->firstNonGuaranteedAttr = -1;
+
 	return desc;
 }
 
@@ -231,6 +225,9 @@ CreateTupleDesc(int natts, Form_pg_attribute *attrs)
 		memcpy(TupleDescAttr(desc, i), attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
 		populate_compact_attribute(desc, i);
 	}
+
+	TupleDescFinalize(desc);
+
 	return desc;
 }
 
@@ -249,10 +246,11 @@ CreateTupleDescCopy(TupleDesc tupdesc)
 
 	desc = CreateTemplateTupleDesc(tupdesc->natts);
 
-	/* Flat-copy the attribute array */
-	memcpy(TupleDescAttr(desc, 0),
-		   TupleDescAttr(tupdesc, 0),
-		   desc->natts * sizeof(FormData_pg_attribute));
+	/* Flat-copy the attribute array (unless there are no attributes) */
+	if (desc->natts > 0)
+		memcpy(TupleDescAttr(desc, 0),
+			   TupleDescAttr(tupdesc, 0),
+			   desc->natts * sizeof(FormData_pg_attribute));
 
 	/*
 	 * Since we're not copying constraints and defaults, clear fields
@@ -274,6 +272,8 @@ CreateTupleDescCopy(TupleDesc tupdesc)
 	/* We can copy the tuple type identification, too */
 	desc->tdtypeid = tupdesc->tdtypeid;
 	desc->tdtypmod = tupdesc->tdtypmod;
+
+	TupleDescFinalize(desc);
 
 	return desc;
 }
@@ -295,10 +295,11 @@ CreateTupleDescTruncatedCopy(TupleDesc tupdesc, int natts)
 
 	desc = CreateTemplateTupleDesc(natts);
 
-	/* Flat-copy the attribute array */
-	memcpy(TupleDescAttr(desc, 0),
-		   TupleDescAttr(tupdesc, 0),
-		   desc->natts * sizeof(FormData_pg_attribute));
+	/* Flat-copy the attribute array (unless there are no attributes) */
+	if (desc->natts > 0)
+		memcpy(TupleDescAttr(desc, 0),
+			   TupleDescAttr(tupdesc, 0),
+			   desc->natts * sizeof(FormData_pg_attribute));
 
 	/*
 	 * Since we're not copying constraints and defaults, clear fields
@@ -321,6 +322,8 @@ CreateTupleDescTruncatedCopy(TupleDesc tupdesc, int natts)
 	desc->tdtypeid = tupdesc->tdtypeid;
 	desc->tdtypmod = tupdesc->tdtypmod;
 
+	TupleDescFinalize(desc);
+
 	return desc;
 }
 
@@ -338,10 +341,11 @@ CreateTupleDescCopyConstr(TupleDesc tupdesc)
 
 	desc = CreateTemplateTupleDesc(tupdesc->natts);
 
-	/* Flat-copy the attribute array */
-	memcpy(TupleDescAttr(desc, 0),
-		   TupleDescAttr(tupdesc, 0),
-		   desc->natts * sizeof(FormData_pg_attribute));
+	/* Flat-copy the attribute array (unless there are no attributes) */
+	if (desc->natts > 0)
+		memcpy(TupleDescAttr(desc, 0),
+			   TupleDescAttr(tupdesc, 0),
+			   desc->natts * sizeof(FormData_pg_attribute));
 
 	for (i = 0; i < desc->natts; i++)
 	{
@@ -354,7 +358,7 @@ CreateTupleDescCopyConstr(TupleDesc tupdesc)
 	/* Copy the TupleConstr data structure, if any */
 	if (constr)
 	{
-		TupleConstr *cpy = (TupleConstr *) palloc0(sizeof(TupleConstr));
+		TupleConstr *cpy = palloc0_object(TupleConstr);
 
 		cpy->has_not_null = constr->has_not_null;
 		cpy->has_generated_stored = constr->has_generated_stored;
@@ -406,6 +410,8 @@ CreateTupleDescCopyConstr(TupleDesc tupdesc)
 	desc->tdtypeid = tupdesc->tdtypeid;
 	desc->tdtypmod = tupdesc->tdtypmod;
 
+	TupleDescFinalize(desc);
+
 	return desc;
 }
 
@@ -448,6 +454,8 @@ TupleDescCopy(TupleDesc dst, TupleDesc src)
 	 * source's refcount would be wrong in any case.)
 	 */
 	dst->tdrefcount = -1;
+
+	TupleDescFinalize(dst);
 }
 
 /*
@@ -456,6 +464,9 @@ TupleDescCopy(TupleDesc dst, TupleDesc src)
  *		descriptor to another.
  *
  * !!! Constraints and defaults are not copied !!!
+ *
+ * The caller must take care of calling TupleDescFinalize() on 'dst' once all
+ * TupleDesc changes have been made.
  */
 void
 TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
@@ -467,8 +478,8 @@ TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
 	/*
 	 * sanity checks
 	 */
-	Assert(PointerIsValid(src));
-	Assert(PointerIsValid(dst));
+	Assert(src);
+	Assert(dst);
 	Assert(srcAttno >= 1);
 	Assert(srcAttno <= src->natts);
 	Assert(dstAttno >= 1);
@@ -486,6 +497,60 @@ TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
 	dstAtt->attgenerated = '\0';
 
 	populate_compact_attribute(dst, dstAttno - 1);
+}
+
+/*
+ * TupleDescFinalize
+ *		Finalize the given TupleDesc.  This must be called after the
+ *		attributes arrays have been populated or adjusted by any code.
+ *
+ * Must be called after populate_compact_attribute() and before
+ * BlessTupleDesc().
+ */
+void
+TupleDescFinalize(TupleDesc tupdesc)
+{
+	int			firstNonCachedOffsetAttr = 0;
+	int			firstNonGuaranteedAttr = tupdesc->natts;
+	int			off = 0;
+
+	for (int i = 0; i < tupdesc->natts; i++)
+	{
+		CompactAttribute *cattr = TupleDescCompactAttr(tupdesc, i);
+
+		/*
+		 * Find the highest attnum which is guaranteed to exist in all tuples
+		 * in the table.  We currently only pay attention to byval attributes
+		 * to allow additional optimizations during tuple deformation.
+		 */
+		if (firstNonGuaranteedAttr == tupdesc->natts &&
+			(cattr->attnullability != ATTNULLABLE_VALID || !cattr->attbyval ||
+			 cattr->atthasmissing || cattr->attisdropped || cattr->attlen <= 0))
+			firstNonGuaranteedAttr = i;
+
+		if (cattr->attlen <= 0)
+			break;
+
+		off = att_nominal_alignby(off, cattr->attalignby);
+
+		/*
+		 * attcacheoff is an int16, so don't try to cache any offsets larger
+		 * than will fit in that type.  Any attributes which are offset more
+		 * than 2^15 are likely due to variable-length attributes.  Since we
+		 * don't cache offsets for or beyond variable-length attributes, using
+		 * an int16 rather than an int32 here is unlikely to cost us anything.
+		 */
+		if (off > PG_INT16_MAX)
+			break;
+
+		cattr->attcacheoff = (int16) off;
+
+		off += cattr->attlen;
+		firstNonCachedOffsetAttr = i + 1;
+	}
+
+	tupdesc->firstNonCachedOffsetAttr = firstNonCachedOffsetAttr;
+	tupdesc->firstNonGuaranteedAttr = firstNonGuaranteedAttr;
 }
 
 /*
@@ -808,10 +873,10 @@ hashRowType(TupleDesc desc)
 	uint32		s;
 	int			i;
 
-	s = hash_combine(0, hash_uint32(desc->natts));
-	s = hash_combine(s, hash_uint32(desc->tdtypeid));
+	s = hash_combine(0, hash_bytes_uint32(desc->natts));
+	s = hash_combine(s, hash_bytes_uint32(desc->tdtypeid));
 	for (i = 0; i < desc->natts; ++i)
-		s = hash_combine(s, hash_uint32(TupleDescAttr(desc, i)->atttypid));
+		s = hash_combine(s, hash_bytes_uint32(TupleDescAttr(desc, i)->atttypid));
 
 	return s;
 }
@@ -846,7 +911,7 @@ TupleDescInitEntry(TupleDesc desc,
 	/*
 	 * sanity checks
 	 */
-	Assert(PointerIsValid(desc));
+	Assert(desc);
 	Assert(attributeNumber >= 1);
 	Assert(attributeNumber <= desc->natts);
 	Assert(attdim >= 0);
@@ -918,7 +983,7 @@ TupleDescInitBuiltinEntry(TupleDesc desc,
 	Form_pg_attribute att;
 
 	/* sanity checks */
-	Assert(PointerIsValid(desc));
+	Assert(desc);
 	Assert(attributeNumber >= 1);
 	Assert(attributeNumber <= desc->natts);
 	Assert(attdim >= 0);
@@ -986,7 +1051,7 @@ TupleDescInitBuiltinEntry(TupleDesc desc,
 
 		case INT8OID:
 			att->attlen = 8;
-			att->attbyval = FLOAT8PASSBYVAL;
+			att->attbyval = true;
 			att->attalign = TYPALIGN_DOUBLE;
 			att->attstorage = TYPSTORAGE_PLAIN;
 			att->attcompression = InvalidCompressionMethod;
@@ -1023,7 +1088,7 @@ TupleDescInitEntryCollation(TupleDesc desc,
 	/*
 	 * sanity checks
 	 */
-	Assert(PointerIsValid(desc));
+	Assert(desc);
 	Assert(attributeNumber >= 1);
 	Assert(attributeNumber <= desc->natts);
 
@@ -1074,6 +1139,8 @@ BuildDescFromLists(const List *names, const List *types, const List *typmods, co
 		TupleDescInitEntry(desc, attnum, attname, atttypid, atttypmod, 0);
 		TupleDescInitEntryCollation(desc, attnum, attcollation);
 	}
+
+	TupleDescFinalize(desc);
 
 	return desc;
 }

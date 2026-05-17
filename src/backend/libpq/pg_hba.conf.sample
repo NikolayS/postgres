@@ -53,8 +53,8 @@
 # directly connected to.
 #
 # METHOD can be "trust", "reject", "md5", "password", "scram-sha-256",
-# "gss", "sspi", "ident", "peer", "pam", "oauth", "ldap", "radius" or
-# "cert".  Note that "password" sends passwords in clear text; "md5" or
+# "gss", "sspi", "ident", "peer", "pam", "oauth", "ldap" or "cert".
+# Note that "password" sends passwords in clear text; "md5" or
 # "scram-sha-256" are preferred since they send encrypted passwords.
 #
 # OPTIONS are a set of options for the authentication in the format
@@ -109,14 +109,14 @@
 
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
 
-@remove-line-for-nolocal@# "local" is for Unix domain socket connections only
-@remove-line-for-nolocal@local   all             all                                     @authmethodlocal@
+# "local" is for Unix domain socket connections only
+local   all             all                                     @authmethodlocal@
 # IPv4 local connections:
 host    all             all             127.0.0.1/32            @authmethodhost@
 # IPv6 local connections:
 host    all             all             ::1/128                 @authmethodhost@
 # Allow replication connections from localhost, by a user with the
 # replication privilege.
-@remove-line-for-nolocal@local   replication     all                                     @authmethodlocal@
+local   replication     all                                     @authmethodlocal@
 host    replication     all             127.0.0.1/32            @authmethodhost@
 host    replication     all             ::1/128                 @authmethodhost@

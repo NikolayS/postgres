@@ -102,6 +102,18 @@ ERROR:  tables declared WITH OIDS are not supported
 -- but explicitly not adding oids is still supported
 CREATE TEMP TABLE withoutoid() WITHOUT OIDS; DROP TABLE withoutoid;
 CREATE TEMP TABLE withoutoid() WITH (oids = false); DROP TABLE withoutoid;
+-- temporary tables are ignored by pg_filenode_relation().
+CREATE TEMP TABLE relation_filenode_check(c1 int);
+SELECT relpersistence,
+  pg_filenode_relation (reltablespace, pg_relation_filenode(oid))
+  FROM pg_class
+  WHERE relname = 'relation_filenode_check';
+ relpersistence | pg_filenode_relation 
+----------------+----------------------
+ t              | 
+(1 row)
+
+DROP TABLE relation_filenode_check;
 -- check restriction with default expressions
 -- invalid use of column reference in default expressions
 CREATE TABLE default_expr_column (id int DEFAULT (id));
@@ -149,6 +161,12 @@ ALTER TABLE remember_node_subid ALTER c TYPE bigint;
 SAVEPOINT q; DROP TABLE remember_node_subid; ROLLBACK TO q;
 COMMIT;
 DROP TABLE remember_node_subid;
+-- generated NOT NULL constraint names must not collide with explicitly named constraints
+CREATE TABLE two_not_null_constraints (
+   col integer NOT NULL,
+   CONSTRAINT two_not_null_constraints_col_not_null CHECK (col IS NOT NULL)
+);
+DROP TABLE two_not_null_constraints;
 --
 -- Partitioned tables
 --
@@ -413,10 +431,11 @@ CREATE TABLE part_null PARTITION OF list_parted FOR VALUES IN (null);
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  a      | integer |           |          |         | plain   |              | 
 Partition key: LIST (a)
-Partitions: part_null FOR VALUES IN (NULL),
-            part_p1 FOR VALUES IN (1),
-            part_p2 FOR VALUES IN (2),
-            part_p3 FOR VALUES IN (3)
+Partitions:
+    part_null FOR VALUES IN (NULL)
+    part_p1 FOR VALUES IN (1)
+    part_p2 FOR VALUES IN (2)
+    part_p3 FOR VALUES IN (3)
 
 -- forbidden expressions for partition bound with list partitioned table
 CREATE TABLE part_bogus_expr_fail PARTITION OF list_parted FOR VALUES IN (somename);
@@ -881,7 +900,8 @@ Partition constraint: ((a IS NOT NULL) AND (a = 'c'::text))
 Partition key: RANGE (b)
 Not-null constraints:
     "part_c_b_not_null" NOT NULL "b" (local, inherited)
-Partitions: part_c_1_10 FOR VALUES FROM (1) TO (10)
+Partitions:
+    part_c_1_10 FOR VALUES FROM (1) TO (10)
 
 -- a level-2 partition's constraint will include the parent's expressions
 \d+ part_c_1_10
@@ -1026,8 +1046,9 @@ create table boolspart_f partition of boolspart for values in (false);
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  a      | boolean |           |          |         | plain   |              | 
 Partition key: LIST (a)
-Partitions: boolspart_f FOR VALUES IN (false),
-            boolspart_t FOR VALUES IN (true)
+Partitions:
+    boolspart_f FOR VALUES IN (false)
+    boolspart_t FOR VALUES IN (true)
 
 drop table boolspart;
 -- partitions mixing temporary and permanent relations

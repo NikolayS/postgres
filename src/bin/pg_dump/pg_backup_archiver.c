@@ -31,6 +31,8 @@
 #endif
 
 #include "catalog/pg_class_d.h"
+#include "catalog/pg_largeobject_metadata_d.h"
+#include "catalog/pg_shdepend_d.h"
 #include "common/string.h"
 #include "compress_io.h"
 #include "dumputils.h"
@@ -42,6 +44,7 @@
 #include "pg_backup_archiver.h"
 #include "pg_backup_db.h"
 #include "pg_backup_utils.h"
+#include "pgtar.h"
 
 #define TEXT_DUMP_HEADER "--\n-- PostgreSQL database dump\n--\n\n"
 #define TEXT_DUMPALL_HEADER "--\n-- PostgreSQL database cluster dump\n--\n\n"
@@ -57,7 +60,6 @@ static ArchiveHandle *_allocAH(const char *FileSpec, const ArchiveFormat fmt,
 							   DataDirSyncMethod sync_method);
 static void _getObjectDescription(PQExpBuffer buf, const TocEntry *te);
 static void _printTocEntry(ArchiveHandle *AH, TocEntry *te, const char *pfx);
-static char *sanitize_line(const char *str, bool want_hyphen);
 static void _doSetFixedOutputState(ArchiveHandle *AH);
 static void _doSetSessionAuth(ArchiveHandle *AH, const char *user);
 static void _reconnectToDB(ArchiveHandle *AH, const char *dbname);
@@ -133,7 +135,7 @@ static void StrictNamesCheck(RestoreOptions *ropt);
 DumpOptions *
 NewDumpOptions(void)
 {
-	DumpOptions *opts = (DumpOptions *) pg_malloc(sizeof(DumpOptions));
+	DumpOptions *opts = pg_malloc_object(DumpOptions);
 
 	InitDumpOptions(opts);
 	return opts;
@@ -152,7 +154,7 @@ InitDumpOptions(DumpOptions *opts)
 	opts->dumpSections = DUMP_UNSECTIONED;
 	opts->dumpSchema = true;
 	opts->dumpData = true;
-	opts->dumpStatistics = true;
+	opts->dumpStatistics = false;
 }
 
 /*
@@ -196,6 +198,7 @@ dumpOptionsFromRestoreOptions(RestoreOptions *ropt)
 	dopt->include_everything = ropt->include_everything;
 	dopt->enable_row_security = ropt->enable_row_security;
 	dopt->sequence_data = ropt->sequence_data;
+	dopt->restrict_key = ropt->restrict_key ? pg_strdup(ropt->restrict_key) : NULL;
 
 	return dopt;
 }
@@ -464,6 +467,17 @@ RestoreArchive(Archive *AHX, bool append_data)
 		SetOutput(AH, ropt->filename, ropt->compression_spec, append_data);
 
 	ahprintf(AH, "--\n-- PostgreSQL database dump\n--\n\n");
+
+	/*
+	 * If generating plain-text output, enter restricted mode to block any
+	 * unexpected psql meta-commands.  A malicious source might try to inject
+	 * a variety of things via bogus responses to queries.  While we cannot
+	 * prevent such sources from affecting the destination at restore time, we
+	 * can block psql meta-commands so that the client machine that runs psql
+	 * with the dump output remains unaffected.
+	 */
+	if (ropt->restrict_key)
+		ahprintf(AH, "\\restrict %s\n\n", ropt->restrict_key);
 
 	if (AH->archiveRemoteVersion)
 		ahprintf(AH, "-- Dumped from database version %s\n",
@@ -753,6 +767,19 @@ RestoreArchive(Archive *AHX, bool append_data)
 			if ((te->reqs & (REQ_SCHEMA | REQ_DATA | REQ_STATS)) == 0)
 				continue;		/* ignore if not to be dumped at all */
 
+			/* Skip if no-tablespace is given. */
+			if (ropt->noTablespace && te && te->desc &&
+				(strcmp(te->desc, "TABLESPACE") == 0))
+				continue;
+
+			/*
+			 * Skip DROP DATABASE/ROLES/TABLESPACE if we didn't specify
+			 * --clean
+			 */
+			if (!ropt->dropSchema && te && te->desc &&
+				strcmp(te->desc, "DROP_GLOBAL") == 0)
+				continue;
+
 			switch (_tocEntryRestorePass(te))
 			{
 				case RESTORE_PASS_MAIN:
@@ -804,6 +831,14 @@ RestoreArchive(Archive *AHX, bool append_data)
 		dumpTimestamp(AH, "Completed on", time(NULL));
 
 	ahprintf(AH, "--\n-- PostgreSQL database dump complete\n--\n\n");
+
+	/*
+	 * If generating plain-text output, exit restricted mode at the very end
+	 * of the script. This is not pro forma; in particular, pg_dumpall
+	 * requires this when transitioning from one database to another.
+	 */
+	if (ropt->restrict_key)
+		ahprintf(AH, "\\unrestrict %s\n\n", ropt->restrict_key);
 
 	/*
 	 * Clean up & we're done.
@@ -1091,7 +1126,7 @@ NewRestoreOptions(void)
 {
 	RestoreOptions *opts;
 
-	opts = (RestoreOptions *) pg_malloc0(sizeof(RestoreOptions));
+	opts = pg_malloc0_object(RestoreOptions);
 
 	/* set any fields that shouldn't default to zeroes */
 	opts->format = archUnknown;
@@ -1228,7 +1263,7 @@ ArchiveEntry(Archive *AHX, CatalogId catalogId, DumpId dumpId,
 	ArchiveHandle *AH = (ArchiveHandle *) AHX;
 	TocEntry   *newToc;
 
-	newToc = (TocEntry *) pg_malloc0(sizeof(TocEntry));
+	newToc = pg_malloc0_object(TocEntry);
 
 	AH->tocCount++;
 	if (dumpId > AH->maxDumpId)
@@ -1256,7 +1291,7 @@ ArchiveEntry(Archive *AHX, CatalogId catalogId, DumpId dumpId,
 
 	if (opts->nDeps > 0)
 	{
-		newToc->dependencies = (DumpId *) pg_malloc(opts->nDeps * sizeof(DumpId));
+		newToc->dependencies = pg_malloc_array(DumpId, opts->nDeps);
 		memcpy(newToc->dependencies, opts->deps, opts->nDeps * sizeof(DumpId));
 		newToc->nDeps = opts->nDeps;
 	}
@@ -1330,8 +1365,8 @@ PrintTOCSummary(Archive *AHX)
 	ahprintf(AH, ";     Dump Version: %d.%d-%d\n",
 			 ARCHIVE_MAJOR(AH->version), ARCHIVE_MINOR(AH->version), ARCHIVE_REV(AH->version));
 	ahprintf(AH, ";     Format: %s\n", fmtName);
-	ahprintf(AH, ";     Integer: %d bytes\n", (int) AH->intSize);
-	ahprintf(AH, ";     Offset: %d bytes\n", (int) AH->offSize);
+	ahprintf(AH, ";     Integer: %zu bytes\n", AH->intSize);
+	ahprintf(AH, ";     Offset: %zu bytes\n", AH->offSize);
 	if (AH->archiveRemoteVersion)
 		ahprintf(AH, ";     Dumped from database version: %s\n",
 				 AH->archiveRemoteVersion);
@@ -1559,7 +1594,7 @@ SortTocFromFile(Archive *AHX)
 	StringInfoData linebuf;
 
 	/* Allocate space for the 'wanted' array, and init it */
-	ropt->idWanted = (bool *) pg_malloc0(sizeof(bool) * AH->maxDumpId);
+	ropt->idWanted = pg_malloc0_array(bool, AH->maxDumpId);
 
 	/* Setup the file */
 	fh = fopen(ropt->tocFile, PG_BINARY_R);
@@ -1675,6 +1710,9 @@ archprintf(Archive *AH, const char *fmt,...)
 
 /*******************************
  * Stuff below here should be 'private' to the archiver routines
+ *
+ * If append_data is set, then append data into file as we are restoring dump
+ * of multiple databases which was taken by pg_dumpall.
  *******************************/
 
 static void
@@ -1868,8 +1906,8 @@ ahwrite(const void *ptr, size_t size, size_t nmemb, ArchiveHandle *AH)
 	{
 		CompressFileHandle *CFH = (CompressFileHandle *) AH->OF;
 
-		if (CFH->write_func(ptr, size * nmemb, CFH))
-			bytes_written = size * nmemb;
+		CFH->write_func(ptr, size * nmemb, CFH);
+		bytes_written = size * nmemb;
 	}
 
 	if (bytes_written != size * nmemb)
@@ -1975,8 +2013,8 @@ buildTocEntryArrays(ArchiveHandle *AH)
 	DumpId		maxDumpId = AH->maxDumpId;
 	TocEntry   *te;
 
-	AH->tocsByDumpId = (TocEntry **) pg_malloc0((maxDumpId + 1) * sizeof(TocEntry *));
-	AH->tableDataId = (DumpId *) pg_malloc0((maxDumpId + 1) * sizeof(DumpId));
+	AH->tocsByDumpId = pg_malloc0_array(TocEntry *, (maxDumpId + 1));
+	AH->tableDataId = pg_malloc0_array(DumpId, (maxDumpId + 1));
 
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
@@ -2052,7 +2090,7 @@ WriteOffset(ArchiveHandle *AH, pgoff_t o, int wasSet)
 }
 
 int
-ReadOffset(ArchiveHandle *AH, pgoff_t * o)
+ReadOffset(ArchiveHandle *AH, pgoff_t *o)
 {
 	int			i;
 	int			off;
@@ -2292,8 +2330,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 		if (ferror(fh))
 			pg_fatal("could not read input file: %m");
 		else
-			pg_fatal("input file is too short (read %lu, expected 5)",
-					 (unsigned long) cnt);
+			pg_fatal("input file is too short (read %zu, expected 5)", cnt);
 	}
 
 	/* Save it, just in case we need it later */
@@ -2336,7 +2373,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 		}
 
 		if (!isValidTarHeader(AH->lookahead))
-			pg_fatal("input file does not appear to be a valid archive");
+			pg_fatal("input file does not appear to be a valid tar archive");
 
 		AH->format = archTar;
 	}
@@ -2371,13 +2408,13 @@ _allocAH(const char *FileSpec, const ArchiveFormat fmt,
 	pg_log_debug("allocating AH for %s, format %d",
 				 FileSpec ? FileSpec : "(stdio)", fmt);
 
-	AH = (ArchiveHandle *) pg_malloc0(sizeof(ArchiveHandle));
+	AH = pg_malloc0_object(ArchiveHandle);
 
 	AH->version = K_VERS_SELF;
 
 	/* initialize for backwards compatible string processing */
 	AH->public.encoding = 0;	/* PG_SQL_ASCII */
-	AH->public.std_strings = false;
+	AH->public.std_strings = true;
 
 	/* sql error handling */
 	AH->public.exit_on_error = true;
@@ -2408,7 +2445,7 @@ _allocAH(const char *FileSpec, const ArchiveFormat fmt,
 	AH->currTablespace = NULL;	/* ditto */
 	AH->currTableAm = NULL;		/* ditto */
 
-	AH->toc = (TocEntry *) pg_malloc0(sizeof(TocEntry));
+	AH->toc = pg_malloc0_object(TocEntry);
 
 	AH->toc->next = AH->toc;
 	AH->toc->prev = AH->toc;
@@ -2495,7 +2532,7 @@ WriteDataChunks(ArchiveHandle *AH, ParallelState *pstate)
 		TocEntry  **tes;
 		int			ntes;
 
-		tes = (TocEntry **) pg_malloc(AH->tocCount * sizeof(TocEntry *));
+		tes = pg_malloc_array(TocEntry *, AH->tocCount);
 		ntes = 0;
 		for (te = AH->toc->next; te != AH->toc; te = te->next)
 		{
@@ -2655,7 +2692,7 @@ WriteToc(ArchiveHandle *AH)
 				pg_fatal("unexpected TOC entry in WriteToc(): %d %s %s",
 						 te->dumpId, te->desc, te->tag);
 
-			if (fseeko(AH->FH, te->defnLen, SEEK_CUR != 0))
+			if (fseeko(AH->FH, te->defnLen, SEEK_CUR) != 0)
 				pg_fatal("error during file seek: %m");
 		}
 		else if (te->defnDumper)
@@ -2706,7 +2743,7 @@ ReadToc(ArchiveHandle *AH)
 
 	for (i = 0; i < AH->tocCount; i++)
 	{
-		te = (TocEntry *) pg_malloc0(sizeof(TocEntry));
+		te = pg_malloc0_object(TocEntry);
 		te->dumpId = ReadInt(AH);
 
 		if (te->dumpId > AH->maxDumpId)
@@ -2803,7 +2840,7 @@ ReadToc(ArchiveHandle *AH)
 		if (AH->version >= K_VERS_1_5)
 		{
 			depSize = 100;
-			deps = (DumpId *) pg_malloc(sizeof(DumpId) * depSize);
+			deps = pg_malloc_array(DumpId, depSize);
 			depIdx = 0;
 			for (;;)
 			{
@@ -2813,7 +2850,7 @@ ReadToc(ArchiveHandle *AH)
 				if (depIdx >= depSize)
 				{
 					depSize *= 2;
-					deps = (DumpId *) pg_realloc(deps, sizeof(DumpId) * depSize);
+					deps = pg_realloc_array(deps, DumpId, depSize);
 				}
 				sscanf(tmp, "%d", &deps[depIdx]);
 				free(tmp);
@@ -2822,7 +2859,7 @@ ReadToc(ArchiveHandle *AH)
 
 			if (depIdx > 0)		/* We have a non-null entry */
 			{
-				deps = (DumpId *) pg_realloc(deps, sizeof(DumpId) * depIdx);
+				deps = pg_realloc_array(deps, DumpId, depIdx);
 				te->dependencies = deps;
 				te->nDeps = depIdx;
 			}
@@ -2974,13 +3011,24 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 	int			res = REQ_SCHEMA | REQ_DATA;
 	RestoreOptions *ropt = AH->public.ropt;
 
+	/*
+	 * For binary upgrade mode, dump pg_largeobject_metadata and the
+	 * associated pg_shdepend rows. This is faster to restore than the
+	 * equivalent set of large object commands.
+	 */
+	if (ropt->binary_upgrade && strcmp(te->desc, "TABLE DATA") == 0 &&
+		(te->catalogId.oid == LargeObjectMetadataRelationId ||
+		 te->catalogId.oid == SharedDependRelationId))
+		return REQ_DATA;
+
 	/* These items are treated specially */
 	if (strcmp(te->desc, "ENCODING") == 0 ||
 		strcmp(te->desc, "STDSTRINGS") == 0 ||
 		strcmp(te->desc, "SEARCHPATH") == 0)
 		return REQ_SPECIAL;
 
-	if (strcmp(te->desc, "STATISTICS DATA") == 0)
+	if ((strcmp(te->desc, "STATISTICS DATA") == 0) ||
+		(strcmp(te->desc, "EXTENDED STATISTICS DATA") == 0))
 	{
 		if (!ropt->dumpStatistics)
 			return 0;
@@ -3003,6 +3051,16 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 	}
 
 	/*
+	 * Global object TOC entries (e.g., ROLEs or TABLESPACEs) must not be
+	 * ignored.
+	 */
+	if (strcmp(te->desc, "ROLE") == 0 ||
+		strcmp(te->desc, "ROLE PROPERTIES") == 0 ||
+		strcmp(te->desc, "TABLESPACE") == 0 ||
+		strcmp(te->desc, "DROP_GLOBAL") == 0)
+		return REQ_SCHEMA;
+
+	/*
 	 * Process exclusions that affect certain classes of TOC entries.
 	 */
 
@@ -3021,6 +3079,33 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 		return 0;
 
 	/*
+	 * If it's a comment on a policy, a publication, or a subscription, maybe
+	 * ignore it.
+	 */
+	if (strcmp(te->desc, "COMMENT") == 0)
+	{
+		if (ropt->no_policies &&
+			strncmp(te->tag, "POLICY", strlen("POLICY")) == 0)
+			return 0;
+
+		if (ropt->no_publications &&
+			strncmp(te->tag, "PUBLICATION", strlen("PUBLICATION")) == 0)
+			return 0;
+
+		if (ropt->no_subscriptions &&
+			strncmp(te->tag, "SUBSCRIPTION", strlen("SUBSCRIPTION")) == 0)
+			return 0;
+
+		/*
+		 * Comments on global objects (ROLEs or TABLESPACEs) should not be
+		 * skipped, since global objects themselves are never skipped.
+		 */
+		if (strncmp(te->tag, "ROLE", strlen("ROLE")) == 0 ||
+			strncmp(te->tag, "TABLESPACE", strlen("TABLESPACE")) == 0)
+			return REQ_SCHEMA;
+	}
+
+	/*
 	 * If it's a publication or a table part of a publication, maybe ignore
 	 * it.
 	 */
@@ -3033,6 +3118,29 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 	/* If it's a security label, maybe ignore it */
 	if (ropt->no_security_labels && strcmp(te->desc, "SECURITY LABEL") == 0)
 		return 0;
+
+	/*
+	 * If it's a security label on a publication or a subscription, maybe
+	 * ignore it.
+	 */
+	if (strcmp(te->desc, "SECURITY LABEL") == 0)
+	{
+		if (ropt->no_publications &&
+			strncmp(te->tag, "PUBLICATION", strlen("PUBLICATION")) == 0)
+			return 0;
+
+		if (ropt->no_subscriptions &&
+			strncmp(te->tag, "SUBSCRIPTION", strlen("SUBSCRIPTION")) == 0)
+			return 0;
+
+		/*
+		 * Security labels on global objects (ROLEs or TABLESPACEs) should not
+		 * be skipped, since global objects themselves are never skipped.
+		 */
+		if (strncmp(te->tag, "ROLE", strlen("ROLE")) == 0 ||
+			strncmp(te->tag, "TABLESPACE", strlen("TABLESPACE")) == 0)
+			return REQ_SCHEMA;
+	}
 
 	/* If it's a subscription, maybe ignore it */
 	if (ropt->no_subscriptions && strcmp(te->desc, "SUBSCRIPTION") == 0)
@@ -3278,12 +3386,14 @@ _tocEntryRestorePass(TocEntry *te)
 		return RESTORE_PASS_POST_ACL;
 
 	/*
-	 * Comments need to be emitted in the same pass as their parent objects.
-	 * ACLs haven't got comments, and neither do matview data objects, but
-	 * event triggers do.  (Fortunately, event triggers haven't got ACLs, or
-	 * we'd need yet another weird special case.)
+	 * Comments and security labels need to be emitted in the same pass as
+	 * their parent objects. ACLs haven't got comments and security labels,
+	 * and neither do matview data objects, but event triggers do.
+	 * (Fortunately, event triggers haven't got ACLs, or we'd need yet another
+	 * weird special case.)
 	 */
-	if (strcmp(te->desc, "COMMENT") == 0 &&
+	if ((strcmp(te->desc, "COMMENT") == 0 ||
+		 strcmp(te->desc, "SECURITY LABEL") == 0) &&
 		strncmp(te->tag, "EVENT TRIGGER ", 14) == 0)
 		return RESTORE_PASS_POST_ACL;
 
@@ -3363,8 +3473,6 @@ _doSetFixedOutputState(ArchiveHandle *AH)
 
 	/* Avoid annoying notices etc */
 	ahprintf(AH, "SET client_min_messages = warning;\n");
-	if (!AH->public.std_strings)
-		ahprintf(AH, "SET escape_string_warning = off;\n");
 
 	/* Adjust row-security state */
 	if (ropt && ropt->enable_row_security)
@@ -3444,11 +3552,21 @@ _reconnectToDB(ArchiveHandle *AH, const char *dbname)
 	else
 	{
 		PQExpBufferData connectbuf;
+		RestoreOptions *ropt = AH->public.ropt;
+
+		/*
+		 * We must temporarily exit restricted mode for \connect, etc.
+		 * Anything added between this line and the following \restrict must
+		 * be careful to avoid any possible meta-command injection vectors.
+		 */
+		ahprintf(AH, "\\unrestrict %s\n", ropt->restrict_key);
 
 		initPQExpBuffer(&connectbuf);
 		appendPsqlMetaConnect(&connectbuf, dbname);
-		ahprintf(AH, "%s\n", connectbuf.data);
+		ahprintf(AH, "%s", connectbuf.data);
 		termPQExpBuffer(&connectbuf);
+
+		ahprintf(AH, "\\restrict %s\n\n", ropt->restrict_key);
 	}
 
 	/*
@@ -3736,6 +3854,7 @@ _getObjectDescription(PQExpBuffer buf, const TocEntry *te)
 		strcmp(type, "DOMAIN") == 0 ||
 		strcmp(type, "FOREIGN TABLE") == 0 ||
 		strcmp(type, "MATERIALIZED VIEW") == 0 ||
+		strcmp(type, "PROPERTY GRAPH") == 0 ||
 		strcmp(type, "SEQUENCE") == 0 ||
 		strcmp(type, "STATISTICS") == 0 ||
 		strcmp(type, "TABLE") == 0 ||
@@ -3796,6 +3915,9 @@ _getObjectDescription(PQExpBuffer buf, const TocEntry *te)
 	else if (strcmp(type, "CAST") == 0 ||
 			 strcmp(type, "CHECK CONSTRAINT") == 0 ||
 			 strcmp(type, "CONSTRAINT") == 0 ||
+			 strcmp(type, "DROP_GLOBAL") == 0 ||
+			 strcmp(type, "ROLE PROPERTIES") == 0 ||
+			 strcmp(type, "ROLE") == 0 ||
 			 strcmp(type, "DATABASE PROPERTIES") == 0 ||
 			 strcmp(type, "DEFAULT") == 0 ||
 			 strcmp(type, "FK CONSTRAINT") == 0 ||
@@ -4042,42 +4164,6 @@ _printTocEntry(ArchiveHandle *AH, TocEntry *te, const char *pfx)
 }
 
 /*
- * Sanitize a string to be included in an SQL comment or TOC listing, by
- * replacing any newlines with spaces.  This ensures each logical output line
- * is in fact one physical output line, to prevent corruption of the dump
- * (which could, in the worst case, present an SQL injection vulnerability
- * if someone were to incautiously load a dump containing objects with
- * maliciously crafted names).
- *
- * The result is a freshly malloc'd string.  If the input string is NULL,
- * return a malloc'ed empty string, unless want_hyphen, in which case return a
- * malloc'ed hyphen.
- *
- * Note that we currently don't bother to quote names, meaning that the name
- * fields aren't automatically parseable.  "pg_restore -L" doesn't care because
- * it only examines the dumpId field, but someday we might want to try harder.
- */
-static char *
-sanitize_line(const char *str, bool want_hyphen)
-{
-	char	   *result;
-	char	   *s;
-
-	if (!str)
-		return pg_strdup(want_hyphen ? "-" : "");
-
-	result = pg_strdup(str);
-
-	for (s = result; *s != '\0'; s++)
-	{
-		if (*s == '\n' || *s == '\r')
-			*s = ' ';
-	}
-
-	return result;
-}
-
-/*
  * Write the file header for a custom-format archive
  */
 void
@@ -4147,8 +4233,7 @@ ReadHead(ArchiveHandle *AH)
 
 	AH->intSize = AH->ReadBytePtr(AH);
 	if (AH->intSize > 32)
-		pg_fatal("sanity check on integer size (%lu) failed",
-				 (unsigned long) AH->intSize);
+		pg_fatal("sanity check on integer size (%zu) failed", AH->intSize);
 
 	if (AH->intSize > sizeof(int))
 		pg_log_warning("archive was made on a machine with larger integers, some operations might fail");
@@ -4847,7 +4932,7 @@ fix_dependencies(ArchiveHandle *AH)
 				{
 					if (strcmp(te2->desc, "BLOBS") == 0)
 					{
-						te->dependencies = (DumpId *) pg_malloc(sizeof(DumpId));
+						te->dependencies = pg_malloc_object(DumpId);
 						te->dependencies[0] = te2->dumpId;
 						te->nDeps++;
 						te->depCount++;
@@ -4890,7 +4975,7 @@ fix_dependencies(ArchiveHandle *AH)
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
 		if (te->nRevDeps > 0)
-			te->revDeps = (DumpId *) pg_malloc(te->nRevDeps * sizeof(DumpId));
+			te->revDeps = pg_malloc_array(DumpId, te->nRevDeps);
 		te->nRevDeps = 0;
 	}
 
@@ -5005,7 +5090,7 @@ identify_locking_dependencies(ArchiveHandle *AH, TocEntry *te)
 	 * difference between a dependency on a table and a dependency on its
 	 * data, so that closer analysis would be needed here.
 	 */
-	lockids = (DumpId *) pg_malloc(te->nDeps * sizeof(DumpId));
+	lockids = pg_malloc_array(DumpId, te->nDeps);
 	nlockids = 0;
 	for (i = 0; i < te->nDeps; i++)
 	{
@@ -5023,7 +5108,7 @@ identify_locking_dependencies(ArchiveHandle *AH, TocEntry *te)
 		return;
 	}
 
-	te->lockDeps = pg_realloc(lockids, nlockids * sizeof(DumpId));
+	te->lockDeps = pg_realloc_array(lockids, DumpId, nlockids);
 	te->nLockDeps = nlockids;
 }
 
@@ -5113,11 +5198,11 @@ CloneArchive(ArchiveHandle *AH)
 	ArchiveHandle *clone;
 
 	/* Make a "flat" copy */
-	clone = (ArchiveHandle *) pg_malloc(sizeof(ArchiveHandle));
+	clone = pg_malloc_object(ArchiveHandle);
 	memcpy(clone, AH, sizeof(ArchiveHandle));
 
 	/* Likewise flat-copy the RestoreOptions, so we can alter them locally */
-	clone->public.ropt = (RestoreOptions *) pg_malloc(sizeof(RestoreOptions));
+	clone->public.ropt = pg_malloc_object(RestoreOptions);
 	memcpy(clone->public.ropt, AH->public.ropt, sizeof(RestoreOptions));
 
 	/* Handle format-independent fields */

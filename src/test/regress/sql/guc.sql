@@ -12,6 +12,15 @@ SHOW vacuum_cost_delay;
 SHOW datestyle;
 SELECT '2006-08-13 12:34:56'::timestamptz;
 
+-- Check handling of list GUCs
+SET search_path = 'pg_catalog', Foo, 'Bar', '';
+SHOW search_path;
+SET search_path = null;  -- means empty list
+SHOW search_path;
+SET search_path = null, null;  -- syntax error
+SET enable_seqscan = null;  -- error
+RESET search_path;
+
 -- SET LOCAL has no effect outside of a transaction
 SET LOCAL vacuum_cost_delay TO 50;
 SHOW vacuum_cost_delay;
@@ -222,6 +231,28 @@ select current_schemas(false);
 drop schema not_there_initially;
 select current_schemas(false);
 reset search_path;
+
+--
+-- Test parsing of log_min_messages
+--
+
+SET log_min_messages TO foo;  -- fail
+SET log_min_messages TO fatal;
+SHOW log_min_messages;
+SET log_min_messages TO 'fatal';
+SHOW log_min_messages;
+SET log_min_messages TO 'checkpointer:debug2, autovacuum:debug1';  -- fail
+SET log_min_messages TO 'debug1, backend:error, fatal';  -- fail
+SET log_min_messages TO 'backend:error, debug1, backend:warning';  -- fail
+SET log_min_messages TO 'backend:error, foo:fatal, archiver:debug1';  -- fail
+SET log_min_messages TO 'backend:error, checkpointer:bar, archiver:debug1';  -- fail
+SET log_min_messages TO 'backend:error, checkpointer:debug3, fatal, archiver:debug2, autovacuum:debug1, walsender:debug3';
+SHOW log_min_messages;
+SET log_min_messages TO 'warning, autovacuum:debug1';
+SHOW log_min_messages;
+SET log_min_messages TO 'autovacuum:debug1, warning';
+SHOW log_min_messages;
+RESET log_min_messages;
 
 --
 -- Tests for function-local GUC settings

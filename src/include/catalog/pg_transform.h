@@ -4,7 +4,7 @@
  *	  definition of the "transform" system catalog (pg_transform)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_transform.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_transform
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_transform,3576,TransformRelationId)
 {
 	Oid			oid;			/* oid */
@@ -34,6 +36,8 @@ CATALOG(pg_transform,3576,TransformRelationId)
 	regproc		trffromsql BKI_LOOKUP_OPT(pg_proc);
 	regproc		trftosql BKI_LOOKUP_OPT(pg_proc);
 } FormData_pg_transform;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_transform corresponds to a pointer to a tuple with

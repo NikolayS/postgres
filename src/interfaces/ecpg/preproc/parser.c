@@ -10,7 +10,7 @@
  * This file will need work if we ever want it to.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -260,14 +260,19 @@ base_yylex_location(void)
 			break;
 		default:
 			/* Else just use the input, i.e., yytext */
-			base_yylloc = loc_strdup(base_yytext);
-			/* Apply an ASCII-only downcasing */
-			for (unsigned char *ptr = (unsigned char *) base_yylloc; *ptr; ptr++)
 			{
-				if (*ptr >= 'A' && *ptr <= 'Z')
-					*ptr += 'a' - 'A';
+				char	   *tmp;
+
+				tmp = loc_strdup(base_yytext);
+				/* Apply an ASCII-only downcasing */
+				for (unsigned char *ptr = (unsigned char *) tmp; *ptr; ptr++)
+				{
+					if (*ptr >= 'A' && *ptr <= 'Z')
+						*ptr += 'a' - 'A';
+				}
+				base_yylloc = tmp;
+				break;
 			}
-			break;
 	}
 	return token;
 }

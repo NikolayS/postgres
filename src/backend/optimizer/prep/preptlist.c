@@ -25,7 +25,7 @@
  * rewriter's work is more concerned with SQL semantics.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -36,7 +36,9 @@
 
 #include "postgres.h"
 
+#include "access/sysattr.h"
 #include "access/table.h"
+#include "catalog/pg_type_d.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/appendinfo.h"
 #include "optimizer/optimizer.h"

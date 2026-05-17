@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025, PostgreSQL Global Development Group
+# Copyright (c) 2023-2026, PostgreSQL Global Development Group
 use strict;
 use warnings FATAL => 'all';
 use Config;
@@ -111,10 +111,13 @@ my $node3_occurrences = () =
 my $total_occurrences =
   $node1_occurrences + $node2_occurrences + $node3_occurrences;
 
-ok($node1_occurrences > 1, "received at least one connection on node1");
-ok($node2_occurrences > 1, "received at least one connection on node2");
-ok($node3_occurrences > 1, "received at least one connection on node3");
-ok($total_occurrences == 50, "received 50 connections across all nodes");
+cmp_ok($node1_occurrences, '>', 1,
+	"received at least one connection on node1");
+cmp_ok($node2_occurrences, '>', 1,
+	"received at least one connection on node2");
+cmp_ok($node3_occurrences, '>', 1,
+	"received at least one connection on node3");
+is($total_occurrences, 50, "received 50 connections across all nodes");
 
 $node1->stop();
 $node2->stop();
@@ -123,7 +126,7 @@ $node2->stop();
 # working one.
 $node3->connect_ok(
 	"host=pg-loadbalancetest port=$port load_balance_hosts=disable",
-	"load_balance_hosts=disable continues until it connects to the a working node",
+	"load_balance_hosts=disable continues until it connects to a working node",
 	sql => "SELECT 'connect3'",
 	log_like => [qr/statement: SELECT 'connect3'/]);
 
@@ -133,7 +136,7 @@ foreach my $i (1 .. 5)
 {
 	$node3->connect_ok(
 		"host=pg-loadbalancetest port=$port load_balance_hosts=random",
-		"load_balance_hosts=random continues until it connects to the a working node",
+		"load_balance_hosts=random continues until it connects to a working node",
 		sql => "SELECT 'connect4'",
 		log_like => [qr/statement: SELECT 'connect4'/]);
 }

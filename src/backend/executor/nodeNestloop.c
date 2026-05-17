@@ -3,7 +3,7 @@
  * nodeNestloop.c
  *	  routines to support nest-loop joins
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -22,6 +22,7 @@
 #include "postgres.h"
 
 #include "executor/execdebug.h"
+#include "executor/instrument.h"
 #include "executor/nodeNestloop.h"
 #include "miscadmin.h"
 

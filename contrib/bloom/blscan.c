@@ -3,7 +3,7 @@
  * blscan.c
  *		Bloom index scan functions.
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  contrib/bloom/blscan.c
@@ -14,9 +14,11 @@
 
 #include "access/relscan.h"
 #include "bloom.h"
+#include "executor/instrument_node.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
+#include "storage/read_stream.h"
 
 /*
  * Begin scan of bloom index.
@@ -29,7 +31,7 @@ blbeginscan(Relation r, int nkeys, int norderbys)
 
 	scan = RelationGetIndexScan(r, nkeys, norderbys);
 
-	so = (BloomScanOpaque) palloc(sizeof(BloomScanOpaqueData));
+	so = (BloomScanOpaque) palloc_object(BloomScanOpaqueData);
 	initBloomState(&so->state, scan->indexRelation);
 	so->sign = NULL;
 
@@ -75,18 +77,20 @@ int64
 blgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
 	int64		ntids = 0;
-	BlockNumber blkno = BLOOM_HEAD_BLKNO,
+	BlockNumber blkno,
 				npages;
 	int			i;
 	BufferAccessStrategy bas;
 	BloomScanOpaque so = (BloomScanOpaque) scan->opaque;
+	BlockRangeReadStreamPrivate p;
+	ReadStream *stream;
 
 	if (so->sign == NULL)
 	{
 		/* New search: have to calculate search signature */
 		ScanKey		skey = scan->keyData;
 
-		so->sign = palloc0(sizeof(BloomSignatureWord) * so->state.opts.bloomLength);
+		so->sign = palloc0_array(BloomSignatureWord, so->state.opts.bloomLength);
 
 		for (i = 0; i < scan->numberOfKeys; i++)
 		{
@@ -119,14 +123,29 @@ blgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	if (scan->instrument)
 		scan->instrument->nsearches++;
 
+	/* Scan all blocks except the metapage using streaming reads */
+	p.current_blocknum = BLOOM_HEAD_BLKNO;
+	p.last_exclusive = npages;
+
+	/*
+	 * It is safe to use batchmode as block_range_read_stream_cb takes no
+	 * locks.
+	 */
+	stream = read_stream_begin_relation(READ_STREAM_FULL |
+										READ_STREAM_USE_BATCHING,
+										bas,
+										scan->indexRelation,
+										MAIN_FORKNUM,
+										block_range_read_stream_cb,
+										&p,
+										0);
+
 	for (blkno = BLOOM_HEAD_BLKNO; blkno < npages; blkno++)
 	{
 		Buffer		buffer;
 		Page		page;
 
-		buffer = ReadBufferExtended(scan->indexRelation, MAIN_FORKNUM,
-									blkno, RBM_NORMAL, bas);
-
+		buffer = read_stream_next_buffer(stream, NULL);
 		LockBuffer(buffer, BUFFER_LOCK_SHARE);
 		page = BufferGetPage(buffer);
 
@@ -162,6 +181,9 @@ blgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 		UnlockReleaseBuffer(buffer);
 		CHECK_FOR_INTERRUPTS();
 	}
+
+	Assert(read_stream_next_buffer(stream, NULL) == InvalidBuffer);
+	read_stream_end(stream);
 	FreeAccessStrategy(bas);
 
 	return ntids;

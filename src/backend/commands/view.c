@@ -3,7 +3,7 @@
  * view.c
  *	  use rewrite rules to construct views
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -22,7 +22,6 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
-#include "parser/parse_relation.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteSupport.h"
@@ -362,6 +361,7 @@ DefineView(ViewStmt *stmt, const char *queryString,
 	ListCell   *cell;
 	bool		check_option;
 	ObjectAddress address;
+	ObjectAddress temp_object;
 
 	/*
 	 * Run parse analysis to convert the raw parse tree to a Query.  Note this
@@ -484,12 +484,14 @@ DefineView(ViewStmt *stmt, const char *queryString,
 	 */
 	view = copyObject(stmt->view);	/* don't corrupt original command */
 	if (view->relpersistence == RELPERSISTENCE_PERMANENT
-		&& isQueryUsingTempRelation(viewParse))
+		&& query_uses_temp_object(viewParse, &temp_object))
 	{
 		view->relpersistence = RELPERSISTENCE_TEMP;
 		ereport(NOTICE,
 				(errmsg("view \"%s\" will be a temporary view",
-						view->relname)));
+						view->relname),
+				 errdetail("It depends on temporary %s.",
+						   getObjectDescription(&temp_object, false))));
 	}
 
 	/*

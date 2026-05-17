@@ -4,7 +4,7 @@
  *	  Low level infrastructure related to expression evaluation
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/executor/execExpr.h
@@ -641,6 +641,10 @@ typedef struct ExprEvalStep
 		{
 			bool		has_nulls;
 			bool		inclause;	/* true for IN and false for NOT IN */
+			bool		null_lhs_result;	/* for non-strict lookups, we
+											 * cache what looking up NULL
+											 * returns. */
+			bool		null_lhs_isnull;
 			struct ScalarArrayOpExprHashTable *elements_tab;
 			FmgrInfo   *finfo;	/* function's lookup data */
 			FunctionCallInfo fcinfo_data;	/* arguments etc */

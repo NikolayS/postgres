@@ -4,7 +4,7 @@
  *	  Declarations for operations on built-in types.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/builtins.h
@@ -68,6 +68,7 @@ extern char *pg_ultostr(char *str, uint32 value);
 
 /* oid.c */
 extern oidvector *buildoidvector(const Oid *oids, int n);
+extern void check_valid_oidvector(const oidvector *oidArray);
 extern Oid	oidparse(Node *node);
 extern int	oid_cmp(const void *p1, const void *p2);
 
@@ -80,7 +81,7 @@ extern PGDLLIMPORT bool quote_all_identifiers;
 extern const char *quote_identifier(const char *ident);
 extern char *quote_qualified_identifier(const char *qualifier,
 										const char *ident);
-extern void generate_operator_clause(fmStringInfo buf,
+extern void generate_operator_clause(StringInfo buf,
 									 const char *leftop, Oid leftoptype,
 									 Oid opoid,
 									 const char *rightop, Oid rightoptype);
@@ -125,7 +126,7 @@ extern Datum numeric_float8_no_overflow(PG_FUNCTION_ARGS);
 #define FORMAT_TYPE_ALLOW_INVALID	0x02	/* allow invalid types */
 #define FORMAT_TYPE_FORCE_QUALIFY	0x04	/* force qualification of type */
 #define FORMAT_TYPE_INVALID_AS_NULL	0x08	/* NULL if undefined */
-extern char *format_type_extended(Oid type_oid, int32 typemod, bits16 flags);
+extern char *format_type_extended(Oid type_oid, int32 typemod, uint16 flags);
 
 extern char *format_type_be(Oid type_oid);
 extern char *format_type_be_qualified(Oid type_oid);

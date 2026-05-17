@@ -4,7 +4,7 @@
  *	  definition of the "extension" system catalog (pg_extension)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_extension.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_extension
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_extension,3079,ExtensionRelationId)
 {
 	Oid			oid;			/* oid */
@@ -43,6 +45,8 @@ CATALOG(pg_extension,3079,ExtensionRelationId)
 	text		extcondition[1];	/* WHERE clauses for config tables */
 #endif
 } FormData_pg_extension;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_extension corresponds to a pointer to a tuple with

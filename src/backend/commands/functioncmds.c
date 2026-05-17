@@ -5,7 +5,7 @@
  *	  Routines for CREATE and DROP FUNCTION commands and CREATE and DROP
  *	  CAST commands.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -34,6 +34,7 @@
 
 #include "access/htup_details.h"
 #include "access/table.h"
+#include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -153,6 +154,8 @@ compute_return_type(TypeName *returnType, Oid languageOid,
 		address = TypeShellMake(typname, namespaceId, GetUserId());
 		rettype = address.objectId;
 		Assert(OidIsValid(rettype));
+		/* Ensure the new shell type is visible to ProcedureCreate */
+		CommandCounterIncrement();
 	}
 
 	aclresult = object_aclcheck(TypeRelationId, rettype, GetUserId(), ACL_USAGE);
@@ -911,7 +914,7 @@ interpret_AS_clause(Oid languageOid, const char *languageName,
 	{
 		SQLFunctionParseInfoPtr pinfo;
 
-		pinfo = (SQLFunctionParseInfoPtr) palloc0(sizeof(SQLFunctionParseInfo));
+		pinfo = palloc0_object(SQLFunctionParseInfo);
 
 		pinfo->fname = funcname;
 		pinfo->nargs = list_length(parameterTypes);
@@ -2421,6 +2424,7 @@ CallStmtResultDesc(CallStmt *stmt)
 							   -1,
 							   0);
 		}
+		TupleDescFinalize(tupdesc);
 	}
 
 	return tupdesc;

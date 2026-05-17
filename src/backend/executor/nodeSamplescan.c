@@ -3,7 +3,7 @@
  * nodeSamplescan.c
  *	  Support routines for sample scans of relations (table sampling).
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -128,7 +128,8 @@ ExecInitSampleScan(SampleScan *node, EState *estate, int eflags)
 	/* and create slot with appropriate rowtype */
 	ExecInitScanTupleSlot(estate, &scanstate->ss,
 						  RelationGetDescr(scanstate->ss.ss_currentRelation),
-						  table_slot_callbacks(scanstate->ss.ss_currentRelation));
+						  table_slot_callbacks(scanstate->ss.ss_currentRelation),
+						  TTS_FLAG_OBEYS_NOT_NULL_CONSTRAINTS);
 
 	/*
 	 * Initialize result type and projection.
@@ -228,7 +229,7 @@ tablesample_init(SampleScanState *scanstate)
 	ListCell   *arg;
 
 	scanstate->donetuples = 0;
-	params = (Datum *) palloc(list_length(scanstate->args) * sizeof(Datum));
+	params = palloc_array(Datum, list_length(scanstate->args));
 
 	i = 0;
 	foreach(arg, scanstate->args)
@@ -297,7 +298,9 @@ tablesample_init(SampleScanState *scanstate)
 									 0, NULL,
 									 scanstate->use_bulkread,
 									 allow_sync,
-									 scanstate->use_pagemode);
+									 scanstate->use_pagemode,
+									 ScanRelIsReadOnly(&scanstate->ss) ?
+									 SO_HINT_REL_READ_ONLY : SO_NONE);
 	}
 	else
 	{

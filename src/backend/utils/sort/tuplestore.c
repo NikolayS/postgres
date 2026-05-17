@@ -43,7 +43,7 @@
  * before switching to the other state or activating a different read pointer.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -63,6 +63,7 @@
 #include "storage/buffile.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
+#include "utils/tuplestore.h"
 
 
 /*
@@ -94,7 +95,7 @@ typedef struct
 	bool		eof_reached;	/* read has reached EOF */
 	int			current;		/* next array index to read */
 	int			file;			/* temp file# */
-	off_t		offset;			/* byte offset in file */
+	pgoff_t		offset;			/* byte offset in file */
 } TSReadPointer;
 
 /*
@@ -179,7 +180,7 @@ struct Tuplestorestate
 	int			readptrsize;	/* allocated length of readptrs array */
 
 	int			writepos_file;	/* file# (valid if READFILE state) */
-	off_t		writepos_offset;	/* offset (valid if READFILE state) */
+	pgoff_t		writepos_offset;	/* offset (valid if READFILE state) */
 };
 
 #define COPYTUP(state,tup)	((*(state)->copytup) (state, tup))
@@ -257,7 +258,7 @@ tuplestore_begin_common(int eflags, bool interXact, int maxKBytes)
 {
 	Tuplestorestate *state;
 
-	state = (Tuplestorestate *) palloc0(sizeof(Tuplestorestate));
+	state = palloc0_object(Tuplestorestate);
 
 	state->status = TSS_INMEM;
 	state->eflags = eflags;
@@ -707,10 +708,10 @@ grow_memtuples(Tuplestorestate *state)
 
 	/* OK, do it */
 	FREEMEM(state, GetMemoryChunkSpace(state->memtuples));
-	state->memtupsize = newmemtupsize;
 	state->memtuples = (void **)
 		repalloc_huge(state->memtuples,
-					  state->memtupsize * sizeof(void *));
+					  newmemtupsize * sizeof(void *));
+	state->memtupsize = newmemtupsize;
 	USEMEM(state, GetMemoryChunkSpace(state->memtuples));
 	if (LACKMEM(state))
 		elog(ERROR, "unexpected out-of-memory situation in tuplestore");
@@ -1024,7 +1025,7 @@ tuplestore_gettuple(Tuplestorestate *state, bool forward,
 							(errcode_for_file_access(),
 							 errmsg("could not seek in tuplestore temporary file")));
 			state->status = TSS_READFILE;
-			/* FALLTHROUGH */
+			pg_fallthrough;
 
 		case TSS_READFILE:
 			*should_free = true;
@@ -1051,7 +1052,7 @@ tuplestore_gettuple(Tuplestorestate *state, bool forward,
 			 * Back up to fetch previously-returned tuple's ending length
 			 * word. If seek fails, assume we are at start of file.
 			 */
-			if (BufFileSeek(state->myfile, 0, -(long) sizeof(unsigned int),
+			if (BufFileSeek(state->myfile, 0, -(pgoff_t) sizeof(unsigned int),
 							SEEK_CUR) != 0)
 			{
 				/* even a failed backwards fetch gets you out of eof state */
@@ -1072,7 +1073,7 @@ tuplestore_gettuple(Tuplestorestate *state, bool forward,
 				 * Back up to get ending length word of tuple before it.
 				 */
 				if (BufFileSeek(state->myfile, 0,
-								-(long) (tuplen + 2 * sizeof(unsigned int)),
+								-(pgoff_t) (tuplen + 2 * sizeof(unsigned int)),
 								SEEK_CUR) != 0)
 				{
 					/*
@@ -1082,7 +1083,7 @@ tuplestore_gettuple(Tuplestorestate *state, bool forward,
 					 * what in-memory case does).
 					 */
 					if (BufFileSeek(state->myfile, 0,
-									-(long) (tuplen + sizeof(unsigned int)),
+									-(pgoff_t) (tuplen + sizeof(unsigned int)),
 									SEEK_CUR) != 0)
 						ereport(ERROR,
 								(errcode_for_file_access(),
@@ -1099,7 +1100,7 @@ tuplestore_gettuple(Tuplestorestate *state, bool forward,
 			 * length word of the tuple, so back up to that point.
 			 */
 			if (BufFileSeek(state->myfile, 0,
-							-(long) tuplen,
+							-(pgoff_t) tuplen,
 							SEEK_CUR) != 0)
 				ereport(ERROR,
 						(errcode_for_file_access(),
@@ -1143,6 +1144,38 @@ tuplestore_gettupleslot(Tuplestorestate *state, bool forward,
 			should_free = true;
 		}
 		ExecStoreMinimalTuple(tuple, slot, should_free);
+		return true;
+	}
+	else
+	{
+		ExecClearTuple(slot);
+		return false;
+	}
+}
+
+/*
+ * tuplestore_gettupleslot_force - exported function to fetch a tuple
+ *
+ * This is identical to tuplestore_gettupleslot except the given slot can be
+ * any kind of slot; it need not be one that will accept a MinimalTuple.
+ */
+bool
+tuplestore_gettupleslot_force(Tuplestorestate *state, bool forward,
+							  bool copy, TupleTableSlot *slot)
+{
+	MinimalTuple tuple;
+	bool		should_free;
+
+	tuple = (MinimalTuple) tuplestore_gettuple(state, forward, &should_free);
+
+	if (tuple)
+	{
+		if (copy && !should_free)
+		{
+			tuple = heap_copy_minimal_tuple(tuple, 0);
+			should_free = true;
+		}
+		ExecForceStoreMinimalTuple(tuple, slot, should_free);
 		return true;
 	}
 	else
@@ -1273,7 +1306,19 @@ dumptuples(Tuplestorestate *state)
 		if (i >= state->memtupcount)
 			break;
 		WRITETUP(state, state->memtuples[i]);
+
+		/*
+		 * Increase memtupdeleted to track the fact that we just deleted that
+		 * tuple.  Think not to remove this on the grounds that we'll reset
+		 * memtupdeleted to zero below.  We might not reach that if some later
+		 * WRITETUP fails (e.g. due to overrunning temp_file_limit).  If so,
+		 * we'd error out leaving an effectively-corrupt tuplestore, which
+		 * would be quite bad if it's a persistent data structure such as a
+		 * Portal's holdStore.
+		 */
+		state->memtupdeleted++;
 	}
+	/* Now we can reset memtupdeleted along with memtupcount */
 	state->memtupdeleted = 0;
 	state->memtupcount = 0;
 }
@@ -1463,8 +1508,10 @@ tuplestore_trim(Tuplestorestate *state)
 		FREEMEM(state, GetMemoryChunkSpace(state->memtuples[i]));
 		pfree(state->memtuples[i]);
 		state->memtuples[i] = NULL;
+		/* As in dumptuples(), increment memtupdeleted synchronously */
+		state->memtupdeleted++;
 	}
-	state->memtupdeleted = nremove;
+	Assert(state->memtupdeleted == nremove);
 
 	/* mark tuplestore as truncated (used for Assert crosschecks only) */
 	state->truncated = true;

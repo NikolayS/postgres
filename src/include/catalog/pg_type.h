@@ -4,7 +4,7 @@
  *	  definition of the "type" system catalog (pg_type)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_type.h
@@ -33,6 +33,8 @@
  *		See struct FormData_pg_attribute for details.
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_type,1247,TypeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 {
 	Oid			oid;			/* oid */
@@ -252,6 +254,8 @@ CATALOG(pg_type,1247,TypeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelati
 	aclitem		typacl[1] BKI_DEFAULT(_null_);
 #endif
 } FormData_pg_type;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_type corresponds to a pointer to a row with

@@ -267,6 +267,58 @@ COPY COPY_TBL FROM :'filename';
 SELECT * FROM COPY_TBL;
 
 --
+-- CHECK constraints
+-- ALTER TABLE ALTER CONSTRAINT [NOT] ENFORCED
+create table parted_ch(
+  a int, b int,
+  constraint cc check (a > 10) not enforced,
+  constraint cc_1 check (b < 17) not enforced
+) partition by range(a);
+create table parted_ch_1 partition of parted_ch for values from (0) to (10) partition by list(b);
+create table parted_ch_11 partition of parted_ch_1 for values in (0, 1, 22,4);
+create table parted_ch_12 partition of parted_ch_1 for values in (2);
+create table parted_ch_2(b int, a int,
+  constraint cc check (a > 10) not enforced,
+  constraint cc_1 check (b < 17) enforced,
+  constraint cc_2 check( a < 15) not enforced
+);
+alter table parted_ch attach partition parted_ch_2 for values from (10) to (20);
+
+insert into parted_ch values (1, 22), (9, 1), (16, 16);
+
+alter table parted_ch alter constraint cc_1 enforced; --error
+update parted_ch set b = 4 where b = 22;
+alter table parted_ch alter constraint cc_1 enforced; --ok
+
+create or replace view check_constraint_status as
+select  conname, conrelid::regclass, conenforced, convalidated
+from    pg_constraint
+where   conrelid::regclass::text ~* '^parted_ch' and contype = 'c'
+order by conname, conrelid::regclass::text collate "C";
+
+alter table parted_ch alter constraint cc not enforced; --no-op
+alter table parted_ch alter constraint cc enforced; --error
+delete from parted_ch where a = 1;
+alter table parted_ch alter constraint cc enforced; --error
+delete from parted_ch where a = 9;
+alter table parted_ch alter constraint cc enforced;
+
+--check these CHECK constraint status
+select * from check_constraint_status;
+
+alter table parted_ch_2 alter constraint cc_2 enforced; --error
+delete from parted_ch where a = 16;
+alter table parted_ch_2 alter constraint cc_2 enforced;
+alter table parted_ch_2 alter constraint cc not enforced;
+alter table parted_ch_2 alter constraint cc_1 not enforced;
+alter table parted_ch_2 alter constraint cc_2 not enforced;
+
+--check these CHECK constraint status again
+select * from check_constraint_status;
+drop table parted_ch;
+drop view check_constraint_status;
+
+--
 -- Primary keys
 --
 
@@ -537,6 +589,9 @@ CREATE TABLE UNIQUE_NOTEN_TBL(i int UNIQUE NOT ENFORCED);
 ALTER TABLE unique_tbl ALTER CONSTRAINT unique_tbl_i_key ENFORCED;
 ALTER TABLE unique_tbl ALTER CONSTRAINT unique_tbl_i_key NOT ENFORCED;
 
+-- can't make an existing constraint NOT VALID
+ALTER TABLE unique_tbl ALTER CONSTRAINT unique_tbl_i_key NOT VALID;
+
 DROP TABLE unique_tbl;
 
 --
@@ -565,6 +620,9 @@ INSERT INTO circles VALUES('<(20,20), 10>', '<(0,0), 4>')
 -- fail, because DO UPDATE variant requires unique index
 INSERT INTO circles VALUES('<(20,20), 10>', '<(0,0), 4>')
   ON CONFLICT ON CONSTRAINT circles_c1_c2_excl DO UPDATE SET c2 = EXCLUDED.c2;
+-- fail, because DO SELECT variant requires unique index
+INSERT INTO circles VALUES('<(20,20), 10>', '<(0,0), 4>')
+  ON CONFLICT ON CONSTRAINT circles_c1_c2_excl DO SELECT RETURNING *;
 -- succeed because c1 doesn't overlap
 INSERT INTO circles VALUES('<(20,20), 1>', '<(0,0), 5>');
 -- succeed because c2 doesn't overlap
@@ -620,7 +678,9 @@ DROP TABLE deferred_excl;
 -- verify constraints created for NOT NULL clauses
 CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL NOT NULL);
 \d+ notnull_tbl1
--- no-op
+-- specifying an existing constraint is a no-op
+ALTER TABLE notnull_tbl1 ADD CONSTRAINT notnull_tbl1_a_not_null NOT NULL a;
+-- but using a different constraint name is not allowed
 ALTER TABLE notnull_tbl1 ADD CONSTRAINT nn NOT NULL a;
 \d+ notnull_tbl1
 -- duplicate name
@@ -829,6 +889,9 @@ ALTER TABLE notnull_tbl1 ADD CONSTRAINT nn NOT NULL a;
 -- cannot add primary key on a column with an invalid not-null
 ALTER TABLE notnull_tbl1 ADD PRIMARY KEY (a);
 
+-- cannot set column as generated-as-identity if it has an invalid not-null
+ALTER TABLE notnull_tbl1 ALTER COLUMN a ADD GENERATED ALWAYS AS IDENTITY;
+
 -- ALTER column SET NOT NULL validates an invalid constraint (but this fails
 -- because of rows with null values)
 ALTER TABLE notnull_tbl1 ALTER a SET NOT NULL;
@@ -997,6 +1060,9 @@ create table constr_parent3 (a int not null);
 create table constr_child3 () inherits (constr_parent2, constr_parent3);
 EXECUTE get_nnconstraint_info('{constr_parent3, constr_child3}');
 
+COMMENT ON CONSTRAINT constr_parent2_a_not_null ON constr_parent2 IS 'this constraint is invalid';
+COMMENT ON CONSTRAINT constr_parent2_a_not_null ON constr_child2 IS 'this constraint is valid';
+
 DEALLOCATE get_nnconstraint_info;
 
 -- end NOT NULL NOT VALID
@@ -1037,3 +1103,14 @@ DROP DOMAIN constraint_comments_dom;
 
 DROP ROLE regress_constraint_comments;
 DROP ROLE regress_constraint_comments_noaccess;
+
+-- Leave some constraints for the pg_upgrade test to pick up
+CREATE DOMAIN constraint_comments_dom AS int;
+
+ALTER DOMAIN constraint_comments_dom ADD CONSTRAINT inv_ck CHECK (value > 0) NOT VALID;
+COMMENT ON CONSTRAINT inv_ck ON DOMAIN constraint_comments_dom IS 'comment on invalid constraint';
+
+-- Create a table that exercises pg_upgrade
+CREATE TABLE regress_notnull1 (a integer);
+CREATE TABLE regress_notnull2 () INHERITS (regress_notnull1);
+ALTER TABLE ONLY regress_notnull2 ALTER COLUMN a SET NOT NULL;
