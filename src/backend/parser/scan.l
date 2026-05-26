@@ -830,6 +830,8 @@ other			.
 					SET_YYLLOC();
 					/* throw back all but the initial u/U */
 					yyless(1);
+					/* Reject identifiers containing Unicode whitespace */
+					check_ident_for_unicode_whitespace(yytext, yyleng);
 					/* and treat it as {identifier} */
 					ident = downcase_truncate_identifier(yytext, yyleng, true);
 					yylval->str = ident;
@@ -1074,6 +1076,9 @@ other			.
 					char	   *ident;
 
 					SET_YYLLOC();
+
+					/* Reject identifiers containing Unicode whitespace */
+					check_ident_for_unicode_whitespace(yytext, yyleng);
 
 					/* Is it a keyword? */
 					kwnum = ScanKeywordLookup(yytext,

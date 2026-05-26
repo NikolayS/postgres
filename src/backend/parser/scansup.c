@@ -16,6 +16,7 @@
 
 #include <ctype.h>
 
+#include "common/unicode_category.h"
 #include "mb/pg_wchar.h"
 #include "parser/scansup.h"
 
@@ -101,6 +102,64 @@ truncate_identifier(char *ident, int len, bool warn)
 					 errmsg("identifier \"%s\" will be truncated to \"%.*s\"",
 							ident, len, ident)));
 		ident[len] = '\0';
+	}
+}
+
+/*
+ * check_ident_for_unicode_whitespace() --- reject identifiers containing
+ * Unicode whitespace or other invisible characters.
+ *
+ * The flex scanner's identifier rules use byte ranges (\200-\377) that match
+ * any non-ASCII byte, including bytes that form multi-byte Unicode whitespace
+ * characters like NO-BREAK SPACE (U+00A0).  This creates a "Trojan Source"
+ * vulnerability where queries can be visually deceptive:
+ *
+ *   SELECT password is<NBSP>null FROM users;
+ *
+ * looks like "password IS NULL" but parses as password aliased to "is null",
+ * leaking the password value.  This function detects and rejects such cases.
+ *
+ * Only applies to multi-byte encodings (primarily UTF-8) where the issue
+ * arises.  Single-byte encodings are not affected because their high-byte
+ * characters don't encode Unicode whitespace.
+ */
+void
+check_ident_for_unicode_whitespace(const char *ident, int len)
+{
+	int			encoding = GetDatabaseEncoding();
+	int			i;
+
+	/* Only UTF-8 encodes Unicode whitespace as sequences of high bytes */
+	if (encoding != PG_UTF8)
+		return;
+
+	for (i = 0; i < len;)
+	{
+		unsigned char ch = (unsigned char) ident[i];
+
+		if (IS_HIGHBIT_SET(ch))
+		{
+			int			mblen = pg_mblen(&ident[i]);
+			pg_wchar	uchar;
+
+			/* Ensure we don't read past the end */
+			if (i + mblen > len)
+				break;
+
+			uchar = utf8_to_unicode((const unsigned char *) &ident[i]);
+
+			if (pg_u_prop_white_space(uchar))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("identifier contains Unicode whitespace character U+%04X",
+								(unsigned int) uchar),
+						 errdetail("Unicode whitespace characters are not allowed in identifiers because they are visually indistinguishable from regular spaces."),
+						 errhint("Remove or replace the Unicode whitespace character.")));
+
+			i += mblen;
+		}
+		else
+			i++;
 	}
 }
 

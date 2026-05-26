@@ -22,6 +22,8 @@ extern char *downcase_identifier(const char *ident, int len,
 
 extern void truncate_identifier(char *ident, int len, bool warn);
 
+extern void check_ident_for_unicode_whitespace(const char *ident, int len);
+
 extern bool scanner_isspace(char ch);
 
 #endif							/* SCANSUP_H */
