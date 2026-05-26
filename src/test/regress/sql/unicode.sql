@@ -36,3 +36,17 @@ FROM
 ORDER BY num;
 
 SELECT is_normalized('abc', 'def');  -- run-time error
+
+-- Test that Unicode whitespace in unquoted identifiers is rejected.
+-- This prevents "Trojan Source" attacks where visually identical queries
+-- parse with different semantics.
+
+-- Normal identifiers with non-Latin letters should still work:
+SELECT 1 AS тест;
+
+-- U+00A0 NO-BREAK SPACE via Unicode escape in a string (should work as data):
+SELECT U&'\00A0' = ' ' AS nbsp_is_not_regular_space;
+
+-- The following line contains U+00A0 (NBSP) between "is" and "null".
+-- It should produce an error about Unicode whitespace in identifiers.
+SELECT 1 is null;
