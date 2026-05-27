@@ -24,7 +24,7 @@
  * for aborts (whether sync or async), since the post-crash assumption would
  * be that such transactions failed anyway.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/clog.c
@@ -43,8 +43,10 @@
 #include "pg_trace.h"
 #include "pgstat.h"
 #include "storage/proc.h"
+#include "storage/subsystems.h"
 #include "storage/sync.h"
 #include "utils/guc_hooks.h"
+#include "utils/wait_event.h"
 
 /*
  * Defines for CLOG page sizes.  A page is the same BLCKSZ as is used
@@ -105,14 +107,21 @@ TransactionIdToPage(TransactionId xid)
 /*
  * Link to shared-memory data structures for CLOG control
  */
-static SlruCtlData XactCtlData;
-
-#define XactCtl (&XactCtlData)
-
-
-static int	ZeroCLOGPage(int64 pageno, bool writeXlog);
+static void CLOGShmemRequest(void *arg);
+static void CLOGShmemInit(void *arg);
 static bool CLOGPagePrecedes(int64 page1, int64 page2);
-static void WriteZeroPageXlogRec(int64 pageno);
+static int	clog_errdetail_for_io_error(const void *opaque_data);
+
+const ShmemCallbacks CLOGShmemCallbacks = {
+	.request_fn = CLOGShmemRequest,
+	.init_fn = CLOGShmemInit,
+};
+
+static SlruDesc XactSlruDesc;
+
+#define XactCtl (&XactSlruDesc)
+
+
 static void WriteTruncateXlogRec(int64 pageno, TransactionId oldestXact,
 								 Oid oldestXactDb);
 static void TransactionIdSetPageStatus(TransactionId xid, int nsubxids,
@@ -383,7 +392,7 @@ TransactionIdSetPageStatusInternal(TransactionId xid, int nsubxids,
 	 * write-busy, since we don't care if the update reaches disk sooner than
 	 * we think.
 	 */
-	slotno = SimpleLruReadPage(XactCtl, pageno, XLogRecPtrIsInvalid(lsn), xid);
+	slotno = SimpleLruReadPage(XactCtl, pageno, !XLogRecPtrIsValid(lsn), &xid);
 
 	/*
 	 * Set the main transaction id, if any.
@@ -576,7 +585,7 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	/* Walk the list and update the status of all XIDs. */
 	while (nextidx != INVALID_PROC_NUMBER)
 	{
-		PGPROC	   *nextproc = &ProcGlobal->allProcs[nextidx];
+		PGPROC	   *nextproc = GetPGProcByNumber(nextidx);
 		int64		thispageno = nextproc->clogGroupMemberPage;
 
 		/*
@@ -635,7 +644,7 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	 */
 	while (wakeidx != INVALID_PROC_NUMBER)
 	{
-		PGPROC	   *wakeproc = &ProcGlobal->allProcs[wakeidx];
+		PGPROC	   *wakeproc = GetPGProcByNumber(wakeidx);
 
 		wakeidx = pg_atomic_read_u32(&wakeproc->clogGroupNext);
 		pg_atomic_write_u32(&wakeproc->clogGroupNext, INVALID_PROC_NUMBER);
@@ -707,7 +716,7 @@ TransactionIdSetStatusBit(TransactionId xid, XidStatus status, XLogRecPtr lsn, i
 	 * recovery. After recovery completes the next clog change will set the
 	 * LSN correctly.
 	 */
-	if (!XLogRecPtrIsInvalid(lsn))
+	if (XLogRecPtrIsValid(lsn))
 	{
 		int			lsnindex = GetLSNIndex(slotno, xid);
 
@@ -744,7 +753,7 @@ TransactionIdGetStatus(TransactionId xid, XLogRecPtr *lsn)
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
 
-	slotno = SimpleLruReadPage_ReadOnly(XactCtl, pageno, xid);
+	slotno = SimpleLruReadPage_ReadOnly(XactCtl, pageno, &xid);
 	byteptr = XactCtl->shared->page_buffer[slotno] + byteno;
 
 	status = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
@@ -775,16 +784,10 @@ CLOGShmemBuffers(void)
 }
 
 /*
- * Initialization of shared memory for CLOG
+ * Register shared memory for CLOG
  */
-Size
-CLOGShmemSize(void)
-{
-	return SimpleLruShmemSize(CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE);
-}
-
-void
-CLOGShmemInit(void)
+static void
+CLOGShmemRequest(void *arg)
 {
 	/* If auto-tuning is requested, now is the time to do it */
 	if (transaction_buffers == 0)
@@ -806,11 +809,26 @@ CLOGShmemInit(void)
 							PGC_S_OVERRIDE);
 	}
 	Assert(transaction_buffers != 0);
+	SimpleLruRequest(.desc = &XactSlruDesc,
+					 .name = "transaction",
+					 .Dir = "pg_xact",
+					 .long_segment_names = false,
 
-	XactCtl->PagePrecedes = CLOGPagePrecedes;
-	SimpleLruInit(XactCtl, "transaction", CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE,
-				  "pg_xact", LWTRANCHE_XACT_BUFFER,
-				  LWTRANCHE_XACT_SLRU, SYNC_HANDLER_CLOG, false);
+					 .nslots = CLOGShmemBuffers(),
+					 .nlsns = CLOG_LSNS_PER_PAGE,
+
+					 .sync_handler = SYNC_HANDLER_CLOG,
+					 .PagePrecedes = CLOGPagePrecedes,
+					 .errdetail_for_io_error = clog_errdetail_for_io_error,
+
+					 .buffer_tranche_id = LWTRANCHE_XACT_BUFFER,
+					 .bank_tranche_id = LWTRANCHE_XACT_SLRU,
+		);
+}
+
+static void
+CLOGShmemInit(void *arg)
+{
 	SlruPagePrecedesUnitTests(XactCtl, CLOG_XACTS_PER_PAGE);
 }
 
@@ -832,41 +850,8 @@ check_transaction_buffers(int *newval, void **extra, GucSource source)
 void
 BootStrapCLOG(void)
 {
-	int			slotno;
-	LWLock	   *lock = SimpleLruGetBankLock(XactCtl, 0);
-
-	LWLockAcquire(lock, LW_EXCLUSIVE);
-
-	/* Create and zero the first page of the commit log */
-	slotno = ZeroCLOGPage(0, false);
-
-	/* Make sure it's written out */
-	SimpleLruWritePage(XactCtl, slotno);
-	Assert(!XactCtl->shared->page_dirty[slotno]);
-
-	LWLockRelease(lock);
-}
-
-/*
- * Initialize (or reinitialize) a page of CLOG to zeroes.
- * If writeXlog is true, also emit an XLOG record saying we did this.
- *
- * The page is not actually written, just set up in shared memory.
- * The slot number of the new page is returned.
- *
- * Control lock must be held at entry, and will be held at exit.
- */
-static int
-ZeroCLOGPage(int64 pageno, bool writeXlog)
-{
-	int			slotno;
-
-	slotno = SimpleLruZeroPage(XactCtl, pageno);
-
-	if (writeXlog)
-		WriteZeroPageXlogRec(pageno);
-
-	return slotno;
+	/* Zero the initial page and flush it to disk */
+	SimpleLruZeroAndWritePage(XactCtl, 0);
 }
 
 /*
@@ -916,7 +901,7 @@ TrimCLOG(void)
 		int			slotno;
 		char	   *byteptr;
 
-		slotno = SimpleLruReadPage(XactCtl, pageno, false, xid);
+		slotno = SimpleLruReadPage(XactCtl, pageno, false, &xid);
 		byteptr = XactCtl->shared->page_buffer[slotno] + byteno;
 
 		/* Zero so-far-unused positions in the current byte */
@@ -974,8 +959,9 @@ ExtendCLOG(TransactionId newestXact)
 
 	LWLockAcquire(lock, LW_EXCLUSIVE);
 
-	/* Zero the page and make an XLOG entry about it */
-	ZeroCLOGPage(pageno, true);
+	/* Zero the page and make a WAL entry about it */
+	SimpleLruZeroPage(XactCtl, pageno);
+	XLogSimpleInsertInt64(RM_CLOG_ID, CLOG_ZEROPAGE, pageno);
 
 	LWLockRelease(lock);
 }
@@ -1066,17 +1052,14 @@ CLOGPagePrecedes(int64 page1, int64 page2)
 			TransactionIdPrecedes(xid1, xid2 + CLOG_XACTS_PER_PAGE - 1));
 }
 
-
-/*
- * Write a ZEROPAGE xlog record
- */
-static void
-WriteZeroPageXlogRec(int64 pageno)
+static int
+clog_errdetail_for_io_error(const void *opaque_data)
 {
-	XLogBeginInsert();
-	XLogRegisterData(&pageno, sizeof(pageno));
-	(void) XLogInsert(RM_CLOG_ID, CLOG_ZEROPAGE);
+	TransactionId xid = *(const TransactionId *) opaque_data;
+
+	return errdetail("Could not access commit status of transaction %u.", xid);
 }
+
 
 /*
  * Write a TRUNCATE xlog record
@@ -1114,19 +1097,9 @@ clog_redo(XLogReaderState *record)
 	if (info == CLOG_ZEROPAGE)
 	{
 		int64		pageno;
-		int			slotno;
-		LWLock	   *lock;
 
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
-
-		lock = SimpleLruGetBankLock(XactCtl, pageno);
-		LWLockAcquire(lock, LW_EXCLUSIVE);
-
-		slotno = ZeroCLOGPage(pageno, false);
-		SimpleLruWritePage(XactCtl, slotno);
-		Assert(!XactCtl->shared->page_dirty[slotno]);
-
-		LWLockRelease(lock);
+		SimpleLruZeroAndWritePage(XactCtl, pageno);
 	}
 	else if (info == CLOG_TRUNCATE)
 	{

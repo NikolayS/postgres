@@ -2,7 +2,7 @@
  * backend_status.h
  *	  Definitions related to backend status reporting
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  * src/include/utils/backend_status.h
  * ----------
@@ -170,10 +170,10 @@ typedef struct PgBackendStatus
 	int64		st_progress_param[PGSTAT_NUM_PROGRESS_PARAM];
 
 	/* query identifier, optionally computed using post_parse_analyze_hook */
-	uint64		st_query_id;
+	int64		st_query_id;
 
 	/* plan identifier, optionally computed using planner_hook */
-	uint64		st_plan_id;
+	int64		st_plan_id;
 } PgBackendStatus;
 
 
@@ -299,14 +299,6 @@ extern PGDLLIMPORT PgBackendStatus *MyBEEntry;
 
 
 /* ----------
- * Functions called from postmaster
- * ----------
- */
-extern Size BackendStatusShmemSize(void);
-extern void BackendStatusShmemInit(void);
-
-
-/* ----------
  * Functions called from backends
  * ----------
  */
@@ -321,17 +313,16 @@ extern void pgstat_clear_backend_activity_snapshot(void);
 
 /* Activity reporting functions */
 extern void pgstat_report_activity(BackendState state, const char *cmd_str);
-extern void pgstat_report_query_id(uint64 query_id, bool force);
-extern void pgstat_report_plan_id(uint64 plan_id, bool force);
+extern void pgstat_report_query_id(int64 query_id, bool force);
+extern void pgstat_report_plan_id(int64 plan_id, bool force);
 extern void pgstat_report_tempfile(size_t filesize);
 extern void pgstat_report_appname(const char *appname);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);
 extern const char *pgstat_get_backend_current_activity(int pid, bool checkUser);
 extern const char *pgstat_get_crashed_backend_activity(int pid, char *buffer,
 													   int buflen);
-extern uint64 pgstat_get_my_query_id(void);
-extern uint64 pgstat_get_my_plan_id(void);
-extern BackendType pgstat_get_backend_type_by_proc_number(ProcNumber procNumber);
+extern int64 pgstat_get_my_query_id(void);
+extern int64 pgstat_get_my_plan_id(void);
 
 
 /* ----------

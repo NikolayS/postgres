@@ -3,7 +3,7 @@
  * heap.c
  *	  code to create and destroy POSTGRES heap relations
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -504,11 +504,15 @@ CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind,
 	 */
 	for (i = 0; i < natts; i++)
 	{
-		CheckAttributeType(NameStr(TupleDescAttr(tupdesc, i)->attname),
-						   TupleDescAttr(tupdesc, i)->atttypid,
-						   TupleDescAttr(tupdesc, i)->attcollation,
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		if (attr->attisdropped)
+			continue;
+		CheckAttributeType(NameStr(attr->attname),
+						   attr->atttypid,
+						   attr->attcollation,
 						   NIL, /* assume we're creating a new rowtype */
-						   flags | (TupleDescAttr(tupdesc, i)->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL ? CHKATYPE_IS_VIRTUAL : 0));
+						   flags | (attr->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL ? CHKATYPE_IS_VIRTUAL : 0));
 	}
 }
 
@@ -654,6 +658,16 @@ CheckAttributeType(const char *attname,
 						   containing_rowtypes,
 						   flags);
 	}
+	else if (att_typtype == TYPTYPE_MULTIRANGE)
+	{
+		/*
+		 * If it's a multirange, recurse to check its plain range type.
+		 */
+		CheckAttributeType(attname, get_multirange_range(atttypid),
+						   InvalidOid,	/* range types are not collatable */
+						   containing_rowtypes,
+						   flags);
+	}
 	else if (OidIsValid((att_typelem = get_element_type(atttypid))))
 	{
 		/*
@@ -663,6 +677,15 @@ CheckAttributeType(const char *attname,
 						   containing_rowtypes,
 						   flags);
 	}
+
+	/*
+	 * For consistency with check_virtual_generated_security().
+	 */
+	if ((flags & CHKATYPE_IS_VIRTUAL) && atttypid >= FirstUnpinnedObjectId)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("virtual generated column \"%s\" cannot have a user-defined type", attname),
+				errdetail("Virtual generated columns that make use of user-defined types are not yet supported."));
 
 	/*
 	 * This might not be strictly invalid per SQL standard, but it is pretty
@@ -723,7 +746,7 @@ InsertPgAttributeTuples(Relation pg_attribute_rel,
 	/* Initialize the number of slots to use */
 	nslots = Min(tupdesc->natts,
 				 (MAX_CATALOG_MULTI_INSERT_BYTES / sizeof(FormData_pg_attribute)));
-	slot = palloc(sizeof(TupleTableSlot *) * nslots);
+	slot = palloc_array(TupleTableSlot *, nslots);
 	for (int i = 0; i < nslots; i++)
 		slot[i] = MakeSingleTupleTableSlot(td, &TTSOpsHeapTuple);
 
@@ -1100,6 +1123,7 @@ AddNewRelationType(const char *typeName,
  *		if false, relacl is always set NULL
  *	allow_system_table_mods: true to allow creation in system namespaces
  *	is_internal: is this a system-generated catalog?
+ *	relrewrite: link to original relation during a table rewrite
  *
  * Output parameters:
  *	typaddress: if not null, gets the object address of the new pg_type entry
@@ -1323,12 +1347,14 @@ heap_create_with_catalog(const char *relname,
 	/*
 	 * Decide whether to create a pg_type entry for the relation's rowtype.
 	 * These types are made except where the use of a relation as such is an
-	 * implementation detail: toast tables, sequences and indexes.
+	 * implementation detail: toast tables, sequences, indexes, and property
+	 * graphs.
 	 */
 	if (!(relkind == RELKIND_SEQUENCE ||
 		  relkind == RELKIND_TOASTVALUE ||
 		  relkind == RELKIND_INDEX ||
-		  relkind == RELKIND_PARTITIONED_INDEX))
+		  relkind == RELKIND_PARTITIONED_INDEX ||
+		  relkind == RELKIND_PROPGRAPH))
 	{
 		Oid			new_array_oid;
 		ObjectAddress new_type_addr;
@@ -2449,7 +2475,7 @@ AddRelationNewConstraints(Relation rel,
 
 		defOid = StoreAttrDefault(rel, colDef->attnum, expr, is_internal);
 
-		cooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
+		cooked = palloc_object(CookedConstraint);
 		cooked->contype = CONSTR_DEFAULT;
 		cooked->conoid = defOid;
 		cooked->name = NULL;
@@ -2583,7 +2609,7 @@ AddRelationNewConstraints(Relation rel,
 
 			numchecks++;
 
-			cooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
+			cooked = palloc_object(CookedConstraint);
 			cooked->contype = CONSTR_CHECK;
 			cooked->conoid = constrOid;
 			cooked->name = ccname;
@@ -2625,6 +2651,7 @@ AddRelationNewConstraints(Relation rel,
 			 * requested validity.
 			 */
 			if (AdjustNotNullInheritance(RelationGetRelid(rel), colnum,
+										 cdef->conname,
 										 is_local, cdef->is_no_inherit,
 										 cdef->skip_validation))
 				continue;
@@ -2659,7 +2686,7 @@ AddRelationNewConstraints(Relation rel,
 								inhcount,
 								cdef->is_no_inherit);
 
-			nncooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
+			nncooked = palloc_object(CookedConstraint);
 			nncooked->contype = CONSTR_NOTNULL;
 			nncooked->conoid = constrOid;
 			nncooked->name = nnname;
@@ -2875,14 +2902,16 @@ MergeWithExistingConstraint(Relation rel, const char *ccname, Node *expr,
  * for each column, giving priority to user-specified ones, and setting
  * inhcount according to how many parents cause each column to get a
  * not-null constraint.  If a user-specified name clashes with another
- * user-specified name, an error is raised.
+ * user-specified name, an error is raised.  'existing_constraints'
+ * is a list of already defined constraint names, which should be avoided
+ * when generating further ones.
  *
  * Returns a list of AttrNumber for columns that need to have the attnotnull
  * flag set.
  */
 List *
 AddRelationNotNullConstraints(Relation rel, List *constraints,
-							  List *old_notnulls)
+							  List *old_notnulls, List *existing_constraints)
 {
 	List	   *givennames;
 	List	   *nnnames;
@@ -2894,7 +2923,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * because we must raise error for user-generated name conflicts, but for
 	 * system-generated name conflicts we just generate another.
 	 */
-	nnnames = NIL;
+	nnnames = list_copy(existing_constraints);	/* don't scribble on input */
 	givennames = NIL;
 
 	/*
@@ -2996,7 +3025,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 				if (constr->is_no_inherit)
 					ereport(ERROR,
 							(errcode(ERRCODE_DATATYPE_MISMATCH),
-							 errmsg("cannot define not-null constraint on column \"%s\" with NO INHERIT",
+							 errmsg("cannot define not-null constraint with NO INHERIT on column \"%s\"",
 									strVal(linitial(constr->keys))),
 							 errdetail("The column has an inherited not-null constraint.")));
 
@@ -3215,6 +3244,86 @@ check_nested_generated(ParseState *pstate, Node *node)
 }
 
 /*
+ * Check security of virtual generated column expression.
+ *
+ * Just like selecting from a view is exploitable (CVE-2024-7348), selecting
+ * from a table with virtual generated columns is exploitable.  Users who are
+ * concerned about this can avoid selecting from views, but telling them to
+ * avoid selecting from tables is less practical.
+ *
+ * To address this, this restricts generation expressions for virtual
+ * generated columns are restricted to using built-in functions and types.  We
+ * assume that built-in functions and types cannot be exploited for this
+ * purpose.  Note the overall security also requires that all functions in use
+ * a immutable.  (For example, there are some built-in non-immutable functions
+ * that can run arbitrary SQL.)  The immutability is checked elsewhere, since
+ * that is a property that needs to hold independent of security
+ * considerations.
+ *
+ * In the future, this could be expanded by some new mechanism to declare
+ * other functions and types as safe or trusted for this purpose, but that is
+ * to be designed.
+ */
+
+/*
+ * Callback for check_functions_in_node() that determines whether a function
+ * is user-defined.
+ */
+static bool
+contains_user_functions_checker(Oid func_id, void *context)
+{
+	return (func_id >= FirstUnpinnedObjectId);
+}
+
+/*
+ * Checks for all the things we don't want in the generation expressions of
+ * virtual generated columns for security reasons.  Errors out if it finds
+ * one.
+ */
+static bool
+check_virtual_generated_security_walker(Node *node, void *context)
+{
+	ParseState *pstate = context;
+
+	if (node == NULL)
+		return false;
+
+	if (!IsA(node, List))
+	{
+		if (check_functions_in_node(node, contains_user_functions_checker, NULL))
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("generation expression uses user-defined function"),
+					errdetail("Virtual generated columns that make use of user-defined functions are not yet supported."),
+					parser_errposition(pstate, exprLocation(node)));
+
+		/*
+		 * check_functions_in_node() doesn't check some node types (see
+		 * comment there).  We handle CoerceToDomain and MinMaxExpr by
+		 * checking for built-in types.  The other listed node types cannot
+		 * call user-definable SQL-visible functions.
+		 *
+		 * We furthermore need this type check to handle built-in, immutable
+		 * polymorphic functions such as array_eq().
+		 */
+		if (exprType(node) >= FirstUnpinnedObjectId)
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("generation expression uses user-defined type"),
+					errdetail("Virtual generated columns that make use of user-defined types are not yet supported."),
+					parser_errposition(pstate, exprLocation(node)));
+	}
+
+	return expression_tree_walker(node, check_virtual_generated_security_walker, context);
+}
+
+static void
+check_virtual_generated_security(ParseState *pstate, Node *node)
+{
+	check_virtual_generated_security_walker(node, pstate);
+}
+
+/*
  * Take a raw default and convert it to a cooked format ready for
  * storage.
  *
@@ -3253,6 +3362,10 @@ cookDefault(ParseState *pstate,
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 					 errmsg("generation expression is not immutable")));
+
+		/* Check security of expressions for virtual generated column */
+		if (attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			check_virtual_generated_security(pstate, expr);
 	}
 	else
 	{
@@ -3473,7 +3586,8 @@ RelationTruncateIndexes(Relation heapRelation)
 
 		/* Initialize the index and rebuild */
 		/* Note: we do not need to re-establish pkey setting */
-		index_build(heapRelation, currentIndex, indexInfo, true, false);
+		index_build(heapRelation, currentIndex, indexInfo, true, false,
+					true);
 
 		/* We're done with this index */
 		index_close(currentIndex, NoLock);

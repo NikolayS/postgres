@@ -5,7 +5,7 @@
  *	  (pg_largeobject_metadata)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_largeobject_metadata.h
@@ -27,6 +27,8 @@
  *		typedef struct FormData_pg_largeobject_metadata
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_largeobject_metadata,2995,LargeObjectMetadataRelationId)
 {
 	Oid			oid;			/* oid */
@@ -38,6 +40,8 @@ CATALOG(pg_largeobject_metadata,2995,LargeObjectMetadataRelationId)
 	aclitem		lomacl[1];		/* access permissions */
 #endif
 } FormData_pg_largeobject_metadata;
+
+END_CATALOG_STRUCT
 
 /* ----------------
  *		Form_pg_largeobject_metadata corresponds to a pointer to a tuple

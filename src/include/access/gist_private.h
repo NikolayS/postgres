@@ -4,7 +4,7 @@
  *	  private declarations for GiST -- declarations related to the
  *	  internal implementation of GiST, not the public API
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/gist_private.h
@@ -457,8 +457,6 @@ extern XLogRecPtr gistXLogSplit(bool page_is_leaf,
 								BlockNumber origrlink, GistNSN orignsn,
 								Buffer leftchildbuf, bool markfollowright);
 
-extern XLogRecPtr gistXLogAssignLSN(void);
-
 /* gistget.c */
 extern bool gistgettuple(IndexScanDesc scan, ScanDirection dir);
 extern int64 gistgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
@@ -530,8 +528,6 @@ extern void gistMakeUnionKey(GISTSTATE *giststate, int attno,
 							 GISTENTRY *entry1, bool isnull1,
 							 GISTENTRY *entry2, bool isnull2,
 							 Datum *dst, bool *dstisnull);
-
-extern XLogRecPtr gistGetFakeLSN(Relation rel);
 
 /* gistvacuum.c */
 extern IndexBulkDeleteResult *gistbulkdelete(IndexVacuumInfo *info,

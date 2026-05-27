@@ -3,7 +3,7 @@
  * fe-auth-scram.c
  *	   The front-end (client) implementation of SCRAM authentication.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -631,7 +631,7 @@ read_server_first_message(fe_scram_state *state, char *input)
 
 	/* Verify immediately that the server used our part of the nonce */
 	if (strlen(nonce) < strlen(state->client_nonce) ||
-		memcmp(nonce, state->client_nonce, strlen(state->client_nonce)) != 0)
+		timingsafe_bcmp(nonce, state->client_nonce, strlen(state->client_nonce)) != 0)
 	{
 		libpq_append_conn_error(conn, "invalid SCRAM response (nonce mismatch)");
 		return false;
@@ -819,7 +819,7 @@ calculate_client_proof(fe_scram_state *state,
 					   strlen(state->server_first_message)) < 0 ||
 		pg_hmac_update(ctx, (uint8 *) ",", 1) < 0 ||
 		pg_hmac_update(ctx,
-					   (uint8 *) client_final_message_without_proof,
+					   (const uint8 *) client_final_message_without_proof,
 					   strlen(client_final_message_without_proof)) < 0 ||
 		pg_hmac_final(ctx, ClientSignature, state->key_length) < 0)
 	{
@@ -896,8 +896,8 @@ verify_server_signature(fe_scram_state *state, bool *match,
 	pg_hmac_free(ctx);
 
 	/* signature processed, so now check after it */
-	if (memcmp(expected_ServerSignature, state->ServerSignature,
-			   state->key_length) != 0)
+	if (timingsafe_bcmp(expected_ServerSignature, state->ServerSignature,
+						state->key_length) != 0)
 		*match = false;
 	else
 		*match = true;

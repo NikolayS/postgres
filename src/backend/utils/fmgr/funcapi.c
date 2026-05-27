@@ -4,7 +4,7 @@
  *	  Utility and convenience functions for fmgr functions that return
  *	  sets and/or composite types, or deal with VARIADIC inputs.
  *
- * Copyright (c) 2002-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2002-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/fmgr/funcapi.c
@@ -73,7 +73,7 @@ static TypeFuncClass get_type_func_class(Oid typid, Oid *base_typeid);
  * RECORD datatype.
  */
 void
-InitMaterializedSRF(FunctionCallInfo fcinfo, bits32 flags)
+InitMaterializedSRF(FunctionCallInfo fcinfo, uint32 flags)
 {
 	bool		random_access;
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
@@ -340,6 +340,8 @@ get_expr_result_type(Node *expr,
 										exprCollation(col));
 			i++;
 		}
+		TupleDescFinalize(tupdesc);
+
 		if (resultTypeId)
 			*resultTypeId = rexpr->row_typeid;
 		if (resultTupleDesc)
@@ -1044,6 +1046,7 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 		}
 	}
 
+	TupleDescFinalize(tupdesc);
 	return true;
 }
 
@@ -1436,7 +1439,7 @@ get_func_arg_info(HeapTuple procTup,
 								  &elems, NULL, &nelems);
 		if (nelems != numargs)	/* should not happen */
 			elog(ERROR, "proargnames must have the same number of elements as the function has arguments");
-		*p_argnames = (char **) palloc(sizeof(char *) * numargs);
+		*p_argnames = palloc_array(char *, numargs);
 		for (i = 0; i < numargs; i++)
 			(*p_argnames)[i] = TextDatumGetCString(elems[i]);
 	}
@@ -1853,6 +1856,8 @@ build_function_result_tupdesc_d(char prokind,
 						   0);
 	}
 
+	TupleDescFinalize(desc);
+
 	return desc;
 }
 
@@ -1970,6 +1975,7 @@ TypeGetTupleDesc(Oid typeoid, List *colaliases)
 						   typeoid,
 						   -1,
 						   0);
+		TupleDescFinalize(tupdesc);
 	}
 	else if (functypclass == TYPEFUNC_RECORD)
 	{

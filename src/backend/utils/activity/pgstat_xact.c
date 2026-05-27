@@ -3,7 +3,7 @@
  * pgstat_xact.c
  *	  Transactional integration for the cumulative statistics system.
  *
- * Copyright (c) 2001-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/activity/pgstat_xact.c
@@ -37,11 +37,18 @@ static PgStat_SubXactStatus *pgStatXactStack = NULL;
  * Called from access/transam/xact.c at top-level transaction commit/abort.
  */
 void
-AtEOXact_PgStat(bool isCommit, bool parallel)
+AtEOXact_PgStat(bool isCommit, bool parallel, bool count_xact_stats)
 {
 	PgStat_SubXactStatus *xact_state;
 
-	AtEOXact_PgStat_Database(isCommit, parallel);
+	/*
+	 * Only the database-level xact_commit/xact_rollback counter is gated
+	 * here.  Per-relation and subxact stat handling below must still run
+	 * unconditionally so any stats accumulated during the transaction are
+	 * not lost.
+	 */
+	if (count_xact_stats)
+		AtEOXact_PgStat_Database(isCommit, parallel);
 
 	/* handle transactional stats information */
 	xact_state = pgStatXactStack;

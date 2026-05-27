@@ -37,9 +37,10 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     DELIMITER '<replaceable class="parameter">delimiter_character</replaceable>'
     NULL '<replaceable class="parameter">null_string</replaceable>'
     DEFAULT '<replaceable class="parameter">default_string</replaceable>'
-    HEADER [ <replaceable class="parameter">boolean</replaceable> | MATCH ]
+    HEADER [ <replaceable class="parameter">boolean</replaceable> | <replaceable class="parameter">integer</replaceable> | MATCH ]
     QUOTE '<replaceable class="parameter">quote_character</replaceable>'
     ESCAPE '<replaceable class="parameter">escape_character</replaceable>'
+    FORCE_ARRAY [ <replaceable class="parameter">boolean</replaceable> ]
     FORCE_QUOTE { ( <replaceable class="parameter">column_name</replaceable> [, ...] ) | * }
     FORCE_NOT_NULL { ( <replaceable class="parameter">column_name</replaceable> [, ...] ) | * }
     FORCE_NULL { ( <replaceable class="parameter">column_name</replaceable> [, ...] ) | * }
@@ -50,7 +51,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
 </synopsis>
  </refsynopsisdiv>
 
- <refsect1>
+ <refsect1 id="sql-copy-description">
   <title>Description</title>
 
   <para>
@@ -101,11 +102,11 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
   </para>
  </refsect1>
 
- <refsect1>
+ <refsect1 id="sql-copy-parameters">
   <title>Parameters</title>
 
   <variablelist>
-   <varlistentry>
+   <varlistentry id="sql-copy-params-table-name">
     <term><replaceable class="parameter">table_name</replaceable></term>
     <listitem>
      <para>
@@ -114,7 +115,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-column-name">
     <term><replaceable class="parameter">column_name</replaceable></term>
      <listitem>
      <para>
@@ -125,7 +126,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-query">
     <term><replaceable class="parameter">query</replaceable></term>
     <listitem>
      <para>
@@ -149,7 +150,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-filename">
     <term><replaceable class="parameter">filename</replaceable></term>
     <listitem>
      <para>
@@ -161,7 +162,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-program">
     <term><literal>PROGRAM</literal></term>
     <listitem>
      <para>
@@ -180,7 +181,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-stdin">
     <term><literal>STDIN</literal></term>
     <listitem>
      <para>
@@ -189,7 +190,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-stdout">
     <term><literal>STDOUT</literal></term>
     <listitem>
      <para>
@@ -198,7 +199,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-boolean">
     <term><replaceable class="parameter">boolean</replaceable></term>
     <listitem>
      <para>
@@ -212,21 +213,51 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-integer">
+    <term><replaceable class="parameter">integer</replaceable></term>
+    <listitem>
+     <para>
+      Specifies a non-negative integer value passed to the selected option.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="sql-copy-params-format">
     <term><literal>FORMAT</literal></term>
     <listitem>
      <para>
       Selects the data format to be read or written:
       <literal>text</literal>,
       <literal>csv</literal> (Comma Separated Values),
+      <literal>json</literal> (JavaScript Object Notation),
       or <literal>binary</literal>.
       The default is <literal>text</literal>.
       See <xref linkend="sql-copy-file-formats"/> below for details.
      </para>
+     <para>
+      The <literal>json</literal> option is allowed only in
+      <command>COPY TO</command>.
+     </para>
+     <note>
+      <para>
+       In JSON format, SQL <literal>NULL</literal> values are output as
+       JSON <literal>null</literal>.  However, a JSON or JSONB column
+       whose value is the JSON literal <literal>null</literal> is also
+       output as <literal>null</literal>, making the two cases
+       indistinguishable in the <command>COPY</command> output.
+       For example:
+<programlisting>
+COPY (SELECT j FROM (VALUES ('null'::json), (NULL::json)) v(j))
+     TO stdout (FORMAT JSON);
+{"j":null}
+{"j":null}
+</programlisting>
+      </para>
+     </note>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-freeze">
     <term><literal>FREEZE</literal></term>
     <listitem>
      <para>
@@ -249,7 +280,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-delimiter">
     <term><literal>DELIMITER</literal></term>
     <listitem>
      <para>
@@ -257,12 +288,12 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
       (line) of the file.  The default is a tab character in text format,
       a comma in <literal>CSV</literal> format.
       This must be a single one-byte character.
-      This option is not allowed when using <literal>binary</literal> format.
+      This option is not allowed when using <literal>binary</literal> or <literal>json</literal> format.
      </para>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-null">
     <term><literal>NULL</literal></term>
     <listitem>
      <para>
@@ -271,7 +302,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
       string in <literal>CSV</literal> format. You might prefer an
       empty string even in text format for cases where you don't want to
       distinguish nulls from empty strings.
-      This option is not allowed when using <literal>binary</literal> format.
+      This option is not allowed when using <literal>binary</literal> or <literal>json</literal> format.
      </para>
 
      <note>
@@ -286,7 +317,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-default">
     <term><literal>DEFAULT</literal></term>
     <listitem>
      <para>
@@ -294,30 +325,39 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
       is found in the input file, the default value of the corresponding column
       will be used.
       This option is allowed only in <command>COPY FROM</command>, and only when
-      not using <literal>binary</literal> format.
+      not using <literal>binary</literal> or <literal>json</literal> format.
      </para>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-header">
     <term><literal>HEADER</literal></term>
     <listitem>
      <para>
-      Specifies that the file contains a header line with the names of each
-      column in the file.  On output, the first line contains the column
-      names from the table.  On input, the first line is discarded when this
-      option is set to <literal>true</literal> (or equivalent Boolean value).
-      If this option is set to <literal>MATCH</literal>, the number and names
-      of the columns in the header line must match the actual column names of
-      the table, in order;  otherwise an error is raised.
-      This option is not allowed when using <literal>binary</literal> format.
-      The <literal>MATCH</literal> option is only valid for <command>COPY
-      FROM</command> commands.
+      On output, if this option is set to <literal>true</literal>
+      (or an equivalent Boolean value), the first line of the output will
+      contain the column names from the table.
+      Integer values <literal>0</literal> and <literal>1</literal> are
+      accepted as Boolean values, but other integers are not allowed for
+      <command>COPY TO</command> commands.
+     </para>
+     <para>
+      On input, if this option is set to <literal>true</literal>
+      (or an equivalent Boolean value), the first line of the input is
+      discarded.  If set to a non-negative integer, that number of
+      lines are discarded.  If set to <literal>MATCH</literal>, the first line
+      is discarded, and it must contain column names that exactly match the
+      table's columns, in both number and order; otherwise, an error is raised.
+      The <literal>MATCH</literal> value is only valid for
+      <command>COPY FROM</command> commands.
+     </para>
+     <para>
+      This option is not allowed when using <literal>binary</literal> or <literal>json</literal> format.
      </para>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-quote">
     <term><literal>QUOTE</literal></term>
     <listitem>
      <para>
@@ -329,7 +369,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-escape">
     <term><literal>ESCAPE</literal></term>
     <listitem>
      <para>
@@ -343,7 +383,20 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-force-array">
+    <term><literal>FORCE_ARRAY</literal></term>
+    <listitem>
+     <para>
+      Force output of square brackets as array decorations at the beginning
+      and end of output, and commas between the rows. It is allowed only in
+      <command>COPY TO</command>, and only when using
+      <literal>json</literal> format. The default is
+      <literal>false</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="sql-copy-params-force-quote">
     <term><literal>FORCE_QUOTE</literal></term>
     <listitem>
      <para>
@@ -357,7 +410,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-force-not-null">
     <term><literal>FORCE_NOT_NULL</literal></term>
     <listitem>
      <para>
@@ -372,7 +425,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-force-null">
     <term><literal>FORCE_NULL</literal></term>
     <listitem>
      <para>
@@ -387,7 +440,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-on-error">
     <term><literal>ON_ERROR</literal></term>
     <listitem>
      <para>
@@ -395,27 +448,38 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
       input value into its data type.
       An <replaceable class="parameter">error_action</replaceable> value of
       <literal>stop</literal> means fail the command, while
-      <literal>ignore</literal> means discard the input row and continue with the next one.
+      <literal>ignore</literal> means discard the input row and continue with the next one,
+      and <literal>set_null</literal> means replace the field containing the invalid
+      input value with a null value and continue to the next field.
       The default is <literal>stop</literal>.
      </para>
      <para>
-      The <literal>ignore</literal> option is applicable only for <command>COPY FROM</command>
+      The <literal>ignore</literal> and <literal>set_null</literal>
+      options are applicable only for <command>COPY FROM</command>
       when the <literal>FORMAT</literal> is <literal>text</literal> or <literal>csv</literal>.
      </para>
      <para>
-      A <literal>NOTICE</literal> message containing the ignored row count is
-      emitted at the end of the <command>COPY FROM</command> if at least one
-      row was discarded. When <literal>LOG_VERBOSITY</literal> option is set to
-      <literal>verbose</literal>, a <literal>NOTICE</literal> message
+      If <literal>ON_ERROR</literal> is set to <literal>ignore</literal> or
+      <literal>set_null</literal>, a <literal>NOTICE</literal> message is emitted at the end of the
+      <command>COPY FROM</command> command containing the count of rows that were ignored or
+      changed, if at least one row was affected.
+     </para>
+     <para>
+      When <literal>LOG_VERBOSITY</literal> option is set to <literal>verbose</literal>,
+      for <literal>ignore</literal> option, a <literal>NOTICE</literal> message
       containing the line of the input file and the column name whose input
-      conversion has failed is emitted for each discarded row.
+      conversion has failed is emitted for each discarded row;
+      for <literal>set_null</literal> option, a <literal>NOTICE</literal>
+      message containing the line of the input file and the column name where
+      value was replaced with <literal>NULL</literal> for each input conversion
+      failure.
       When it is set to <literal>silent</literal>, no message is emitted
-      regarding ignored rows.
+      regarding input conversion failed rows.
      </para>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-reject-limit">
     <term><literal>REJECT_LIMIT</literal></term>
     <listitem>
      <para>
@@ -433,7 +497,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-encoding">
     <term><literal>ENCODING</literal></term>
     <listitem>
      <para>
@@ -445,7 +509,7 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-log-verbosity">
     <term><literal>LOG_VERBOSITY</literal></term>
     <listitem>
      <para>
@@ -458,12 +522,13 @@ COPY { <replaceable class="parameter">table_name</replaceable> [ ( <replaceable 
      </para>
      <para>
       This is currently used in <command>COPY FROM</command> command when
-      <literal>ON_ERROR</literal> option is set to <literal>ignore</literal>.
+      <literal>ON_ERROR</literal> option is set to <literal>ignore</literal>
+      or <literal>set_null</literal>.
       </para>
     </listitem>
    </varlistentry>
 
-   <varlistentry>
+   <varlistentry id="sql-copy-params-where">
     <term><literal>WHERE</literal></term>
     <listitem>
    <para>
@@ -492,7 +557,7 @@ WHERE <replaceable class="parameter">condition</replaceable>
   </variablelist>
  </refsect1>
 
- <refsect1>
+ <refsect1 id="sql-copy-outputs">
   <title>Outputs</title>
 
   <para>
@@ -516,18 +581,19 @@ COPY <replaceable class="parameter">count</replaceable>
   </note>
  </refsect1>
 
- <refsect1>
+ <refsect1 id="sql-copy-notes">
   <title>Notes</title>
 
    <para>
     <command>COPY TO</command> can be used with plain
-    tables and populated materialized views.
-    For example,
-    <literal>COPY <replaceable class="parameter">table</replaceable>
-    TO</literal> copies the same rows as
+    tables, populated materialized views, and partitioned tables.
+    For non-partitioned tables, COPY <replaceable class="parameter">table</replaceable>
+    copies the same rows as
     <literal>SELECT * FROM ONLY <replaceable class="parameter">table</replaceable></literal>.
+    For partitioned tables, it copies the same rows as
+    <literal>SELECT * FROM <replaceable class="parameter">table</replaceable></literal>.
     However it doesn't directly support other relation types,
-    such as partitioned tables, inheritance child tables, or views.
+    such as inheritance child tables, or views.
     To copy all rows from such relations, use <literal>COPY (SELECT * FROM
     <replaceable class="parameter">table</replaceable>) TO</literal>.
    </para>
@@ -1056,7 +1122,7 @@ versions of <productname>PostgreSQL</productname>.
   </refsect2>
  </refsect1>
 
- <refsect1>
+ <refsect1 id="sql-copy-examples">
   <title>Examples</title>
 
   <para>
@@ -1066,6 +1132,22 @@ versions of <productname>PostgreSQL</productname>.
 COPY country TO STDOUT (DELIMITER '|');
 </programlisting>
   </para>
+
+<para>
+   When the <literal>FORCE_ARRAY</literal> option is enabled,
+   the entire output is wrapped in a single JSON array with rows separated by commas:
+<programlisting>
+COPY (SELECT * FROM (VALUES(1),(2)) val(id)) TO STDOUT  (FORMAT JSON, FORCE_ARRAY);
+</programlisting>
+The output is as follows:
+<screen>
+[
+ {"id":1}
+,{"id":2}
+]
+</screen>
+</para>
+
 
   <para>
    To copy data from a file into the <literal>country</literal> table:
@@ -1122,7 +1204,7 @@ ZW      ZIMBABWE
 </programlisting></para>
  </refsect1>
 
- <refsect1>
+ <refsect1 id="sql-copy-compatibility">
   <title>Compatibility</title>
 
   <para>

@@ -80,7 +80,7 @@
  * general, after logging in, but let's do what we can here.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/libpq/auth-scram.c
@@ -133,8 +133,6 @@ typedef enum
 typedef struct
 {
 	scram_state_enum state;
-
-	const char *username;		/* username from startup packet */
 
 	Port	   *port;
 	bool		channel_binding_in_use;
@@ -242,7 +240,7 @@ scram_init(Port *port, const char *selected_mech, const char *shadow_pass)
 	scram_state *state;
 	bool		got_secret;
 
-	state = (scram_state *) palloc0(sizeof(scram_state));
+	state = palloc0_object(scram_state);
 	state->port = port;
 	state->state = SCRAM_AUTH_INIT;
 
@@ -581,7 +579,7 @@ scram_verify_plain_password(const char *username, const char *password,
 	 * Compare the secret's Server Key with the one computed from the
 	 * user-supplied password.
 	 */
-	return memcmp(computed_key, server_key, key_length) == 0;
+	return timingsafe_bcmp(computed_key, server_key, key_length) == 0;
 }
 
 
@@ -1132,9 +1130,9 @@ verify_final_nonce(scram_state *state)
 
 	if (final_nonce_len != client_nonce_len + server_nonce_len)
 		return false;
-	if (memcmp(state->client_final_nonce, state->client_nonce, client_nonce_len) != 0)
+	if (timingsafe_bcmp(state->client_final_nonce, state->client_nonce, client_nonce_len) != 0)
 		return false;
-	if (memcmp(state->client_final_nonce + client_nonce_len, state->server_nonce, server_nonce_len) != 0)
+	if (timingsafe_bcmp(state->client_final_nonce + client_nonce_len, state->server_nonce, server_nonce_len) != 0)
 		return false;
 
 	return true;
@@ -1188,7 +1186,7 @@ verify_client_proof(scram_state *state)
 				client_StoredKey, &errstr) < 0)
 		elog(ERROR, "could not hash stored key: %s", errstr);
 
-	if (memcmp(client_StoredKey, state->StoredKey, state->key_length) != 0)
+	if (timingsafe_bcmp(client_StoredKey, state->StoredKey, state->key_length) != 0)
 		return false;
 
 	return true;
@@ -1492,8 +1490,8 @@ scram_mock_salt(const char *username, pg_cryptohash_type hash_type,
 
 	ctx = pg_cryptohash_create(hash_type);
 	if (pg_cryptohash_init(ctx) < 0 ||
-		pg_cryptohash_update(ctx, (uint8 *) username, strlen(username)) < 0 ||
-		pg_cryptohash_update(ctx, (uint8 *) mock_auth_nonce, MOCK_AUTH_NONCE_LEN) < 0 ||
+		pg_cryptohash_update(ctx, (const uint8 *) username, strlen(username)) < 0 ||
+		pg_cryptohash_update(ctx, (const uint8 *) mock_auth_nonce, MOCK_AUTH_NONCE_LEN) < 0 ||
 		pg_cryptohash_final(ctx, sha_digest, key_length) < 0)
 	{
 		pg_cryptohash_free(ctx);

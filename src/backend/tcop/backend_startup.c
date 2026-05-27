@@ -3,7 +3,7 @@
  * backend_startup.c
  *	  Backend startup code
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -492,10 +492,11 @@ static int
 ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 {
 	int32		len;
-	char	   *buf;
+	char	   *buf = NULL;
 	ProtocolVersion proto;
 	MemoryContext oldcontext;
 
+retry:
 	pq_startmsgread();
 
 	/*
@@ -516,7 +517,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		 * scanners, which may be less benign, but it's not really our job to
 		 * notice those.)
 		 */
-		return STATUS_ERROR;
+		goto fail;
 	}
 
 	if (pq_getbytes(((char *) &len) + 1, 3) == EOF)
@@ -526,7 +527,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 			ereport(COMMERROR,
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
 					 errmsg("incomplete startup packet")));
-		return STATUS_ERROR;
+		goto fail;
 	}
 
 	len = pg_ntoh32(len);
@@ -538,7 +539,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("invalid length of startup packet")));
-		return STATUS_ERROR;
+		goto fail;
 	}
 
 	/*
@@ -554,7 +555,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("incomplete startup packet")));
-		return STATUS_ERROR;
+		goto fail;
 	}
 	pq_endmsgread();
 
@@ -568,7 +569,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 	{
 		ProcessCancelRequestPacket(port, buf, len);
 		/* Not really an error, but we don't want to proceed further */
-		return STATUS_ERROR;
+		goto fail;
 	}
 
 	if (proto == NEGOTIATE_SSL_CODE && !ssl_done)
@@ -607,13 +608,16 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 			ereport(COMMERROR,
 					(errcode_for_socket_access(),
 					 errmsg("failed to send SSL negotiation response: %m")));
-			return STATUS_ERROR;	/* close the connection */
+			goto fail;			/* close the connection */
 		}
 
 #ifdef USE_SSL
 		if (SSLok == 'S' && secure_open_server(port) == -1)
-			return STATUS_ERROR;
+			goto fail;
 #endif
+
+		pfree(buf);
+		buf = NULL;
 
 		/*
 		 * At this point we should have no data already buffered.  If we do,
@@ -632,7 +636,16 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		 * another SSL negotiation request, and a GSS request should only
 		 * follow if SSL was rejected (client may negotiate in either order)
 		 */
-		return ProcessStartupPacket(port, true, SSLok == 'S');
+		ssl_done = true;
+		if (SSLok == 'S')
+		{
+			/*
+			 * We are done with SSL and negotiated correctly, so consider the
+			 * same for GSS.
+			 */
+			gss_done = true;
+		}
+		goto retry;
 	}
 	else if (proto == NEGOTIATE_GSS_CODE && !gss_done)
 	{
@@ -661,13 +674,16 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 			ereport(COMMERROR,
 					(errcode_for_socket_access(),
 					 errmsg("failed to send GSSAPI negotiation response: %m")));
-			return STATUS_ERROR;	/* close the connection */
+			goto fail;			/* close the connection */
 		}
 
 #ifdef ENABLE_GSS
 		if (GSSok == 'G' && secure_open_gssapi(port) == -1)
-			return STATUS_ERROR;
+			goto fail;
 #endif
+
+		pfree(buf);
+		buf = NULL;
 
 		/*
 		 * At this point we should have no data already buffered.  If we do,
@@ -686,7 +702,16 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		 * another GSS negotiation request, and an SSL request should only
 		 * follow if GSS was rejected (client may negotiate in either order)
 		 */
-		return ProcessStartupPacket(port, GSSok == 'G', true);
+		gss_done = true;
+		if (GSSok == 'G')
+		{
+			/*
+			 * We are done with GSS and negotiated correctly, so consider the
+			 * same for SSL.
+			 */
+			ssl_done = true;
+		}
+		goto retry;
 	}
 
 	/* Could add additional special packet types here */
@@ -821,6 +846,8 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 		if (PG_PROTOCOL_MINOR(proto) > PG_PROTOCOL_MINOR(PG_PROTOCOL_LATEST) ||
 			unrecognized_protocol_options != NIL)
 			SendNegotiateProtocolVersion(unrecognized_protocol_options);
+
+		list_free_deep(unrecognized_protocol_options);
 	}
 
 	/* Check a user name was given. */
@@ -842,10 +869,9 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 	if (strlen(port->user_name) >= NAMEDATALEN)
 		port->user_name[NAMEDATALEN - 1] = '\0';
 
+	Assert(MyBackendType == B_BACKEND || MyBackendType == B_DEAD_END_BACKEND);
 	if (am_walsender)
 		MyBackendType = B_WAL_SENDER;
-	else
-		MyBackendType = B_BACKEND;
 
 	/*
 	 * Normal walsender backends, e.g. for streaming replication, are not
@@ -863,7 +889,16 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 	 */
 	MemoryContextSwitchTo(oldcontext);
 
+	pfree(buf);
+
 	return STATUS_OK;
+
+fail:
+	/* be tidy, just to avoid Valgrind complaints */
+	if (buf)
+		pfree(buf);
+
+	return STATUS_ERROR;
 }
 
 /*
@@ -881,7 +916,7 @@ ProcessCancelRequestPacket(Port *port, void *pkt, int pktlen)
 	{
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
-				 errmsg("invalid length of query cancel packet")));
+				 errmsg("invalid length of cancel request packet")));
 		return;
 	}
 	len = pktlen - offsetof(CancelRequestPacket, cancelAuthCode);
@@ -889,7 +924,7 @@ ProcessCancelRequestPacket(Port *port, void *pkt, int pktlen)
 	{
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
-				 errmsg("invalid length of query cancel key")));
+				 errmsg("invalid length of cancel key in cancel request packet")));
 		return;
 	}
 
@@ -1077,7 +1112,7 @@ check_log_connections(char **newval, void **extra, GucSource source)
 
 	if (!SplitIdentifierString(rawstring, ',', &elemlist))
 	{
-		GUC_check_errdetail("Invalid list syntax in parameter \"log_connections\".");
+		GUC_check_errdetail("Invalid list syntax in parameter \"%s\".", "log_connections");
 		pfree(rawstring);
 		list_free(elemlist);
 		return false;

@@ -229,7 +229,7 @@ main(int argc, char **argv)
     }
 
     if (ps.com_ind <= 1)
-	ps.com_ind = 2;		/* dont put normal comments before column 2 */
+	ps.com_ind = 2;		/* don't put normal comments before column 2 */
     if (block_comment_max_col <= 0)
 	block_comment_max_col = max_col;
     if (ps.local_decl_indent < 0)	/* if not specified by user, set this */
@@ -296,6 +296,7 @@ main(int argc, char **argv)
 		 * done earlier.
 		 */
 		force_nl = false;
+		break;
 	    case form_feed:
 		break;
 	    case comment:
@@ -352,7 +353,7 @@ main(int argc, char **argv)
 		    }
 		    goto sw_buffer;
 		}
-		/* FALLTHROUGH */
+		pg_fallthrough;
 	    default:		/* it is the start of a normal statement */
 		{
 		    int remove_newlines;
@@ -482,7 +483,7 @@ check_type:
 		if (verbose)
 		    diag2(0, "Line broken");
 		dump_line();
-		ps.want_blank = false;	/* dont insert blank at line start */
+		ps.want_blank = false;	/* don't insert blank at line start */
 		force_nl = false;
 	    }
 	    ps.in_stmt = true;	/* turn on flag which causes an extra level of
@@ -603,7 +604,7 @@ check_type:
 		force_nl = true;/* must force newline after if */
 		ps.last_u_d = true;	/* inform lexi that a following
 					 * operator is unary */
-		ps.in_stmt = false;	/* dont use stmt continuation
+		ps.in_stmt = false;	/* don't use stmt continuation
 					 * indentation */
 
 		parse(hd_type);	/* let parser worry about if, or whatever */
@@ -749,7 +750,7 @@ check_type:
 		if (sp_sw) {	/* this is a check for an if, while, etc. with
 				 * unbalanced parens */
 		    sp_sw = false;
-		    parse(hd_type);	/* dont lose the if, or whatever */
+		    parse(hd_type);	/* don't lose the if, or whatever */
 		}
 	    }
 	    *e_code++ = ';';
@@ -764,7 +765,7 @@ check_type:
 	    break;
 
 	case lbrace:		/* got a '{' */
-	    ps.in_stmt = false;	/* dont indent the {} */
+	    ps.in_stmt = false;	/* don't indent the {} */
 	    if (!ps.block_init)
 		force_nl = true;/* force other stuff on same line as '{' onto
 				 * new line */
@@ -802,7 +803,7 @@ check_type:
 		}
 	    }
 	    if (s_code == e_code)
-		ps.ind_stmt = false;	/* dont put extra indentation on line
+		ps.ind_stmt = false;	/* don't put extra indentation on line
 					 * with '{' */
 	    if (ps.in_decl && ps.in_or_st) {	/* this is either a structure
 						 * declaration or an init */
@@ -922,7 +923,7 @@ check_type:
 	case structure:
 	    if (ps.p_l_follow > 0)
 		goto copy_id;
-		/* FALLTHROUGH */
+	    pg_fallthrough;
 	case decl:		/* we have a declaration type (int, etc.) */
 	    parse(decl);	/* let parser worry about indentation */
 	    if (ps.last_token == rparen && ps.tos <= 1) {
@@ -1013,7 +1014,7 @@ check_type:
 	case period:		/* treat a period kind of like a binary
 				 * operation */
 	    *e_code++ = '.';	/* move the period into line */
-	    ps.want_blank = false;	/* dont put a blank after a period */
+	    ps.want_blank = false;	/* don't put a blank after a period */
 	    break;
 
 	case comma:

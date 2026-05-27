@@ -3,7 +3,7 @@
  * json.h
  *	  Declarations for JSON data type support.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/json.h
@@ -17,6 +17,8 @@
 #include "lib/stringinfo.h"
 
 /* functions in json.c */
+extern void composite_to_json(Datum composite, StringInfo result,
+							  bool use_line_feeds);
 extern void escape_json(StringInfo buf, const char *str);
 extern void escape_json_with_len(StringInfo buf, const char *str, int len);
 extern void escape_json_text(StringInfo buf, const text *txt);

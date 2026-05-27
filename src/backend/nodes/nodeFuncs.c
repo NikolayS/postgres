@@ -3,7 +3,7 @@
  * nodeFuncs.c
  *		Various general-purpose manipulations of Node trees
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -284,6 +284,9 @@ exprType(const Node *expr)
 		case T_PlaceHolderVar:
 			type = exprType((Node *) ((const PlaceHolderVar *) expr)->phexpr);
 			break;
+		case T_GraphPropertyRef:
+			type = ((const GraphPropertyRef *) expr)->typeId;
+			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
 			type = InvalidOid;	/* keep compiler quiet */
@@ -536,6 +539,8 @@ exprTypmod(const Node *expr)
 			return exprTypmod((Node *) ((const ReturningExpr *) expr)->retexpr);
 		case T_PlaceHolderVar:
 			return exprTypmod((Node *) ((const PlaceHolderVar *) expr)->phexpr);
+		case T_GraphPropertyRef:
+			return ((const GraphPropertyRef *) expr)->typmod;
 		default:
 			break;
 	}
@@ -997,8 +1002,16 @@ exprCollation(const Node *expr)
 			{
 				const JsonConstructorExpr *ctor = (const JsonConstructorExpr *) expr;
 
+				/*
+				 * Collation comes from coercion if present, otherwise from
+				 * func.  The func fallback is needed in cases where func
+				 * already produces the final output type and no coercion is
+				 * needed (cf. the JSCTOR_JSON_ARRAY_QUERY case).
+				 */
 				if (ctor->coercion)
 					coll = exprCollation((Node *) ctor->coercion);
+				else if (ctor->func)
+					coll = exprCollation((Node *) ctor->func);
 				else
 					coll = InvalidOid;
 			}
@@ -1009,14 +1022,14 @@ exprCollation(const Node *expr)
 			break;
 		case T_JsonExpr:
 			{
-				const JsonExpr *jsexpr = (JsonExpr *) expr;
+				const JsonExpr *jsexpr = (const JsonExpr *) expr;
 
 				coll = jsexpr->collation;
 			}
 			break;
 		case T_JsonBehavior:
 			{
-				const JsonBehavior *behavior = (JsonBehavior *) expr;
+				const JsonBehavior *behavior = (const JsonBehavior *) expr;
 
 				if (behavior->expr)
 					coll = exprCollation(behavior->expr);
@@ -1057,6 +1070,9 @@ exprCollation(const Node *expr)
 			break;
 		case T_PlaceHolderVar:
 			coll = exprCollation((Node *) ((const PlaceHolderVar *) expr)->phexpr);
+			break;
+		case T_GraphPropertyRef:
+			coll = ((const GraphPropertyRef *) expr)->collation;
 			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
@@ -1256,8 +1272,11 @@ exprSetCollation(Node *expr, Oid collation)
 			{
 				JsonConstructorExpr *ctor = (JsonConstructorExpr *) expr;
 
+				/* See comment in exprCollation() */
 				if (ctor->coercion)
 					exprSetCollation((Node *) ctor->coercion, collation);
+				else if (ctor->func)
+					exprSetCollation((Node *) ctor->func, collation);
 				else
 					Assert(!OidIsValid(collation)); /* result is always a
 													 * json[b] type */
@@ -1274,12 +1293,8 @@ exprSetCollation(Node *expr, Oid collation)
 			}
 			break;
 		case T_JsonBehavior:
-			{
-				JsonBehavior *behavior = (JsonBehavior *) expr;
-
-				if (behavior->expr)
-					exprSetCollation(behavior->expr, collation);
-			}
+			Assert(((JsonBehavior *) expr)->expr == NULL ||
+				   exprCollation(((JsonBehavior *) expr)->expr) == collation);
 			break;
 		case T_NullTest:
 			/* NullTest's result is boolean ... */
@@ -1597,7 +1612,7 @@ exprLocation(const Node *expr)
 			}
 			break;
 		case T_JsonBehavior:
-			loc = exprLocation(((JsonBehavior *) expr)->expr);
+			loc = exprLocation(((const JsonBehavior *) expr)->expr);
 			break;
 		case T_NullTest:
 			{
@@ -1729,6 +1744,9 @@ exprLocation(const Node *expr)
 			break;
 		case T_ColumnDef:
 			loc = ((const ColumnDef *) expr)->location;
+			break;
+		case T_IndexElem:
+			loc = ((const IndexElem *) expr)->location;
 			break;
 		case T_Constraint:
 			loc = ((const Constraint *) expr)->location;
@@ -2128,6 +2146,8 @@ expression_tree_walker_impl(Node *node,
 		case T_RangeTblRef:
 		case T_SortGroupClause:
 		case T_CTESearchClause:
+		case T_GraphLabelRef:
+		case T_GraphPropertyRef:
 		case T_MergeSupportFunc:
 			/* primitive node types with no expression subnodes */
 			break;
@@ -2571,6 +2591,24 @@ expression_tree_walker_impl(Node *node,
 					return true;
 			}
 			break;
+		case T_ForPortionOfExpr:
+			{
+				ForPortionOfExpr *forPortionOf = (ForPortionOfExpr *) node;
+
+				if (WALK(forPortionOf->rangeVar))
+					return true;
+				if (WALK(forPortionOf->targetFrom))
+					return true;
+				if (WALK(forPortionOf->targetTo))
+					return true;
+				if (WALK(forPortionOf->targetRange))
+					return true;
+				if (WALK(forPortionOf->overlapsExpr))
+					return true;
+				if (WALK(forPortionOf->rangeTargetList))
+					return true;
+			}
+			break;
 		case T_PartitionPruneStepOp:
 			{
 				PartitionPruneStepOp *opstep = (PartitionPruneStepOp *) node;
@@ -2668,6 +2706,28 @@ expression_tree_walker_impl(Node *node,
 					return true;
 			}
 			break;
+		case T_GraphElementPattern:
+			{
+				GraphElementPattern *gep = (GraphElementPattern *) node;
+
+				if (WALK(gep->labelexpr))
+					return true;
+				if (WALK(gep->subexpr))
+					return true;
+				if (WALK(gep->whereClause))
+					return true;
+			}
+			break;
+		case T_GraphPattern:
+			{
+				GraphPattern *gp = (GraphPattern *) node;
+
+				if (LIST_WALK(gp->path_pattern_list))
+					return true;
+				if (WALK(gp->whereClause))
+					return true;
+			}
+			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d",
 				 (int) nodeTag(node));
@@ -2718,6 +2778,8 @@ query_tree_walker_impl(Query *query,
 	if (WALK(query->mergeActionList))
 		return true;
 	if (WALK(query->mergeJoinCondition))
+		return true;
+	if (WALK(query->forPortionOf))
 		return true;
 	if (WALK(query->returningList))
 		return true;
@@ -2861,6 +2923,12 @@ range_table_entry_walker_impl(RangeTblEntry *rte,
 			if (WALK(rte->values_lists))
 				return true;
 			break;
+		case RTE_GRAPH_TABLE:
+			if (WALK(rte->graph_pattern))
+				return true;
+			if (WALK(rte->graph_table_columns))
+				return true;
+			break;
 		case RTE_CTE:
 		case RTE_NAMEDTUPLESTORE:
 		case RTE_RESULT:
@@ -2957,7 +3025,7 @@ expression_tree_mutator_impl(Node *node,
 	 */
 
 #define FLATCOPY(newnode, node, nodetype)  \
-	( (newnode) = (nodetype *) palloc(sizeof(nodetype)), \
+	( (newnode) = palloc_object(nodetype), \
 	  memcpy((newnode), (node), sizeof(nodetype)) )
 
 #define MUTATE(newfield, oldfield, fieldtype)  \
@@ -3007,6 +3075,8 @@ expression_tree_mutator_impl(Node *node,
 		case T_RangeTblRef:
 		case T_SortGroupClause:
 		case T_CTESearchClause:
+		case T_GraphLabelRef:
+		case T_GraphPropertyRef:
 		case T_MergeSupportFunc:
 			return copyObject(node);
 		case T_WithCheckOption:
@@ -3613,6 +3683,22 @@ expression_tree_mutator_impl(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_ForPortionOfExpr:
+			{
+				ForPortionOfExpr *fpo = (ForPortionOfExpr *) node;
+				ForPortionOfExpr *newnode;
+
+				FLATCOPY(newnode, fpo, ForPortionOfExpr);
+				MUTATE(newnode->rangeVar, fpo->rangeVar, Var *);
+				MUTATE(newnode->targetFrom, fpo->targetFrom, Node *);
+				MUTATE(newnode->targetTo, fpo->targetTo, Node *);
+				MUTATE(newnode->targetRange, fpo->targetRange, Node *);
+				MUTATE(newnode->overlapsExpr, fpo->overlapsExpr, Node *);
+				MUTATE(newnode->rangeTargetList, fpo->rangeTargetList, List *);
+
+				return (Node *) newnode;
+			}
+			break;
 		case T_PartitionPruneStepOp:
 			{
 				PartitionPruneStepOp *opstep = (PartitionPruneStepOp *) node;
@@ -3744,6 +3830,30 @@ expression_tree_mutator_impl(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_GraphElementPattern:
+			{
+				GraphElementPattern *gep = (GraphElementPattern *) node;
+				GraphElementPattern *newnode;
+
+				FLATCOPY(newnode, gep, GraphElementPattern);
+				MUTATE(newnode->labelexpr, gep->labelexpr, Node *);
+				MUTATE(newnode->subexpr, gep->subexpr, List *);
+				MUTATE(newnode->whereClause, gep->whereClause, Node *);
+				newnode->quantifier = list_copy(gep->quantifier);
+				return (Node *) newnode;
+			}
+			break;
+		case T_GraphPattern:
+			{
+				GraphPattern *gp = (GraphPattern *) node;
+				GraphPattern *newnode;
+
+				FLATCOPY(newnode, gp, GraphPattern);
+				MUTATE(newnode->path_pattern_list, gp->path_pattern_list, List *);
+				MUTATE(newnode->whereClause, gp->whereClause, Node *);
+				return (Node *) newnode;
+			}
+			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d",
 				 (int) nodeTag(node));
@@ -3794,6 +3904,7 @@ query_tree_mutator_impl(Query *query,
 	MUTATE(query->onConflict, query->onConflict, OnConflictExpr *);
 	MUTATE(query->mergeActionList, query->mergeActionList, List *);
 	MUTATE(query->mergeJoinCondition, query->mergeJoinCondition, Node *);
+	MUTATE(query->forPortionOf, query->forPortionOf, ForPortionOfExpr *);
 	MUTATE(query->returningList, query->returningList, List *);
 	MUTATE(query->jointree, query->jointree, FromExpr *);
 	MUTATE(query->setOperations, query->setOperations, Node *);
@@ -3912,6 +4023,10 @@ range_table_mutator_impl(List *rtable,
 				break;
 			case RTE_VALUES:
 				MUTATE(newrte->values_lists, rte->values_lists, List *);
+				break;
+			case RTE_GRAPH_TABLE:
+				MUTATE(newrte->graph_pattern, rte->graph_pattern, GraphPattern *);
+				MUTATE(newrte->graph_table_columns, rte->graph_table_columns, List *);
 				break;
 			case RTE_CTE:
 			case RTE_NAMEDTUPLESTORE:
@@ -4547,6 +4662,18 @@ raw_expression_tree_walker_impl(Node *node,
 					return true;
 			}
 			break;
+		case T_RangeGraphTable:
+			{
+				RangeGraphTable *rgt = (RangeGraphTable *) node;
+
+				if (WALK(rgt->graph_pattern))
+					return true;
+				if (WALK(rgt->columns))
+					return true;
+				if (WALK(rgt->alias))
+					return true;
+			}
+			break;
 		case T_TypeName:
 			{
 				TypeName   *tn = (TypeName *) node;
@@ -4705,6 +4832,28 @@ raw_expression_tree_walker_impl(Node *node,
 					return true;
 			}
 			break;
+		case T_GraphElementPattern:
+			{
+				GraphElementPattern *gep = (GraphElementPattern *) node;
+
+				if (WALK(gep->labelexpr))
+					return true;
+				if (WALK(gep->subexpr))
+					return true;
+				if (WALK(gep->whereClause))
+					return true;
+			}
+			break;
+		case T_GraphPattern:
+			{
+				GraphPattern *gp = (GraphPattern *) node;
+
+				if (WALK(gp->path_pattern_list))
+					return true;
+				if (WALK(gp->whereClause))
+					return true;
+			}
+			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d",
 				 (int) nodeTag(node));
@@ -4830,9 +4979,7 @@ planstate_walk_members(PlanState **planstates, int nplans,
 					   planstate_tree_walker_callback walker,
 					   void *context)
 {
-	int			j;
-
-	for (j = 0; j < nplans; j++)
+	for (int j = 0; j < nplans; j++)
 	{
 		if (PSWALK(planstates[j]))
 			return true;

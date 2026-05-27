@@ -3,7 +3,7 @@
  * lsyscache.h
  *	  Convenience routines for common queries in the system catalog cache.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/lsyscache.h
@@ -19,7 +19,7 @@
 #include "nodes/pg_list.h"
 
 /* avoid including subscripting.h here */
-struct SubscriptRoutines;
+typedef struct SubscriptRoutines SubscriptRoutines;
 
 /* Result list element for get_op_index_interpretation */
 typedef struct OpIndexInterpretation
@@ -89,6 +89,8 @@ extern bool get_op_hash_functions(Oid opno,
 extern List *get_op_index_interpretation(Oid opno);
 extern bool equality_ops_are_compatible(Oid opno1, Oid opno2);
 extern bool comparison_ops_are_compatible(Oid opno1, Oid opno2);
+extern bool collations_agree_on_equality(Oid coll1, Oid coll2);
+extern bool op_is_safe_index_member(Oid opno);
 extern Oid	get_opfamily_proc(Oid opfamily, Oid lefttype, Oid righttype,
 							  int16 procnum);
 extern char *get_attname(Oid relid, AttrNumber attnum, bool missing_ok);
@@ -104,7 +106,7 @@ extern bool get_collation_isdeterministic(Oid colloid);
 extern char *get_constraint_name(Oid conoid);
 extern Oid	get_constraint_index(Oid conoid);
 extern char get_constraint_type(Oid conoid);
-
+extern char *get_database_name(Oid dbid);
 extern char *get_language_name(Oid langoid, bool missing_ok);
 extern Oid	get_opclass_family(Oid opclass);
 extern Oid	get_opclass_input_type(Oid opclass);
@@ -187,8 +189,8 @@ extern Oid	get_typmodin(Oid typid);
 extern Oid	get_typcollation(Oid typid);
 extern bool type_is_collatable(Oid typid);
 extern RegProcedure get_typsubscript(Oid typid, Oid *typelemp);
-extern const struct SubscriptRoutines *getSubscriptingRoutines(Oid typid,
-															   Oid *typelemp);
+extern const SubscriptRoutines *getSubscriptingRoutines(Oid typid,
+														Oid *typelemp);
 extern Oid	getBaseType(Oid typid);
 extern Oid	getBaseTypeAndTypmod(Oid typid, int32 *typmod);
 extern int32 get_typavgwidth(Oid typid, int32 typmod);
@@ -198,8 +200,10 @@ extern bool get_attstatsslot(AttStatsSlot *sslot, HeapTuple statstuple,
 extern void free_attstatsslot(AttStatsSlot *sslot);
 extern char *get_namespace_name(Oid nspid);
 extern char *get_namespace_name_or_temp(Oid nspid);
+extern char *get_qualified_objname(Oid nspid, char *objname);
 extern Oid	get_range_subtype(Oid rangeOid);
 extern Oid	get_range_collation(Oid rangeOid);
+extern Oid	get_range_constructor2(Oid rangeOid);
 extern Oid	get_range_multirange(Oid rangeOid);
 extern Oid	get_multirange_range(Oid multirangeOid);
 extern Oid	get_index_column_opclass(Oid index_oid, int attno);
@@ -210,6 +214,9 @@ extern Oid	get_publication_oid(const char *pubname, bool missing_ok);
 extern char *get_publication_name(Oid pubid, bool missing_ok);
 extern Oid	get_subscription_oid(const char *subname, bool missing_ok);
 extern char *get_subscription_name(Oid subid, bool missing_ok);
+
+extern char *get_propgraph_label_name(Oid labeloid);
+extern char *get_propgraph_property_name(Oid propoid);
 
 #define type_is_array(typid)  (get_element_type(typid) != InvalidOid)
 /* type_is_array_domain accepts both plain arrays and domains over arrays */

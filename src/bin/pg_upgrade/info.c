@@ -3,7 +3,7 @@
  *
  *	information support functions
  *
- *	Copyright (c) 2010-2025, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2026, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/info.c
  */
 
@@ -29,7 +29,7 @@ static void free_rel_infos(RelInfoArr *rel_arr);
 static void print_db_infos(DbInfoArr *db_arr);
 static void print_rel_infos(RelInfoArr *rel_arr);
 static void print_slot_infos(LogicalSlotInfoArr *slot_arr);
-static char *get_old_cluster_logical_slot_infos_query(void);
+static const char *get_old_cluster_logical_slot_infos_query(ClusterInfo *cluster);
 static void process_old_cluster_logical_slot_infos(DbInfo *dbinfo, PGresult *res, void *arg);
 
 
@@ -53,8 +53,7 @@ gen_db_file_maps(DbInfo *old_db, DbInfo *new_db,
 	bool		all_matched = true;
 
 	/* There will certainly not be more mappings than there are old rels */
-	maps = (FileNameMap *) pg_malloc(sizeof(FileNameMap) *
-									 old_db->rel_arr.nrels);
+	maps = pg_malloc_array(FileNameMap, old_db->rel_arr.nrels);
 
 	/*
 	 * Each of the RelInfo arrays should be sorted by OID.  Scan through them
@@ -281,7 +280,6 @@ get_db_rel_and_slot_infos(ClusterInfo *cluster)
 {
 	UpgradeTask *task = upgrade_task_create();
 	char	   *rel_infos_query = NULL;
-	char	   *logical_slot_infos_query = NULL;
 
 	if (cluster->dbarr.dbs != NULL)
 		free_db_and_rel_infos(&cluster->dbarr);
@@ -306,20 +304,15 @@ get_db_rel_and_slot_infos(ClusterInfo *cluster)
 	 */
 	if (cluster == &old_cluster &&
 		GET_MAJOR_VERSION(cluster->major_version) > 1600)
-	{
-		logical_slot_infos_query = get_old_cluster_logical_slot_infos_query();
 		upgrade_task_add_step(task,
-							  logical_slot_infos_query,
+							  get_old_cluster_logical_slot_infos_query(cluster),
 							  process_old_cluster_logical_slot_infos,
 							  true, NULL);
-	}
 
 	upgrade_task_run(task, cluster);
 	upgrade_task_free(task);
 
 	pg_free(rel_infos_query);
-	if (logical_slot_infos_query)
-		pg_free(logical_slot_infos_query);
 
 	if (cluster == &old_cluster)
 		pg_log(PG_VERBOSE, "\nsource databases:");
@@ -370,7 +363,7 @@ get_template0_info(ClusterInfo *cluster)
 	if (PQntuples(dbres) != 1)
 		pg_fatal("template0 not found");
 
-	locale = pg_malloc(sizeof(DbLocaleInfo));
+	locale = pg_malloc_object(DbLocaleInfo);
 
 	i_datencoding = PQfnumber(dbres, "encoding");
 	i_datlocprovider = PQfnumber(dbres, "datlocprovider");
@@ -439,14 +432,30 @@ get_db_infos(ClusterInfo *cluster)
 	i_spclocation = PQfnumber(res, "spclocation");
 
 	ntups = PQntuples(res);
-	dbinfos = (DbInfo *) pg_malloc0(sizeof(DbInfo) * ntups);
+	dbinfos = pg_malloc0_array(DbInfo, ntups);
 
 	for (tupnum = 0; tupnum < ntups; tupnum++)
 	{
+		char	   *spcloc = PQgetvalue(res, tupnum, i_spclocation);
+		bool		inplace = spcloc[0] && !is_absolute_path(spcloc);
+
 		dbinfos[tupnum].db_oid = atooid(PQgetvalue(res, tupnum, i_oid));
 		dbinfos[tupnum].db_name = pg_strdup(PQgetvalue(res, tupnum, i_datname));
-		snprintf(dbinfos[tupnum].db_tablespace, sizeof(dbinfos[tupnum].db_tablespace), "%s",
-				 PQgetvalue(res, tupnum, i_spclocation));
+
+		/*
+		 * The tablespace location might be "", meaning the cluster default
+		 * location, i.e. pg_default or pg_global.  For in-place tablespaces,
+		 * pg_tablespace_location() returns a path relative to the data
+		 * directory.
+		 */
+		if (inplace)
+			snprintf(dbinfos[tupnum].db_tablespace,
+					 sizeof(dbinfos[tupnum].db_tablespace),
+					 "%s/%s", cluster->pgdata, spcloc);
+		else
+			snprintf(dbinfos[tupnum].db_tablespace,
+					 sizeof(dbinfos[tupnum].db_tablespace),
+					 "%s", spcloc);
 	}
 	PQclear(res);
 
@@ -482,7 +491,10 @@ get_rel_infos_query(void)
 	 *
 	 * pg_largeobject contains user data that does not appear in pg_dump
 	 * output, so we have to copy that system table.  It's easiest to do that
-	 * by treating it as a user table.
+	 * by treating it as a user table.  We can do the same for
+	 * pg_largeobject_metadata for upgrades from v16 and newer.  pg_upgrade
+	 * can't copy/link the files from older versions because aclitem (needed
+	 * by pg_largeobject_metadata.lomacl) changed its storage format in v16.
 	 */
 	appendPQExpBuffer(&query,
 					  "WITH regular_heap (reloid, indtable, toastheap) AS ( "
@@ -498,10 +510,12 @@ get_rel_infos_query(void)
 					  "                        'binary_upgrade', 'pg_toast') AND "
 					  "      c.oid >= %u::pg_catalog.oid) OR "
 					  "     (n.nspname = 'pg_catalog' AND "
-					  "      relname IN ('pg_largeobject') ))), ",
+					  "      relname IN ('pg_largeobject'%s) ))), ",
 					  (user_opts.transfer_mode == TRANSFER_MODE_SWAP) ?
 					  ", " CppAsString2(RELKIND_SEQUENCE) : "",
-					  FirstNormalObjectId);
+					  FirstNormalObjectId,
+					  (GET_MAJOR_VERSION(old_cluster.major_version) >= 1600) ?
+					  ", 'pg_largeobject_metadata'" : "");
 
 	/*
 	 * Add a CTE that collects OIDs of toast tables belonging to the tables
@@ -564,7 +578,7 @@ static void
 process_rel_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 {
 	int			ntups = PQntuples(res);
-	RelInfo    *relinfos = (RelInfo *) pg_malloc(sizeof(RelInfo) * ntups);
+	RelInfo    *relinfos = pg_malloc_array(RelInfo, ntups);
 	int			i_reloid = PQfnumber(res, "reloid");
 	int			i_indtable = PQfnumber(res, "indtable");
 	int			i_toastheap = PQfnumber(res, "toastheap");
@@ -579,8 +593,6 @@ process_rel_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 	char	   *tablespace = NULL;
 	char	   *last_namespace = NULL;
 	char	   *last_tablespace = NULL;
-
-	AssertVariableIsOfType(&process_rel_infos, UpgradeTaskProcessCB);
 
 	for (int relnum = 0; relnum < ntups; relnum++)
 	{
@@ -616,11 +628,21 @@ process_rel_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 		/* Is the tablespace oid non-default? */
 		if (atooid(PQgetvalue(res, relnum, i_reltablespace)) != 0)
 		{
+			char	   *spcloc = PQgetvalue(res, relnum, i_spclocation);
+			bool		inplace = spcloc[0] && !is_absolute_path(spcloc);
+
 			/*
 			 * The tablespace location might be "", meaning the cluster
-			 * default location, i.e. pg_default or pg_global.
+			 * default location, i.e. pg_default or pg_global.  For in-place
+			 * tablespaces, pg_tablespace_location() returns a path relative
+			 * to the data directory.
 			 */
-			tablespace = PQgetvalue(res, relnum, i_spclocation);
+			if (inplace)
+				tablespace = psprintf("%s/%s",
+									  os_info.running_cluster->pgdata,
+									  spcloc);
+			else
+				tablespace = spcloc;
 
 			/* Can we reuse the previous string allocation? */
 			if (last_tablespace && strcmp(tablespace, last_tablespace) == 0)
@@ -630,6 +652,10 @@ process_rel_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 				last_tablespace = curr->tablespace = pg_strdup(tablespace);
 				curr->tblsp_alloc = true;
 			}
+
+			/* Free palloc'd string for in-place tablespaces. */
+			if (inplace)
+				pfree(tablespace);
 		}
 		else
 			/* A zero reltablespace oid indicates the database tablespace. */
@@ -648,17 +674,15 @@ process_rel_infos(DbInfo *dbinfo, PGresult *res, void *arg)
  * get_db_rel_and_slot_infos()'s UpgradeTask.  The status of each logical slot
  * is checked in check_old_cluster_for_valid_slots().
  */
-static char *
-get_old_cluster_logical_slot_infos_query(void)
+static const char *
+get_old_cluster_logical_slot_infos_query(ClusterInfo *cluster)
 {
 	/*
 	 * Fetch the logical replication slot information. The check whether the
 	 * slot is considered caught up is done by an upgrade function. This
 	 * regards the slot as caught up if we don't find any decodable changes.
-	 * See binary_upgrade_logical_slot_has_caught_up().
-	 *
-	 * Note that we can't ensure whether the slot is caught up during
-	 * live_check as the new WAL records could be generated.
+	 * The implementation of this check varies depending on the server
+	 * version.
 	 *
 	 * We intentionally skip checking the WALs for invalidated slots as the
 	 * corresponding WALs could have been removed for such slots.
@@ -668,21 +692,81 @@ get_old_cluster_logical_slot_infos_query(void)
 	 * started and stopped several times causing any temporary slots to be
 	 * removed.
 	 */
-	return psprintf("SELECT slot_name, plugin, two_phase, failover, "
-					"%s as caught_up, invalidation_reason IS NOT NULL as invalid "
-					"FROM pg_catalog.pg_replication_slots "
-					"WHERE slot_type = 'logical' AND "
-					"database = current_database() AND "
-					"temporary IS FALSE;",
-					user_opts.live_check ? "FALSE" :
-					"(CASE WHEN invalidation_reason IS NOT NULL THEN FALSE "
-					"ELSE (SELECT pg_catalog.binary_upgrade_logical_slot_has_caught_up(slot_name)) "
-					"END)");
+
+	if (user_opts.live_check)
+	{
+		/*
+		 * We skip the caught-up check during live_check. We cannot verify
+		 * whether the slot is caught up in this mode, as new WAL records
+		 * could be generated concurrently.
+		 */
+		return "SELECT slot_name, plugin, two_phase, failover, "
+			"FALSE as caught_up, "
+			"invalidation_reason IS NOT NULL as invalid "
+			"FROM pg_catalog.pg_replication_slots "
+			"WHERE slot_type = 'logical' AND "
+			"database = current_database() AND "
+			"temporary IS FALSE";
+	}
+	else if (GET_MAJOR_VERSION(cluster->major_version) >= 1900)
+	{
+		/*
+		 * For PG19 and later, we optimize the slot caught-up check to avoid
+		 * reading the same WAL stream multiple times: execute the caught-up
+		 * check only for the slot with the minimum confirmed_flush_lsn, and
+		 * apply the same result to all other slots in the same database. This
+		 * limits the check to at most one logical slot per database. We also
+		 * use the maximum confirmed_flush_lsn among all logical slots on the
+		 * database as an early scan cutoff; finding a decodable WAL record
+		 * beyond this point implies that no slot has caught up.
+		 *
+		 * Note that we don't distinguish slots based on their output plugin.
+		 * If a plugin applies replication origin filters, we might get a
+		 * false positive (i.e., erroneously considering a slot caught up).
+		 * However, such cases are very rare, and the impact of a false
+		 * positive is minimal.
+		 */
+		return "WITH check_caught_up AS ( "
+			"  SELECT pg_catalog.binary_upgrade_check_logical_slot_pending_wal(slot_name, "
+			"    MAX(confirmed_flush_lsn) OVER ()) as last_pending_wal "
+			"  FROM pg_replication_slots "
+			"  WHERE slot_type = 'logical' AND "
+			"    database = current_database() AND "
+			"    temporary IS FALSE AND "
+			"    invalidation_reason IS NULL "
+			"  ORDER BY confirmed_flush_lsn ASC "
+			"  LIMIT 1 "
+			") "
+			"SELECT slot_name, plugin, two_phase, failover, "
+			"CASE WHEN invalidation_reason IS NOT NULL THEN FALSE "
+			"ELSE  last_pending_wal IS NULL OR "
+			"  confirmed_flush_lsn > last_pending_wal "
+			"END as caught_up, "
+			"invalidation_reason IS NOT NULL as invalid "
+			"FROM pg_catalog.pg_replication_slots "
+			"LEFT JOIN check_caught_up ON true "
+			"WHERE slot_type = 'logical' AND "
+			"database = current_database() AND "
+			"temporary IS FALSE ";
+	}
+
+	/*
+	 * For PG18 and earlier, we call
+	 * binary_upgrade_logical_slot_has_caught_up() for each logical slot.
+	 */
+	return "SELECT slot_name, plugin, two_phase, failover, "
+		"CASE WHEN invalidation_reason IS NOT NULL THEN FALSE "
+		"ELSE (SELECT pg_catalog.binary_upgrade_logical_slot_has_caught_up(slot_name)) "
+		"END as caught_up, "
+		"invalidation_reason IS NOT NULL as invalid "
+		"FROM pg_catalog.pg_replication_slots "
+		"WHERE slot_type = 'logical' AND "
+		"database = current_database() AND "
+		"temporary IS FALSE ";
 }
 
 /*
- * Callback function for processing results of the query returned by
- * get_old_cluster_logical_slot_infos_query(), which is used for
+ * Callback function for processing results of the query, which is used for
  * get_db_rel_and_slot_infos()'s UpgradeTask.  This function stores the logical
  * slot information for later use.
  */
@@ -691,9 +775,6 @@ process_old_cluster_logical_slot_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 {
 	LogicalSlotInfo *slotinfos = NULL;
 	int			num_slots = PQntuples(res);
-
-	AssertVariableIsOfType(&process_old_cluster_logical_slot_infos,
-						   UpgradeTaskProcessCB);
 
 	if (num_slots)
 	{
@@ -704,7 +785,7 @@ process_old_cluster_logical_slot_infos(DbInfo *dbinfo, PGresult *res, void *arg)
 		int			i_caught_up;
 		int			i_invalid;
 
-		slotinfos = (LogicalSlotInfo *) pg_malloc(sizeof(LogicalSlotInfo) * num_slots);
+		slotinfos = pg_malloc_array(LogicalSlotInfo, num_slots);
 
 		i_slotname = PQfnumber(res, "slot_name");
 		i_plugin = PQfnumber(res, "plugin");
@@ -738,7 +819,7 @@ process_old_cluster_logical_slot_infos(DbInfo *dbinfo, PGresult *res, void *arg)
  *
  * Note: this function always returns 0 if the old_cluster is PG16 and prior
  * because we gather slot information only for cluster versions greater than or
- * equal to PG17. See get_old_cluster_logical_slot_infos().
+ * equal to PG17. See get_db_rel_and_slot_infos().
  */
 int
 count_old_cluster_logical_slots(void)
@@ -752,20 +833,33 @@ count_old_cluster_logical_slots(void)
 }
 
 /*
- * get_subscription_count()
+ * get_subscription_info()
  *
- * Gets the number of subscriptions in the cluster.
+ * Gets the information of subscriptions in the cluster.
  */
 void
-get_subscription_count(ClusterInfo *cluster)
+get_subscription_info(ClusterInfo *cluster)
 {
 	PGconn	   *conn;
 	PGresult   *res;
+	int			i_nsub;
+	int			i_retain_dead_tuples;
 
 	conn = connectToServer(cluster, "template1");
-	res = executeQueryOrDie(conn, "SELECT count(*) "
-							"FROM pg_catalog.pg_subscription");
-	cluster->nsubs = atoi(PQgetvalue(res, 0, 0));
+	if (GET_MAJOR_VERSION(cluster->major_version) >= 1900)
+		res = executeQueryOrDie(conn, "SELECT count(*) AS nsub,"
+								"COUNT(CASE WHEN subretaindeadtuples THEN 1 END) > 0 AS retain_dead_tuples "
+								"FROM pg_catalog.pg_subscription");
+	else
+		res = executeQueryOrDie(conn, "SELECT count(*) AS nsub,"
+								"'f' AS retain_dead_tuples "
+								"FROM pg_catalog.pg_subscription");
+
+	i_nsub = PQfnumber(res, "nsub");
+	i_retain_dead_tuples = PQfnumber(res, "retain_dead_tuples");
+
+	cluster->nsubs = atoi(PQgetvalue(res, 0, i_nsub));
+	cluster->sub_retain_dead_tuples = (strcmp(PQgetvalue(res, 0, i_retain_dead_tuples), "t") == 0);
 
 	PQclear(res);
 	PQfinish(conn);

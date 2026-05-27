@@ -39,7 +39,7 @@
  * empty and be returned to the free page manager, and whole segments can
  * become empty and be returned to the operating system.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -529,6 +529,21 @@ dsa_attach(dsa_handle handle)
 				  PointerGetDatum(dsm_segment_address(segment)));
 
 	return area;
+}
+
+/*
+ * Returns whether the area with the given handle was already attached by the
+ * current process.  The area must have been created with dsa_create (not
+ * dsa_create_in_place).
+ */
+bool
+dsa_is_attached(dsa_handle handle)
+{
+	/*
+	 * An area handle is really a DSM segment handle for the first segment, so
+	 * we can just search for that.
+	 */
+	return dsm_find_mapping(handle) != NULL;
 }
 
 /*
@@ -1028,9 +1043,44 @@ dsa_get_total_size(dsa_area *area)
 {
 	size_t		size;
 
-	LWLockAcquire(DSA_AREA_LOCK(area), LW_EXCLUSIVE);
+	LWLockAcquire(DSA_AREA_LOCK(area), LW_SHARED);
 	size = area->control->total_segment_size;
 	LWLockRelease(DSA_AREA_LOCK(area));
+
+	return size;
+}
+
+/*
+ * Same as dsa_get_total_size(), but accepts a DSA handle.  The area must have
+ * been created with dsa_create (not dsa_create_in_place).
+ */
+size_t
+dsa_get_total_size_from_handle(dsa_handle handle)
+{
+	size_t		size;
+	bool		already_attached;
+	dsm_segment *segment;
+	dsa_area_control *control;
+
+	already_attached = dsa_is_attached(handle);
+	if (already_attached)
+		segment = dsm_find_mapping(handle);
+	else
+		segment = dsm_attach(handle);
+
+	if (segment == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("could not attach to dynamic shared area")));
+
+	control = (dsa_area_control *) dsm_segment_address(segment);
+
+	LWLockAcquire(&control->lock, LW_SHARED);
+	size = control->total_segment_size;
+	LWLockRelease(&control->lock);
+
+	if (!already_attached)
+		dsm_detach(segment);
 
 	return size;
 }
@@ -1280,7 +1330,7 @@ create_internal(void *place, size_t size,
 	 * area.  Other backends will need to obtain their own dsa_area object by
 	 * attaching.
 	 */
-	area = palloc(sizeof(dsa_area));
+	area = palloc_object(dsa_area);
 	area->control = control;
 	area->resowner = CurrentResourceOwner;
 	memset(area->segment_maps, 0, sizeof(dsa_segment_map) * DSA_MAX_SEGMENTS);
@@ -1336,7 +1386,7 @@ attach_internal(void *place, dsm_segment *segment, dsa_handle handle)
 		   (DSA_SEGMENT_HEADER_MAGIC ^ handle ^ 0));
 
 	/* Build the backend-local area object. */
-	area = palloc(sizeof(dsa_area));
+	area = palloc_object(dsa_area);
 	area->control = control;
 	area->resowner = CurrentResourceOwner;
 	memset(&area->segment_maps[0], 0,
@@ -2146,6 +2196,8 @@ make_new_segment(dsa_area *area, size_t requested_pages)
 	/* See if that is enough... */
 	if (requested_pages > usable_pages)
 	{
+		size_t		total_requested_pages PG_USED_FOR_ASSERTS_ONLY;
+
 		/*
 		 * We'll make an odd-sized segment, working forward from the requested
 		 * number of pages.
@@ -2156,10 +2208,37 @@ make_new_segment(dsa_area *area, size_t requested_pages)
 			MAXALIGN(sizeof(FreePageManager)) +
 			usable_pages * sizeof(dsa_pointer);
 
+		/*
+		 * We must also account for pagemap entries needed to cover the
+		 * metadata pages themselves.  The pagemap must track all pages in the
+		 * segment, including the pages occupied by metadata.
+		 *
+		 * This formula uses integer ceiling division to compute the exact
+		 * number of additional entries needed.  The divisor (FPM_PAGE_SIZE -
+		 * sizeof(dsa_pointer)) accounts for the fact that each metadata page
+		 * consumes one pagemap entry of sizeof(dsa_pointer) bytes, leaving
+		 * only (FPM_PAGE_SIZE - sizeof(dsa_pointer)) net bytes per metadata
+		 * page.
+		 */
+		metadata_bytes +=
+			((metadata_bytes + (FPM_PAGE_SIZE - sizeof(dsa_pointer)) - 1) /
+			 (FPM_PAGE_SIZE - sizeof(dsa_pointer))) *
+			sizeof(dsa_pointer);
+
 		/* Add padding up to next page boundary. */
 		if (metadata_bytes % FPM_PAGE_SIZE != 0)
 			metadata_bytes += FPM_PAGE_SIZE - (metadata_bytes % FPM_PAGE_SIZE);
 		total_size = metadata_bytes + usable_pages * FPM_PAGE_SIZE;
+		total_requested_pages = total_size / FPM_PAGE_SIZE;
+
+		/*
+		 * Verify that we allocated enough pagemap entries for metadata and
+		 * usable pages.  This reverse-engineers the new calculation of
+		 * "metadata_bytes" done based on the new "requested_pages" for an
+		 * odd-sized segment.
+		 */
+		Assert((metadata_bytes - MAXALIGN(sizeof(dsa_segment_header)) -
+				MAXALIGN(sizeof(FreePageManager))) / sizeof(dsa_pointer) >= total_requested_pages);
 
 		/* Is that too large for dsa_pointer's addressing scheme? */
 		if (total_size > DSA_MAX_SEGMENT_SIZE)

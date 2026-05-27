@@ -4,7 +4,7 @@
  *	  definition of the "text search parser" system catalog (pg_ts_parser)
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_ts_parser.h
@@ -26,6 +26,8 @@
  *		typedef struct FormData_pg_ts_parser
  * ----------------
  */
+BEGIN_CATALOG_STRUCT
+
 CATALOG(pg_ts_parser,3601,TSParserRelationId)
 {
 	Oid			oid;			/* oid */
@@ -51,6 +53,8 @@ CATALOG(pg_ts_parser,3601,TSParserRelationId)
 	/* return descriptions of lexeme's types */
 	regproc		prslextype BKI_LOOKUP(pg_proc);
 } FormData_pg_ts_parser;
+
+END_CATALOG_STRUCT
 
 typedef FormData_pg_ts_parser *Form_pg_ts_parser;
 

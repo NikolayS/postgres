@@ -11,11 +11,16 @@ import functools
 import http.server
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.parse
 from collections import defaultdict
 from typing import Dict
+
+ssl_dir = os.getenv("cert_dir")
+ssl_cert = ssl_dir + "/server-localhost-alt-names.crt"
+ssl_key = ssl_dir + "/server-localhost-alt-names.key"
 
 
 class OAuthHandler(http.server.BaseHTTPRequestHandler):
@@ -257,13 +262,33 @@ class OAuthHandler(http.server.BaseHTTPRequestHandler):
 
         return token
 
+    def _log_response(self, js: JsonObject) -> None:
+        """
+        Trims the response JSON, if necessary, and logs it for later debugging.
+        """
+        # At the moment the biggest problem for tests is the _pad_ member, which
+        # is a megabyte in size, so truncate that to something more reasonable.
+        if "_pad_" in js:
+            pad = js["_pad_"]
+
+            # Don't modify the original dict.
+            js = dict(js)
+            js["_pad_"] = pad[:64] + f"[...truncated from {len(pad)} bytes]"
+
+        resp = json.dumps(js).encode("ascii")
+        self.log_message("sending JSON response: %s", resp)
+
+        # If you've tripped this assertion, please truncate the new addition as
+        # above, or else come up with a new strategy.
+        assert len(resp) < 1024, "_log_response must be adjusted for new JSON"
+
     def _send_json(self, js: JsonObject) -> None:
         """
         Sends the provided JSON dict as an application/json response.
         self._response_code can be modified to send JSON error responses.
         """
         resp = json.dumps(js).encode("ascii")
-        self.log_message("sending JSON response: %s", resp)
+        self._log_response(js)
 
         self.send_response(self._response_code)
         self.send_header("Content-Type", self._content_type)
@@ -275,7 +300,11 @@ class OAuthHandler(http.server.BaseHTTPRequestHandler):
     def config(self) -> JsonObject:
         port = self.server.socket.getsockname()[1]
 
-        issuer = f"http://127.0.0.1:{port}"
+        # XXX This IPv4-only Issuer can't be changed to "localhost" unless our
+        # server also listens on the corresponding IPv6 port when available.
+        # Otherwise, other processes with ephemeral sockets could accidentally
+        # interfere with our Curl client, causing intermittent failures.
+        issuer = f"https://127.0.0.1:{port}"
         if self._alt_issuer:
             issuer += "/alternate"
         elif self._parameterized:
@@ -388,8 +417,17 @@ def main():
     Starts the authorization server on localhost. The ephemeral port in use will
     be printed to stdout.
     """
-
+    # XXX Listen exclusively on IPv4. Listening on a dual-stack socket would be
+    # more true-to-life, but every OS/Python combination in the buildfarm and CI
+    # would need to provide the functionality first.
     s = http.server.HTTPServer(("127.0.0.1", 0), OAuthHandler)
+
+    # Speak HTTPS.
+    # TODO: switch to HTTPSServer with Python 3.14
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(ssl_cert, ssl_key)
+
+    s.socket = ssl_context.wrap_socket(s.socket, server_side=True)
 
     # Attach a "cache" dictionary to the server to allow the OAuthHandlers to
     # track state across token requests. The use of defaultdict ensures that new

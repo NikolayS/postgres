@@ -1,12 +1,19 @@
 /*-------------------------------------------------------------------------
  *
  * pg_dumpall.c
+ *	  pg_dumpall dumps all databases and global objects (roles and
+ *	  tablespaces) from a PostgreSQL cluster.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ *	  For text format output, globals are written directly and pg_dump is
+ *	  invoked for each database, with all output going to stdout or a file.
+ *
+ *	  For non-text formats (custom, directory, tar), a directory is created
+ *	  containing a toc.glo file with global objects, a map.dat file mapping
+ *	  database OIDs to names, and a databases/ subdirectory with individual
+ *	  pg_dump archives for each database.
+ *
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- * pg_dumpall forces all pg_dump output to be text, since it also outputs
- * text into the same output stream.
  *
  * src/bin/pg_dump/pg_dumpall.c
  *
@@ -27,9 +34,11 @@
 #include "common/string.h"
 #include "connectdb.h"
 #include "dumputils.h"
+#include "fe_utils/option_utils.h"
 #include "fe_utils/string_utils.h"
 #include "filter.h"
 #include "getopt_long.h"
+#include "pg_backup_archiver.h"
 
 /* version string we expect back from pg_dump */
 #define PGDUMP_VERSIONSTR "pg_dump (PostgreSQL) " PG_VERSION "\n"
@@ -65,19 +74,21 @@ static void dropTablespaces(PGconn *conn);
 static void dumpTablespaces(PGconn *conn);
 static void dropDBs(PGconn *conn);
 static void dumpUserConfig(PGconn *conn, const char *username);
-static void dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat);
+static void dumpDatabases(PGconn *conn);
 static void dumpTimestamp(const char *msg);
-static int	runPgDump(const char *dbname, const char *create_opts,
-					  char *dbfile, ArchiveFormat archDumpFormat);
+static int	runPgDump(const char *dbname, const char *create_opts, char *dbfile);
 static void buildShSecLabels(PGconn *conn,
 							 const char *catalog_name, Oid objectId,
 							 const char *objtype, const char *objname,
 							 PQExpBuffer buffer);
 static void executeCommand(PGconn *conn, const char *query);
+static void check_for_invalid_global_names(PGconn *conn,
+										   SimpleStringList *excluded_names);
 static void expand_dbname_patterns(PGconn *conn, SimpleStringList *patterns,
 								   SimpleStringList *names);
 static void read_dumpall_filters(const char *filename, SimpleStringList *pattern);
 static ArchiveFormat parseDumpFormat(const char *format);
+static int	createDumpId(void);
 
 static char pg_dump_bin[MAXPGPATH];
 static PQExpBuffer pgdumpopts;
@@ -107,8 +118,6 @@ static int	no_subscriptions = 0;
 static int	no_toast_compression = 0;
 static int	no_unlogged_table_data = 0;
 static int	no_role_passwords = 0;
-static int	with_data = 0;
-static int	with_schema = 0;
 static int	with_statistics = 0;
 static int	server_version;
 static int	load_via_partition_root = 0;
@@ -125,6 +134,12 @@ static char *filename = NULL;
 
 static SimpleStringList database_exclude_patterns = {NULL, NULL};
 static SimpleStringList database_exclude_names = {NULL, NULL};
+
+static char *restrict_key;
+static Archive *fout = NULL;
+static int	dumpIdVal = 0;
+static ArchiveFormat archDumpFormat = archNull;
+static const CatalogId nilCatalogId = {0, 0};
 
 int
 main(int argc, char *argv[])
@@ -183,14 +198,13 @@ main(int argc, char *argv[])
 		{"no-sync", no_argument, NULL, 4},
 		{"no-toast-compression", no_argument, &no_toast_compression, 1},
 		{"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
-		{"with-data", no_argument, &with_data, 1},
-		{"with-schema", no_argument, &with_schema, 1},
-		{"with-statistics", no_argument, &with_statistics, 1},
 		{"on-conflict-do-nothing", no_argument, &on_conflict_do_nothing, 1},
 		{"rows-per-insert", required_argument, NULL, 7},
+		{"statistics", no_argument, &with_statistics, 1},
 		{"statistics-only", no_argument, &statistics_only, 1},
 		{"filter", required_argument, NULL, 8},
 		{"sequence-data", no_argument, &sequence_data, 1},
+		{"restrict-key", required_argument, NULL, 9},
 
 		{NULL, 0, NULL, 0}
 	};
@@ -201,19 +215,19 @@ main(int argc, char *argv[])
 	char	   *pgdb = NULL;
 	char	   *use_role = NULL;
 	const char *dumpencoding = NULL;
-	ArchiveFormat archDumpFormat = archNull;
-	const char *formatName = "p";
+	const char *format_name = "p";
 	trivalue	prompt_password = TRI_DEFAULT;
 	bool		data_only = false;
 	bool		globals_only = false;
 	bool		roles_only = false;
+	bool		schema_only = false;
 	bool		tablespaces_only = false;
 	PGconn	   *conn;
 	int			encoding;
-	const char *std_strings;
 	int			c,
 				ret;
 	int			optindex;
+	DumpOptions dopt;
 
 	pg_logging_init(argv[0]);
 	pg_logging_set_level(PG_LOG_WARNING);
@@ -251,6 +265,7 @@ main(int argc, char *argv[])
 	}
 
 	pgdumpopts = createPQExpBuffer();
+	InitDumpOptions(&dopt);
 
 	while ((c = getopt_long(argc, argv, "acd:E:f:F:gh:l:Op:rsS:tU:vwWx", long_options, &optindex)) != -1)
 	{
@@ -281,7 +296,7 @@ main(int argc, char *argv[])
 				appendShellString(pgdumpopts, filename);
 				break;
 			case 'F':
-				formatName = pg_strdup(optarg);
+				format_name = pg_strdup(optarg);
 				break;
 			case 'g':
 				globals_only = true;
@@ -308,6 +323,7 @@ main(int argc, char *argv[])
 				break;
 
 			case 's':
+				schema_only = true;
 				appendPQExpBufferStr(pgdumpopts, " -s");
 				break;
 
@@ -322,6 +338,7 @@ main(int argc, char *argv[])
 
 			case 'U':
 				pguser = pg_strdup(optarg);
+				dopt.cparams.username = pg_strdup(optarg);
 				break;
 
 			case 'v':
@@ -382,6 +399,12 @@ main(int argc, char *argv[])
 				read_dumpall_filters(optarg, &database_exclude_patterns);
 				break;
 
+			case 9:
+				restrict_key = pg_strdup(optarg);
+				appendPQExpBufferStr(pgdumpopts, " --restrict-key ");
+				appendShellString(pgdumpopts, optarg);
+				break;
+
 			default:
 				/* getopt_long already emitted a complaint */
 				pg_log_error_hint("Try \"%s --help\" for more information.", progname);
@@ -398,41 +421,50 @@ main(int argc, char *argv[])
 		exit_nicely(1);
 	}
 
-	if (database_exclude_patterns.head != NULL &&
-		(globals_only || roles_only || tablespaces_only))
-	{
-		pg_log_error("option --exclude-database cannot be used together with -g/--globals-only, -r/--roles-only, or -t/--tablespaces-only");
-		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
-		exit_nicely(1);
-	}
+	/* --exclude-database is incompatible with global *-only options */
+	check_mut_excl_opts(database_exclude_patterns.head, "--exclude-database",
+						globals_only, "-g/--globals-only",
+						roles_only, "-r/--roles-only",
+						tablespaces_only, "-t/--tablespaces-only");
 
-	/* Make sure the user hasn't specified a mix of globals-only options */
-	if (globals_only && roles_only)
-	{
-		pg_log_error("options -g/--globals-only and -r/--roles-only cannot be used together");
-		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
-		exit_nicely(1);
-	}
+	/* *-only options are incompatible with each other */
+	check_mut_excl_opts(data_only, "-a/--data-only",
+						globals_only, "-g/--globals-only",
+						roles_only, "-r/--roles-only",
+						schema_only, "-s/--schema-only",
+						statistics_only, "--statistics-only",
+						tablespaces_only, "-t/--tablespaces-only");
 
-	if (globals_only && tablespaces_only)
-	{
-		pg_log_error("options -g/--globals-only and -t/--tablespaces-only cannot be used together");
-		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
-		exit_nicely(1);
-	}
+	/* --no-* and *-only for same thing are incompatible */
+	check_mut_excl_opts(data_only, "-a/--data-only",
+						no_data, "--no-data");
+	check_mut_excl_opts(schema_only, "-s/--schema-only",
+						no_schema, "--no-schema");
+	check_mut_excl_opts(statistics_only, "--statistics-only",
+						no_statistics, "--no-statistics");
+
+	/* --statistics and --no-statistics are incompatible */
+	check_mut_excl_opts(with_statistics, "--statistics",
+						no_statistics, "--no-statistics");
+
+	/* --statistics is incompatible with *-only (except --statistics-only) */
+	check_mut_excl_opts(with_statistics, "--statistics",
+						data_only, "-a/--data-only",
+						globals_only, "-g/--globals-only",
+						roles_only, "-r/--roles-only",
+						schema_only, "-s/--schema-only",
+						tablespaces_only, "-t/--tablespaces-only");
+
+	/* --clean and --data-only are incompatible */
+	check_mut_excl_opts(output_clean, "-c/--clean",
+						data_only, "-a/--data-only");
 
 	if (if_exists && !output_clean)
-		pg_fatal("option --if-exists requires option -c/--clean");
-
-	if (roles_only && tablespaces_only)
-	{
-		pg_log_error("options -r/--roles-only and -t/--tablespaces-only cannot be used together");
-		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
-		exit_nicely(1);
-	}
+		pg_fatal("option %s requires option %s",
+				 "--if-exists", "-c/--clean");
 
 	/* Get format for dump. */
-	archDumpFormat = parseDumpFormat(formatName);
+	archDumpFormat = parseDumpFormat(format_name);
 
 	/*
 	 * If a non-plain format is specified, a file name is also required as the
@@ -441,10 +473,21 @@ main(int argc, char *argv[])
 	if (archDumpFormat != archNull &&
 		(!filename || strcmp(filename, "") == 0))
 	{
-		pg_log_error("option -F/--format=d|c|t requires option -f/--file");
+		pg_log_error("option %s=d|c|t requires option %s",
+					 "-F/--format", "-f/--file");
 		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
 		exit_nicely(1);
 	}
+
+	/* restrict-key is only supported with --format=plain */
+	if (archDumpFormat != archNull && restrict_key)
+		pg_fatal("option %s can only be used with %s=plain",
+				 "--restrict-key", "--format");
+
+	/* --clean and -g/--globals-only cannot be used together in non-text dump */
+	if (archDumpFormat != archNull && output_clean && globals_only)
+		pg_fatal("options %s and %s cannot be used together in non-text dump",
+				 "--clean", "-g/--globals-only");
 
 	/*
 	 * If password values are not required in the dump, switch to using
@@ -497,12 +540,8 @@ main(int argc, char *argv[])
 		appendPQExpBufferStr(pgdumpopts, " --no-toast-compression");
 	if (no_unlogged_table_data)
 		appendPQExpBufferStr(pgdumpopts, " --no-unlogged-table-data");
-	if (with_data)
-		appendPQExpBufferStr(pgdumpopts, " --with-data");
-	if (with_schema)
-		appendPQExpBufferStr(pgdumpopts, " --with-schema");
 	if (with_statistics)
-		appendPQExpBufferStr(pgdumpopts, " --with-statistics");
+		appendPQExpBufferStr(pgdumpopts, " --statistics");
 	if (on_conflict_do_nothing)
 		appendPQExpBufferStr(pgdumpopts, " --on-conflict-do-nothing");
 	if (statistics_only)
@@ -512,20 +551,14 @@ main(int argc, char *argv[])
 
 	/*
 	 * Open the output file if required, otherwise use stdout.  If required,
-	 * then create new directory and global.dat file.
+	 * then create new directory.
 	 */
 	if (archDumpFormat != archNull)
 	{
-		char		global_path[MAXPGPATH];
+		Assert(filename);
 
 		/* Create new directory or accept the empty existing directory. */
 		create_or_open_dir(filename);
-
-		snprintf(global_path, MAXPGPATH, "%s/global.dat", filename);
-
-		OPF = fopen(global_path, PG_BINARY_W);
-		if (!OPF)
-			pg_fatal("could not open \"%s\": %m", global_path);
 	}
 	else if (filename)
 	{
@@ -536,6 +569,16 @@ main(int argc, char *argv[])
 	}
 	else
 		OPF = stdout;
+
+	/*
+	 * If you don't provide a restrict key, one will be appointed for you.
+	 */
+	if (!restrict_key)
+		restrict_key = generate_restrict_key();
+	if (!restrict_key)
+		pg_fatal("could not generate restrict key");
+	if (!valid_restrict_key(restrict_key))
+		pg_fatal("invalid restrict key");
 
 	/*
 	 * If there was a database specified on the command line, use that,
@@ -587,14 +630,17 @@ main(int argc, char *argv[])
 	}
 
 	/*
-	 * Get the active encoding and the standard_conforming_strings setting, so
-	 * we know how to escape strings.
+	 * Force standard_conforming_strings on, just in case we are dumping from
+	 * an old server that has it disabled.  Without this, literals in views,
+	 * expressions, etc, would be incorrect for modern servers.
+	 */
+	executeCommand(conn, "SET standard_conforming_strings = on");
+
+	/*
+	 * Get the active encoding, so we know how to escape strings.
 	 */
 	encoding = PQclientEncoding(conn);
 	setFmtEncoding(encoding);
-	std_strings = PQparameterStatus(conn, "standard_conforming_strings");
-	if (!std_strings)
-		std_strings = "off";
 
 	/* Set the role if requested */
 	if (use_role)
@@ -610,37 +656,137 @@ main(int argc, char *argv[])
 	if (quote_all_identifiers)
 		executeCommand(conn, "SET quote_all_identifiers = true");
 
-	fprintf(OPF, "--\n-- PostgreSQL database cluster dump\n--\n\n");
-	if (verbose)
-		dumpTimestamp("Started on");
+	/* create a archive file for global commands. */
+	if (archDumpFormat != archNull)
+	{
+		PQExpBuffer qry = createPQExpBuffer();
+		char		global_path[MAXPGPATH];
+		const char *encname;
+		pg_compress_specification compression_spec = {0};
 
-	/*
-	 * We used to emit \connect postgres here, but that served no purpose
-	 * other than to break things for installations without a postgres
-	 * database.  Everything we're restoring here is a global, so whichever
-	 * database we're connected to at the moment is fine.
-	 */
+		/*
+		 * Check that no global object names contain newlines or carriage
+		 * returns, which would break the map.dat file format.  This is only
+		 * needed for servers older than v19, which started prohibiting such
+		 * names.
+		 */
+		if (server_version < 190000)
+			check_for_invalid_global_names(conn, &database_exclude_names);
 
-	/* Restore will need to write to the target cluster */
-	fprintf(OPF, "SET default_transaction_read_only = off;\n\n");
+		/* Set file path for global sql commands. */
+		snprintf(global_path, MAXPGPATH, "%s/toc.glo", filename);
 
-	/* Replicate encoding and std_strings in output */
-	fprintf(OPF, "SET client_encoding = '%s';\n",
-			pg_encoding_to_char(encoding));
-	fprintf(OPF, "SET standard_conforming_strings = %s;\n", std_strings);
-	if (strcmp(std_strings, "off") == 0)
-		fprintf(OPF, "SET escape_string_warning = off;\n");
-	fprintf(OPF, "\n");
+		/* Open the output file */
+		fout = CreateArchive(global_path, archCustom, compression_spec,
+							 dosync, archModeWrite, NULL, DATA_DIR_SYNC_METHOD_FSYNC);
 
-	if (!data_only)
+		/* Make dump options accessible right away */
+		SetArchiveOptions(fout, &dopt, NULL);
+
+		((ArchiveHandle *) fout)->connection = conn;
+		((ArchiveHandle *) fout)->public.numWorkers = 1;
+
+		/* Register the cleanup hook */
+		on_exit_close_archive(fout);
+
+		/* Let the archiver know how noisy to be */
+		fout->verbose = verbose;
+
+		/*
+		 * We allow the server to be back to 9.2, and up to any minor release
+		 * of our own major version.  (See also version check in
+		 * pg_dumpall.c.)
+		 */
+		fout->minRemoteVersion = 90200;
+		fout->maxRemoteVersion = (PG_VERSION_NUM / 100) * 100 + 99;
+		fout->numWorkers = 1;
+
+		/* Dump default_transaction_read_only. */
+		appendPQExpBufferStr(qry, "SET default_transaction_read_only = off;\n\n");
+		ArchiveEntry(fout,
+					 nilCatalogId,	/* catalog ID */
+					 createDumpId(),	/* dump ID */
+					 ARCHIVE_OPTS(.tag = "default_transaction_read_only",
+								  .description = "default_transaction_read_only",
+								  .section = SECTION_PRE_DATA,
+								  .createStmt = qry->data));
+		resetPQExpBuffer(qry);
+
+		/* Put the correct encoding into the archive */
+		encname = pg_encoding_to_char(encoding);
+
+		appendPQExpBufferStr(qry, "SET client_encoding = ");
+		appendStringLiteralAH(qry, encname, fout);
+		appendPQExpBufferStr(qry, ";\n");
+		ArchiveEntry(fout,
+					 nilCatalogId,	/* catalog ID */
+					 createDumpId(),	/* dump ID */
+					 ARCHIVE_OPTS(.tag = "client_encoding",
+								  .description = "client_encoding",
+								  .section = SECTION_PRE_DATA,
+								  .createStmt = qry->data));
+		resetPQExpBuffer(qry);
+
+		/* Put the correct escape string behavior into the archive. */
+		appendPQExpBufferStr(qry, "SET standard_conforming_strings = 'on';\n");
+		ArchiveEntry(fout,
+					 nilCatalogId,	/* catalog ID */
+					 createDumpId(),	/* dump ID */
+					 ARCHIVE_OPTS(.tag = "standard_conforming_strings",
+								  .description = "standard_conforming_strings",
+								  .section = SECTION_PRE_DATA,
+								  .createStmt = qry->data));
+		destroyPQExpBuffer(qry);
+	}
+	else
+	{
+		fprintf(OPF, "--\n-- PostgreSQL database cluster dump\n--\n\n");
+
+		if (verbose)
+			dumpTimestamp("Started on");
+
+		/*
+		 * Enter restricted mode to block any unexpected psql meta-commands. A
+		 * malicious source might try to inject a variety of things via bogus
+		 * responses to queries.  While we cannot prevent such sources from
+		 * affecting the destination at restore time, we can block psql
+		 * meta-commands so that the client machine that runs psql with the
+		 * dump output remains unaffected.
+		 */
+		fprintf(OPF, "\\restrict %s\n\n", restrict_key);
+
+		/*
+		 * We used to emit \connect postgres here, but that served no purpose
+		 * other than to break things for installations without a postgres
+		 * database.  Everything we're restoring here is a global, so
+		 * whichever database we're connected to at the moment is fine.
+		 */
+
+		/* Restore will need to write to the target cluster */
+		fprintf(OPF, "SET default_transaction_read_only = off;\n\n");
+
+		/* Replicate encoding and standard_conforming_strings in output */
+		fprintf(OPF, "SET client_encoding = '%s';\n",
+				pg_encoding_to_char(encoding));
+		fprintf(OPF, "SET standard_conforming_strings = on;\n");
+		fprintf(OPF, "\n");
+	}
+
+	if (!data_only && !statistics_only && !no_schema)
 	{
 		/*
 		 * If asked to --clean, do that first.  We can avoid detailed
 		 * dependency analysis because databases never depend on each other,
 		 * and tablespaces never depend on each other.  Roles could have
 		 * grants to each other, but DROP ROLE will clean those up silently.
+		 *
+		 * For non-text formats, pg_dumpall unconditionally process --clean
+		 * option. In contrast, pg_restore only applies it if the user
+		 * explicitly provides the flag.  This discrepancy resolves corner
+		 * cases where pg_restore requires cleanup instructions that may be
+		 * missing from a standard pg_dumpall output.
 		 */
-		if (output_clean)
+		if (output_clean || archDumpFormat != archNull)
 		{
 			if (!globals_only && !roles_only && !tablespaces_only)
 				dropDBs(conn);
@@ -674,22 +820,45 @@ main(int argc, char *argv[])
 			dumpTablespaces(conn);
 	}
 
-	if (!globals_only && !roles_only && !tablespaces_only)
-		dumpDatabases(conn, archDumpFormat);
-
-	PQfinish(conn);
-
-	if (verbose)
-		dumpTimestamp("Completed on");
-	fprintf(OPF, "--\n-- PostgreSQL database cluster dump complete\n--\n\n");
-
-	if (filename)
+	if (archDumpFormat == archNull)
 	{
-		fclose(OPF);
+		/*
+		 * Exit restricted mode just before dumping the databases.  pg_dump
+		 * will handle entering restricted mode again as appropriate.
+		 */
+		fprintf(OPF, "\\unrestrict %s\n\n", restrict_key);
+	}
 
-		/* sync the resulting file, errors are not fatal */
-		if (dosync && (archDumpFormat == archNull))
-			(void) fsync_fname(filename, false);
+	if (!globals_only && !roles_only && !tablespaces_only)
+		dumpDatabases(conn);
+
+	if (archDumpFormat == archNull)
+	{
+		PQfinish(conn);
+
+		if (verbose)
+			dumpTimestamp("Completed on");
+		fprintf(OPF, "--\n-- PostgreSQL database cluster dump complete\n--\n\n");
+
+		if (filename)
+		{
+			fclose(OPF);
+
+			/* sync the resulting file, errors are not fatal */
+			if (dosync)
+				(void) fsync_fname(filename, false);
+		}
+	}
+	else
+	{
+		RestoreOptions *ropt;
+
+		ropt = NewRestoreOptions();
+		SetArchiveOptions(fout, &dopt, ropt);
+
+		/* Mark which entries should be output */
+		ProcessArchiveRestoreOptions(fout);
+		CloseArchive(fout);
 	}
 
 	exit_nicely(0);
@@ -699,7 +868,7 @@ main(int argc, char *argv[])
 static void
 help(void)
 {
-	printf(_("%s extracts a PostgreSQL database cluster based on specified dump format.\n\n"), progname);
+	printf(_("%s exports a PostgreSQL database cluster as an SQL script or to other formats.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 
@@ -748,15 +917,14 @@ help(void)
 	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
 	printf(_("  --on-conflict-do-nothing     add ON CONFLICT DO NOTHING to INSERT commands\n"));
 	printf(_("  --quote-all-identifiers      quote all identifiers, even if not key words\n"));
+	printf(_("  --restrict-key=RESTRICT_KEY  use provided string as psql \\restrict key\n"));
 	printf(_("  --rows-per-insert=NROWS      number of rows per INSERT; implies --inserts\n"));
 	printf(_("  --sequence-data              include sequence data in dump\n"));
+	printf(_("  --statistics                 dump the statistics\n"));
 	printf(_("  --statistics-only            dump only the statistics, not schema or data\n"));
 	printf(_("  --use-set-session-authorization\n"
 			 "                               use SET SESSION AUTHORIZATION commands instead of\n"
 			 "                               ALTER OWNER commands to set ownership\n"));
-	printf(_("  --with-data                  dump the data\n"));
-	printf(_("  --with-schema                dump the schema\n"));
-	printf(_("  --with-statistics            dump the statistics\n"));
 
 	printf(_("\nConnection options:\n"));
 	printf(_("  -d, --dbname=CONNSTR     connect using connection string\n"));
@@ -802,24 +970,45 @@ dropRoles(PGconn *conn)
 
 	i_rolname = PQfnumber(res, "rolname");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Drop roles\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
 	{
 		const char *rolename;
+		PQExpBuffer delQry = createPQExpBuffer();
 
 		rolename = PQgetvalue(res, i, i_rolname);
 
-		fprintf(OPF, "DROP ROLE %s%s;\n",
-				if_exists ? "IF EXISTS " : "",
-				fmtId(rolename));
+		if (archDumpFormat == archNull)
+		{
+			appendPQExpBuffer(delQry, "DROP ROLE %s%s;\n",
+							  if_exists ? "IF EXISTS " : "",
+							  fmtId(rolename));
+			fprintf(OPF, "%s", delQry->data);
+		}
+		else
+		{
+			appendPQExpBuffer(delQry, "DROP ROLE IF EXISTS %s;\n",
+							  fmtId(rolename));
+
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = psprintf("ROLE %s", fmtId(rolename)),
+									  .description = "DROP_GLOBAL",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = delQry->data));
+		}
+
+		destroyPQExpBuffer(delQry);
 	}
 
 	PQclear(res);
 	destroyPQExpBuffer(buf);
 
-	fprintf(OPF, "\n\n");
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 /*
@@ -829,6 +1018,8 @@ static void
 dumpRoles(PGconn *conn)
 {
 	PQExpBuffer buf = createPQExpBuffer();
+	PQExpBuffer comment_buf = createPQExpBuffer();
+	PQExpBuffer seclabel_buf = createPQExpBuffer();
 	PGresult   *res;
 	int			i_oid,
 				i_rolname,
@@ -900,7 +1091,7 @@ dumpRoles(PGconn *conn)
 	i_rolcomment = PQfnumber(res, "rolcomment");
 	i_is_current_user = PQfnumber(res, "is_current_user");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Roles\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
@@ -919,6 +1110,8 @@ dumpRoles(PGconn *conn)
 		}
 
 		resetPQExpBuffer(buf);
+		resetPQExpBuffer(comment_buf);
+		resetPQExpBuffer(seclabel_buf);
 
 		if (binary_upgrade)
 		{
@@ -995,17 +1188,53 @@ dumpRoles(PGconn *conn)
 
 		if (!no_comments && !PQgetisnull(res, i, i_rolcomment))
 		{
-			appendPQExpBuffer(buf, "COMMENT ON ROLE %s IS ", fmtId(rolename));
-			appendStringLiteralConn(buf, PQgetvalue(res, i, i_rolcomment), conn);
-			appendPQExpBufferStr(buf, ";\n");
+			appendPQExpBuffer(comment_buf, "COMMENT ON ROLE %s IS ", fmtId(rolename));
+			appendStringLiteralConn(comment_buf, PQgetvalue(res, i, i_rolcomment), conn);
+			appendPQExpBufferStr(comment_buf, ";\n");
 		}
 
 		if (!no_security_labels)
 			buildShSecLabels(conn, "pg_authid", auth_oid,
 							 "ROLE", rolename,
-							 buf);
+							 seclabel_buf);
 
-		fprintf(OPF, "%s", buf->data);
+		if (archDumpFormat == archNull)
+		{
+			fprintf(OPF, "%s", buf->data);
+			fprintf(OPF, "%s", comment_buf->data);
+
+			if (seclabel_buf->data[0] != '\0')
+				fprintf(OPF, "%s", seclabel_buf->data);
+		}
+		else
+		{
+			char	   *tag = psprintf("ROLE %s", fmtId(rolename));
+
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = tag,
+									  .description = "ROLE",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = buf->data));
+			if (comment_buf->data[0] != '\0')
+				ArchiveEntry(fout,
+							 nilCatalogId,	/* catalog ID */
+							 createDumpId(),	/* dump ID */
+							 ARCHIVE_OPTS(.tag = tag,
+										  .description = "COMMENT",
+										  .section = SECTION_PRE_DATA,
+										  .createStmt = comment_buf->data));
+
+			if (seclabel_buf->data[0] != '\0')
+				ArchiveEntry(fout,
+							 nilCatalogId,	/* catalog ID */
+							 createDumpId(),	/* dump ID */
+							 ARCHIVE_OPTS(.tag = tag,
+										  .description = "SECURITY LABEL",
+										  .section = SECTION_PRE_DATA,
+										  .createStmt = seclabel_buf->data));
+		}
 	}
 
 	/*
@@ -1013,14 +1242,20 @@ dumpRoles(PGconn *conn)
 	 * We do it this way because config settings for roles could mention the
 	 * names of other roles.
 	 */
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
+		fprintf(OPF, "\n--\n-- User Configurations\n--\n");
+
 	for (i = 0; i < PQntuples(res); i++)
 		dumpUserConfig(conn, PQgetvalue(res, i, i_rolname));
 
 	PQclear(res);
 
-	fprintf(OPF, "\n\n");
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 
 	destroyPQExpBuffer(buf);
+	destroyPQExpBuffer(comment_buf);
+	destroyPQExpBuffer(seclabel_buf);
 }
 
 
@@ -1034,6 +1269,7 @@ static void
 dumpRoleMembership(PGconn *conn)
 {
 	PQExpBuffer buf = createPQExpBuffer();
+	PQExpBuffer querybuf = createPQExpBuffer();
 	PQExpBuffer optbuf = createPQExpBuffer();
 	PGresult   *res;
 	int			start = 0,
@@ -1062,7 +1298,7 @@ dumpRoleMembership(PGconn *conn)
 	 * that no longer exist.  If we find such cases, print a warning and skip
 	 * the entry.
 	 */
-	dump_grantors = (PQserverVersion(conn) >= 160000);
+	dump_grantors = (server_version >= 160000);
 
 	/*
 	 * Previous versions of PostgreSQL also did not have grant-level options.
@@ -1096,7 +1332,7 @@ dumpRoleMembership(PGconn *conn)
 	i_inherit_option = PQfnumber(res, "inherit_option");
 	i_set_option = PQfnumber(res, "set_option");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Role memberships\n--\n\n");
 
 	/*
@@ -1127,7 +1363,7 @@ dumpRoleMembership(PGconn *conn)
 		if (PQgetisnull(res, start, i_role))
 		{
 			/* translator: %s represents a numeric role OID */
-			pg_log_warning("found orphaned pg_auth_members entry for role %s",
+			pg_log_warning("ignoring role grant for missing role with OID %s",
 						   PQgetvalue(res, start, i_roleid));
 			break;
 		}
@@ -1143,7 +1379,12 @@ dumpRoleMembership(PGconn *conn)
 		}
 
 		remaining = end - start;
-		done = pg_malloc0(remaining * sizeof(bool));
+		done = pg_malloc0_array(bool, remaining);
+
+		/*
+		 * We use a hashtable to track the member names that have been granted
+		 * admin option.  Usually a hashtable is overkill, but sometimes not.
+		 */
 		ht = rolename_create(remaining, NULL);
 
 		/*
@@ -1171,50 +1412,56 @@ dumpRoleMembership(PGconn *conn)
 			for (i = start; i < end; ++i)
 			{
 				char	   *member;
-				char	   *admin_option;
 				char	   *grantorid;
-				char	   *grantor;
+				char	   *grantor = NULL;
+				bool		dump_this_grantor = dump_grantors;
 				char	   *set_option = "true";
+				char	   *admin_option;
 				bool		found;
 
 				/* If we already did this grant, don't do it again. */
 				if (done[i - start])
 					continue;
 
-				/* Complain about, then ignore, entries with orphaned OIDs. */
+				/* Complain about, then ignore, entries for unknown members. */
 				if (PQgetisnull(res, i, i_member))
 				{
 					/* translator: %s represents a numeric role OID */
-					pg_log_warning("found orphaned pg_auth_members entry for role %s",
+					pg_log_warning("ignoring role grant to missing role with OID %s",
 								   PQgetvalue(res, i, i_memberid));
 					done[i - start] = true;
 					--remaining;
 					continue;
 				}
-				if (PQgetisnull(res, i, i_grantor))
+				member = PQgetvalue(res, i, i_member);
+
+				/* If the grantor is unknown, complain and dump without it. */
+				grantorid = PQgetvalue(res, i, i_grantorid);
+				if (dump_this_grantor)
 				{
-					/* translator: %s represents a numeric role OID */
-					pg_log_warning("found orphaned pg_auth_members entry for role %s",
-								   PQgetvalue(res, i, i_grantorid));
-					done[i - start] = true;
-					--remaining;
-					continue;
+					if (PQgetisnull(res, i, i_grantor))
+					{
+						/* translator: %s represents a numeric role OID */
+						pg_log_warning("grant of role \"%s\" to \"%s\" has invalid grantor OID %s",
+									   role, member, grantorid);
+						pg_log_warning_detail("This grant will be dumped without GRANTED BY.");
+						dump_this_grantor = false;
+					}
+					else
+						grantor = PQgetvalue(res, i, i_grantor);
 				}
 
-				member = PQgetvalue(res, i, i_member);
-				grantor = PQgetvalue(res, i, i_grantor);
-				grantorid = PQgetvalue(res, i, i_grantorid);
 				admin_option = PQgetvalue(res, i, i_admin_option);
 				if (dump_grant_options)
 					set_option = PQgetvalue(res, i, i_set_option);
 
 				/*
-				 * If we're not dumping grantors or if the grantor is the
+				 * If we're not dumping the grantor or if the grantor is the
 				 * bootstrap superuser, it's fine to dump this now. Otherwise,
 				 * it's got to be someone who has already been granted ADMIN
 				 * OPTION.
 				 */
-				if (dump_grantors &&
+				if (dump_this_grantor &&
 					atooid(grantorid) != BOOTSTRAP_SUPERUSERID &&
 					rolename_lookup(ht, grantor) == NULL)
 					continue;
@@ -1232,8 +1479,9 @@ dumpRoleMembership(PGconn *conn)
 
 				/* Generate the actual GRANT statement. */
 				resetPQExpBuffer(optbuf);
-				fprintf(OPF, "GRANT %s", fmtId(role));
-				fprintf(OPF, " TO %s", fmtId(member));
+				resetPQExpBuffer(querybuf);
+				appendPQExpBuffer(querybuf, "GRANT %s", fmtId(role));
+				appendPQExpBuffer(querybuf, " TO %s", fmtId(member));
 				if (*admin_option == 't')
 					appendPQExpBufferStr(optbuf, "ADMIN OPTION");
 				if (dump_grant_options)
@@ -1254,10 +1502,21 @@ dumpRoleMembership(PGconn *conn)
 					appendPQExpBufferStr(optbuf, "SET FALSE");
 				}
 				if (optbuf->data[0] != '\0')
-					fprintf(OPF, " WITH %s", optbuf->data);
-				if (dump_grantors)
-					fprintf(OPF, " GRANTED BY %s", fmtId(grantor));
-				fprintf(OPF, ";\n");
+					appendPQExpBuffer(querybuf, " WITH %s", optbuf->data);
+				if (dump_this_grantor)
+					appendPQExpBuffer(querybuf, " GRANTED BY %s", fmtId(grantor));
+				appendPQExpBufferStr(querybuf, ";\n");
+
+				if (archDumpFormat == archNull)
+					fprintf(OPF, "%s", querybuf->data);
+				else
+					ArchiveEntry(fout,
+								 nilCatalogId,	/* catalog ID */
+								 createDumpId(),	/* dump ID */
+								 ARCHIVE_OPTS(.tag = psprintf("ROLE %s", fmtId(role)),
+											  .description = "ROLE PROPERTIES",
+											  .section = SECTION_PRE_DATA,
+											  .createStmt = querybuf->data));
 			}
 		}
 
@@ -1268,8 +1527,11 @@ dumpRoleMembership(PGconn *conn)
 
 	PQclear(res);
 	destroyPQExpBuffer(buf);
+	destroyPQExpBuffer(querybuf);
+	destroyPQExpBuffer(optbuf);
 
-	fprintf(OPF, "\n\n");
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 
@@ -1296,7 +1558,7 @@ dumpRoleGUCPrivs(PGconn *conn)
 					   "FROM pg_catalog.pg_parameter_acl "
 					   "ORDER BY 1");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Role privileges on configuration parameters\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
@@ -1321,14 +1583,25 @@ dumpRoleGUCPrivs(PGconn *conn)
 			exit_nicely(1);
 		}
 
-		fprintf(OPF, "%s", buf->data);
+		if (archDumpFormat == archNull)
+			fprintf(OPF, "%s", buf->data);
+		else
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = psprintf("ROLE %s", fmtId(parowner)),
+									  .description = "ROLE PROPERTIES",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = buf->data));
 
 		free(fparname);
 		destroyPQExpBuffer(buf);
 	}
 
 	PQclear(res);
-	fprintf(OPF, "\n\n");
+
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 
@@ -1350,21 +1623,41 @@ dropTablespaces(PGconn *conn)
 					   "WHERE spcname !~ '^pg_' "
 					   "ORDER BY 1");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Drop tablespaces\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
 	{
 		char	   *spcname = PQgetvalue(res, i, 0);
+		PQExpBuffer delQry = createPQExpBuffer();
 
-		fprintf(OPF, "DROP TABLESPACE %s%s;\n",
-				if_exists ? "IF EXISTS " : "",
-				fmtId(spcname));
+		if (archDumpFormat == archNull)
+		{
+			appendPQExpBuffer(delQry, "DROP TABLESPACE %s%s;\n",
+							  if_exists ? "IF EXISTS " : "",
+							  fmtId(spcname));
+			fprintf(OPF, "%s", delQry->data);
+		}
+		else
+		{
+			appendPQExpBuffer(delQry, "DROP TABLESPACE IF EXISTS %s;\n",
+							  fmtId(spcname));
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = psprintf("TABLESPACE %s", fmtId(spcname)),
+									  .description = "DROP_GLOBAL",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = delQry->data));
+		}
+
+		destroyPQExpBuffer(delQry);
 	}
 
 	PQclear(res);
 
-	fprintf(OPF, "\n\n");
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 /*
@@ -1374,6 +1667,8 @@ static void
 dumpTablespaces(PGconn *conn)
 {
 	PGresult   *res;
+	PQExpBuffer comment_buf = createPQExpBuffer();
+	PQExpBuffer seclabel_buf = createPQExpBuffer();
 	int			i;
 
 	/*
@@ -1390,7 +1685,7 @@ dumpTablespaces(PGconn *conn)
 					   "WHERE spcname !~ '^pg_' "
 					   "ORDER BY 1");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Tablespaces\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
@@ -1408,6 +1703,9 @@ dumpTablespaces(PGconn *conn)
 
 		/* needed for buildACLCommands() */
 		fspcname = pg_strdup(fmtId(spcname));
+
+		resetPQExpBuffer(comment_buf);
+		resetPQExpBuffer(seclabel_buf);
 
 		if (binary_upgrade)
 		{
@@ -1450,24 +1748,67 @@ dumpTablespaces(PGconn *conn)
 
 		if (!no_comments && spccomment && spccomment[0] != '\0')
 		{
-			appendPQExpBuffer(buf, "COMMENT ON TABLESPACE %s IS ", fspcname);
-			appendStringLiteralConn(buf, spccomment, conn);
-			appendPQExpBufferStr(buf, ";\n");
+			appendPQExpBuffer(comment_buf, "COMMENT ON TABLESPACE %s IS ", fspcname);
+			appendStringLiteralConn(comment_buf, spccomment, conn);
+			appendPQExpBufferStr(comment_buf, ";\n");
 		}
 
 		if (!no_security_labels)
 			buildShSecLabels(conn, "pg_tablespace", spcoid,
 							 "TABLESPACE", spcname,
-							 buf);
+							 seclabel_buf);
 
-		fprintf(OPF, "%s", buf->data);
+		if (archDumpFormat == archNull)
+		{
+			fprintf(OPF, "%s", buf->data);
+
+			if (comment_buf->data[0] != '\0')
+				fprintf(OPF, "%s", comment_buf->data);
+
+			if (seclabel_buf->data[0] != '\0')
+				fprintf(OPF, "%s", seclabel_buf->data);
+		}
+		else
+		{
+			char	   *tag = psprintf("TABLESPACE %s", fmtId(fspcname));
+
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = tag,
+									  .description = "TABLESPACE",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = buf->data));
+
+			if (comment_buf->data[0] != '\0')
+				ArchiveEntry(fout,
+							 nilCatalogId,	/* catalog ID */
+							 createDumpId(),	/* dump ID */
+							 ARCHIVE_OPTS(.tag = tag,
+										  .description = "COMMENT",
+										  .section = SECTION_PRE_DATA,
+										  .createStmt = comment_buf->data));
+
+			if (seclabel_buf->data[0] != '\0')
+				ArchiveEntry(fout,
+							 nilCatalogId,	/* catalog ID */
+							 createDumpId(),	/* dump ID */
+							 ARCHIVE_OPTS(.tag = tag,
+										  .description = "SECURITY LABEL",
+										  .section = SECTION_PRE_DATA,
+										  .createStmt = seclabel_buf->data));
+		}
 
 		free(fspcname);
 		destroyPQExpBuffer(buf);
 	}
 
 	PQclear(res);
-	fprintf(OPF, "\n\n");
+	destroyPQExpBuffer(comment_buf);
+	destroyPQExpBuffer(seclabel_buf);
+
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 
@@ -1490,7 +1831,7 @@ dropDBs(PGconn *conn)
 					   "WHERE datallowconn AND datconnlimit != -2 "
 					   "ORDER BY datname");
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Drop databases (except postgres and template1)\n--\n\n");
 
 	for (i = 0; i < PQntuples(res); i++)
@@ -1506,15 +1847,33 @@ dropDBs(PGconn *conn)
 			strcmp(dbname, "template0") != 0 &&
 			strcmp(dbname, "postgres") != 0)
 		{
-			fprintf(OPF, "DROP DATABASE %s%s;\n",
-					if_exists ? "IF EXISTS " : "",
-					fmtId(dbname));
+			if (archDumpFormat == archNull)
+			{
+				fprintf(OPF, "DROP DATABASE %s%s;\n",
+						if_exists ? "IF EXISTS " : "",
+						fmtId(dbname));
+			}
+			else
+			{
+				char	   *stmt = psprintf("DROP DATABASE IF EXISTS %s;\n",
+											fmtId(dbname));
+
+				ArchiveEntry(fout,
+							 nilCatalogId,	/* catalog ID */
+							 createDumpId(),	/* dump ID */
+							 ARCHIVE_OPTS(.tag = psprintf("DATABASE %s", fmtId(dbname)),
+										  .description = "DROP_GLOBAL",
+										  .section = SECTION_PRE_DATA,
+										  .createStmt = stmt));
+				pg_free(stmt);
+			}
 		}
 	}
 
 	PQclear(res);
 
-	fprintf(OPF, "\n\n");
+	if (archDumpFormat == archNull)
+		fprintf(OPF, "\n\n");
 }
 
 
@@ -1526,7 +1885,6 @@ dumpUserConfig(PGconn *conn, const char *username)
 {
 	PQExpBuffer buf = createPQExpBuffer();
 	PGresult   *res;
-	static bool header_done = false;
 
 	printfPQExpBuffer(buf, "SELECT unnest(setconfig) FROM pg_db_role_setting "
 					  "WHERE setdatabase = 0 AND setrole = "
@@ -1537,13 +1895,13 @@ dumpUserConfig(PGconn *conn, const char *username)
 
 	res = executeQuery(conn, buf->data);
 
-	if (PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 	{
-		if (!header_done)
-			fprintf(OPF, "\n--\n-- User Configurations\n--\n");
-		header_done = true;
+		char	   *sanitized;
 
-		fprintf(OPF, "\n--\n-- User Config \"%s\"\n--\n\n", username);
+		sanitized = sanitize_line(username, true);
+		fprintf(OPF, "\n--\n-- User Config \"%s\"\n--\n\n", sanitized);
+		free(sanitized);
 	}
 
 	for (int i = 0; i < PQntuples(res); i++)
@@ -1552,7 +1910,17 @@ dumpUserConfig(PGconn *conn, const char *username)
 		makeAlterConfigCommand(conn, PQgetvalue(res, i, 0),
 							   "ROLE", username, NULL, NULL,
 							   buf);
-		fprintf(OPF, "%s", buf->data);
+
+		if (archDumpFormat == archNull)
+			fprintf(OPF, "%s", buf->data);
+		else
+			ArchiveEntry(fout,
+						 nilCatalogId,	/* catalog ID */
+						 createDumpId(),	/* dump ID */
+						 ARCHIVE_OPTS(.tag = psprintf("ROLE %s", fmtId(username)),
+									  .description = "ROLE PROPERTIES",
+									  .section = SECTION_PRE_DATA,
+									  .createStmt = buf->data));
 	}
 
 	PQclear(res);
@@ -1618,7 +1986,7 @@ expand_dbname_patterns(PGconn *conn,
  * Dump contents of databases.
  */
 static void
-dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
+dumpDatabases(PGconn *conn)
 {
 	PGresult   *res;
 	int			i;
@@ -1643,7 +2011,7 @@ dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
 					   "WHERE datallowconn AND datconnlimit != -2 "
 					   "ORDER BY (datname <> 'template1'), datname");
 
-	if (archDumpFormat == archNull && PQntuples(res) > 0)
+	if (PQntuples(res) > 0 && archDumpFormat == archNull)
 		fprintf(OPF, "--\n-- Databases\n--\n\n");
 
 	/*
@@ -1659,19 +2027,32 @@ dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
 
 		/* Create a subdirectory with 'databases' name under main directory. */
 		if (mkdir(db_subdir, pg_dir_create_mode) != 0)
-			pg_fatal("could not create subdirectory \"%s\": %m", db_subdir);
+			pg_fatal("could not create directory \"%s\": %m", db_subdir);
 
 		snprintf(map_file_path, MAXPGPATH, "%s/map.dat", filename);
 
 		/* Create a map file (to store dboid and dbname) */
 		map_file = fopen(map_file_path, PG_BINARY_W);
 		if (!map_file)
-			pg_fatal("could not open map file: %s", strerror(errno));
+			pg_fatal("could not open file \"%s\": %m", map_file_path);
+
+		fprintf(map_file,
+				"#################################################################\n"
+				"# map.dat\n"
+				"#\n"
+				"# This file maps oids to database names\n"
+				"#\n"
+				"# pg_restore will restore all the databases listed here, unless\n"
+				"# otherwise excluded. You can also inhibit restoration of a\n"
+				"# database by removing the line or commenting out the line with\n"
+				"# a # mark.\n"
+				"#################################################################\n");
 	}
 
 	for (i = 0; i < PQntuples(res); i++)
 	{
 		char	   *dbname = PQgetvalue(res, i, 0);
+		char	   *sanitized;
 		char	   *oid = PQgetvalue(res, i, 1);
 		const char *create_opts = "";
 		int			ret;
@@ -1686,6 +2067,39 @@ dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
 			pg_log_info("excluding database \"%s\"", dbname);
 			continue;
 		}
+
+		pg_log_info("dumping database \"%s\"", dbname);
+
+		sanitized = sanitize_line(dbname, true);
+
+		if (archDumpFormat == archNull)
+			fprintf(OPF, "--\n-- Database \"%s\" dump\n--\n\n", sanitized);
+
+		free(sanitized);
+
+		/*
+		 * We assume that "template1" and "postgres" already exist in the
+		 * target installation.  dropDBs() won't have removed them, for fear
+		 * of removing the DB the restore script is initially connected to. If
+		 * --clean was specified, tell pg_dump to drop and recreate them;
+		 * otherwise we'll merely restore their contents.  Other databases
+		 * should simply be created.
+		 */
+		if (strcmp(dbname, "template1") == 0 || strcmp(dbname, "postgres") == 0)
+		{
+			if (output_clean)
+				create_opts = "--clean --create";
+			/* Since pg_dump won't emit a \connect command, we must */
+			else if (archDumpFormat == archNull)
+				fprintf(OPF, "\\connect %s\n\n", dbname);
+			else
+				create_opts = "";
+		}
+		else
+			create_opts = "--create";
+
+		if (filename && archDumpFormat == archNull)
+			fclose(OPF);
 
 		/*
 		 * If this is not a plain format dump, then append dboid and dbname to
@@ -1704,50 +2118,16 @@ dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
 			fprintf(map_file, "%s %s\n", oid, dbname);
 		}
 
-		pg_log_info("dumping database \"%s\"", dbname);
-
-		if (archDumpFormat == archNull)
-			fprintf(OPF, "--\n-- Database \"%s\" dump\n--\n\n", dbname);
-
-		/*
-		 * We assume that "template1" and "postgres" already exist in the
-		 * target installation.  dropDBs() won't have removed them, for fear
-		 * of removing the DB the restore script is initially connected to. If
-		 * --clean was specified, tell pg_dump to drop and recreate them;
-		 * otherwise we'll merely restore their contents.  Other databases
-		 * should simply be created.
-		 */
-		if (strcmp(dbname, "template1") == 0 || strcmp(dbname, "postgres") == 0)
-		{
-			if (output_clean)
-				create_opts = "--clean --create";
-			/* Since pg_dump won't emit a \connect command, we must */
-			else if (archDumpFormat == archNull)
-				fprintf(OPF, "\\connect %s\n\n", dbname);
-		}
-		else
-			create_opts = "--create";
-
-		if (filename)
-			fclose(OPF);
-
-		ret = runPgDump(dbname, create_opts, dbfilepath, archDumpFormat);
+		ret = runPgDump(dbname, create_opts, dbfilepath);
 		if (ret != 0)
 			pg_fatal("pg_dump failed on database \"%s\", exiting", dbname);
 
-		if (filename)
+		if (filename && archDumpFormat == archNull)
 		{
-			char		global_path[MAXPGPATH];
-
-			if (archDumpFormat != archNull)
-				snprintf(global_path, MAXPGPATH, "%s/global.dat", filename);
-			else
-				snprintf(global_path, MAXPGPATH, "%s", filename);
-
-			OPF = fopen(global_path, PG_BINARY_A);
+			OPF = fopen(filename, PG_BINARY_A);
 			if (!OPF)
 				pg_fatal("could not re-open the output file \"%s\": %m",
-						 global_path);
+						 filename);
 		}
 	}
 
@@ -1764,8 +2144,7 @@ dumpDatabases(PGconn *conn, ArchiveFormat archDumpFormat)
  * Run pg_dump on dbname, with specified options.
  */
 static int
-runPgDump(const char *dbname, const char *create_opts, char *dbfile,
-		  ArchiveFormat archDumpFormat)
+runPgDump(const char *dbname, const char *create_opts, char *dbfile)
 {
 	PQExpBufferData connstrbuf;
 	PQExpBufferData cmd;
@@ -1780,8 +2159,8 @@ runPgDump(const char *dbname, const char *create_opts, char *dbfile,
 	 */
 	if (archDumpFormat != archNull)
 	{
-		printfPQExpBuffer(&cmd, "\"%s\" -f %s %s", pg_dump_bin,
-						  dbfile, create_opts);
+		printfPQExpBuffer(&cmd, "\"%s\" %s -f %s %s", pg_dump_bin,
+						  pgdumpopts->data, dbfile, create_opts);
 
 		if (archDumpFormat == archDirectory)
 			appendPQExpBufferStr(&cmd, "  --format=directory ");
@@ -1878,6 +2257,76 @@ executeCommand(PGconn *conn, const char *query)
 
 
 /*
+ * check_for_invalid_global_names
+ *
+ * Check that no database, role, or tablespace name contains a newline or
+ * carriage return character.  Such characters in database names would break
+ * the map.dat file format used for non-plain-text dumps.  Role and tablespace
+ * names are also checked because such characters were forbidden starting in
+ * v19.
+ *
+ * Excluded databases are skipped since they won't appear in map.dat.
+ */
+static void
+check_for_invalid_global_names(PGconn *conn,
+							   SimpleStringList *excluded_names)
+{
+	PGresult   *res;
+	int			i;
+	PQExpBuffer names;
+	int			count = 0;
+
+	res = executeQuery(conn,
+					   "SELECT datname AS objname, 'database' AS objtype "
+					   "FROM pg_catalog.pg_database "
+					   "WHERE datallowconn AND datconnlimit != -2 "
+					   "UNION ALL "
+					   "SELECT rolname AS objname, 'role' AS objtype "
+					   "FROM pg_catalog.pg_roles "
+					   "UNION ALL "
+					   "SELECT spcname AS objname, 'tablespace' AS objtype "
+					   "FROM pg_catalog.pg_tablespace");
+
+	names = createPQExpBuffer();
+
+	for (i = 0; i < PQntuples(res); i++)
+	{
+		char	   *objname = PQgetvalue(res, i, 0);
+		char	   *objtype = PQgetvalue(res, i, 1);
+
+		/* Skip excluded databases since they won't be in map.dat */
+		if (strcmp(objtype, "database") == 0 &&
+			simple_string_list_member(excluded_names, objname))
+			continue;
+
+		if (strpbrk(objname, "\n\r"))
+		{
+			appendPQExpBuffer(names, "  %s: \"", objtype);
+			for (char *p = objname; *p; p++)
+			{
+				if (*p == '\n')
+					appendPQExpBufferStr(names, "\\n");
+				else if (*p == '\r')
+					appendPQExpBufferStr(names, "\\r");
+				else
+					appendPQExpBufferChar(names, *p);
+			}
+			appendPQExpBufferStr(names, "\"\n");
+			count++;
+		}
+	}
+
+	PQclear(res);
+
+	if (count > 0)
+		pg_fatal("database, role, or tablespace names contain a newline or carriage return character, which is not supported in non-plain-text dumps:\n%s",
+				 names->data);
+
+	destroyPQExpBuffer(names);
+}
+
+
+/*
  * dumpTimestamp
  */
 static void
@@ -1957,27 +2406,36 @@ read_dumpall_filters(const char *filename, SimpleStringList *pattern)
 static ArchiveFormat
 parseDumpFormat(const char *format)
 {
-	ArchiveFormat archDumpFormat;
-
 	if (pg_strcasecmp(format, "c") == 0)
-		archDumpFormat = archCustom;
+		return archCustom;
 	else if (pg_strcasecmp(format, "custom") == 0)
-		archDumpFormat = archCustom;
+		return archCustom;
 	else if (pg_strcasecmp(format, "d") == 0)
-		archDumpFormat = archDirectory;
+		return archDirectory;
 	else if (pg_strcasecmp(format, "directory") == 0)
-		archDumpFormat = archDirectory;
+		return archDirectory;
 	else if (pg_strcasecmp(format, "p") == 0)
-		archDumpFormat = archNull;
+		return archNull;
 	else if (pg_strcasecmp(format, "plain") == 0)
-		archDumpFormat = archNull;
+		return archNull;
 	else if (pg_strcasecmp(format, "t") == 0)
-		archDumpFormat = archTar;
+		return archTar;
 	else if (pg_strcasecmp(format, "tar") == 0)
-		archDumpFormat = archTar;
+		return archTar;
 	else
-		pg_fatal("unrecognized archive format \"%s\"; please specify \"c\", \"d\", \"p\", or \"t\"",
+		pg_fatal("unrecognized output format \"%s\"; please specify \"c\", \"d\", \"p\", or \"t\"",
 				 format);
 
-	return archDumpFormat;
+	return archUnknown;
+}
+
+/*
+ * createDumpId
+ *
+ * Return the next dumpId.
+ */
+static int
+createDumpId(void)
+{
+	return ++dumpIdVal;
 }

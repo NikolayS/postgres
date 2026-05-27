@@ -3,7 +3,7 @@
  * statistics.h
  *	  Extended statistics and selectivity estimation functions.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/statistics/statistics.h
@@ -101,6 +101,7 @@ extern MCVList *statext_mcv_load(Oid mvoid, bool inh);
 extern void BuildRelationExtStatistics(Relation onerel, bool inh, double totalrows,
 									   int numrows, HeapTuple *rows,
 									   int natts, VacAttrStats **vacattrstats);
+extern bool HasRelationExtStatistics(Relation onerel);
 extern int	ComputeExtStatisticsRows(Relation onerel,
 									 int natts, VacAttrStats **vacattrstats);
 extern bool statext_is_kind_built(HeapTuple htup, char type);

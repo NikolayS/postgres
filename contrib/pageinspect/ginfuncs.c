@@ -2,7 +2,7 @@
  * ginfuncs.c
  *		Functions to investigate the content of GIN indexes
  *
- * Copyright (c) 2014-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		contrib/pageinspect/ginfuncs.c
@@ -222,7 +222,7 @@ gin_leafpage_items(PG_FUNCTION_ARGS)
 							   opaq->flags,
 							   (GIN_DATA | GIN_LEAF | GIN_COMPRESSED))));
 
-		inter_call_data = palloc(sizeof(gin_leafpage_items_state));
+		inter_call_data = palloc_object(gin_leafpage_items_state);
 
 		/* Build a tuple descriptor for our result type */
 		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)

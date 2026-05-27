@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2026, PostgreSQL Global Development Group
  *
  * src/bin/psql/startup.c
  */
@@ -24,6 +24,7 @@
 #include "help.h"
 #include "input.h"
 #include "mainloop.h"
+#include "portability/instr_time.h"
 #include "settings.h"
 
 /*
@@ -326,6 +327,9 @@ main(int argc, char *argv[])
 #endif
 
 	PQsetNoticeProcessor(pset.db, NoticeProcessor, NULL);
+
+	/* initialize timing infrastructure (required for INSTR_* calls) */
+	pg_initialize_timing();
 
 	SyncVariables();
 

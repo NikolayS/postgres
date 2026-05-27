@@ -12,7 +12,7 @@
  * case, but most of the heavy lifting for that is done elsewhere,
  * notably in prepjointree.c and allpaths.c.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -22,6 +22,8 @@
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
+
+#include <math.h>
 
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
@@ -35,6 +37,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/tlist.h"
 #include "parser/parse_coerce.h"
+#include "port/pg_bitutils.h"
 #include "utils/selfuncs.h"
 
 
@@ -74,6 +77,8 @@ static List *generate_append_tlist(List *colTypes, List *colCollations,
 								   List *input_tlists,
 								   List *refnames_tlist);
 static List *generate_setop_grouplist(SetOperationStmt *op, List *targetlist);
+static PathTarget *create_setop_pathtarget(PlannerInfo *root, List *tlist,
+										   List *child_pathlist);
 
 
 /*
@@ -228,6 +233,7 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 		PlannerInfo *subroot;
 		List	   *tlist;
 		bool		trivial_tlist;
+		char	   *plan_name;
 
 		Assert(subquery != NULL);
 
@@ -242,7 +248,9 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 		 * parentOp, pass that down to encourage subquery_planner to consider
 		 * suitably-sorted Paths.
 		 */
-		subroot = rel->subroot = subquery_planner(root->glob, subquery, root,
+		plan_name = choose_plan_name(root->glob, "setop", true);
+		subroot = rel->subroot = subquery_planner(root->glob, subquery,
+												  plan_name, root, NULL,
 												  false, root->tuple_fraction,
 												  parentOp);
 
@@ -519,6 +527,13 @@ build_setop_child_paths(PlannerInfo *root, RelOptInfo *rel,
 		bool		is_sorted;
 		int			presorted_keys;
 
+		/* If the input rel is dummy, propagate that to this query level */
+		if (is_dummy_rel(final_rel))
+		{
+			mark_dummy_rel(rel);
+			continue;
+		}
+
 		/*
 		 * Include the cheapest path as-is so that the set operation can be
 		 * cheaply implemented using a method which does not require the input
@@ -682,9 +697,9 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 	ListCell   *lc;
 	ListCell   *lc2;
 	ListCell   *lc3;
-	List	   *cheapest_pathlist = NIL;
-	List	   *ordered_pathlist = NIL;
-	List	   *partial_pathlist = NIL;
+	AppendPathInput cheapest = {0};
+	AppendPathInput ordered = {0};
+	AppendPathInput partial = {0};
 	bool		partial_paths_valid = true;
 	bool		consider_parallel = true;
 	List	   *rellist;
@@ -759,7 +774,17 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 		RelOptInfo *rel = lfirst(lc);
 		Path	   *ordered_path;
 
-		cheapest_pathlist = lappend(cheapest_pathlist,
+		/*
+		 * Record the relids so that we can identify the correct
+		 * UPPERREL_SETOP RelOptInfo below.
+		 */
+		relids = bms_add_members(relids, rel->relids);
+
+		/* Skip any UNION children that are proven not to yield any rows */
+		if (is_dummy_rel(rel))
+			continue;
+
+		cheapest.subpaths = lappend(cheapest.subpaths,
 									rel->cheapest_total_path);
 
 		if (try_sorted)
@@ -771,7 +796,7 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 														  false);
 
 			if (ordered_path != NULL)
-				ordered_pathlist = lappend(ordered_pathlist, ordered_path);
+				ordered.subpaths = lappend(ordered.subpaths, ordered_path);
 			else
 			{
 				/*
@@ -794,25 +819,32 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 			else if (rel->partial_pathlist == NIL)
 				partial_paths_valid = false;
 			else
-				partial_pathlist = lappend(partial_pathlist,
-										   linitial(rel->partial_pathlist));
+				partial.partial_subpaths = lappend(partial.partial_subpaths,
+												   linitial(rel->partial_pathlist));
 		}
-
-		relids = bms_union(relids, rel->relids);
 	}
 
 	/* Build result relation. */
 	result_rel = fetch_upper_rel(root, UPPERREL_SETOP, relids);
-	result_rel->reltarget = create_pathtarget(root, tlist);
+	result_rel->reltarget = create_setop_pathtarget(root, tlist,
+													cheapest.subpaths);
 	result_rel->consider_parallel = consider_parallel;
 	result_rel->consider_startup = (root->tuple_fraction > 0);
+
+	/* If all UNION children were dummy rels, make the resulting rel dummy */
+	if (cheapest.subpaths == NIL)
+	{
+		mark_dummy_rel(result_rel);
+
+		return result_rel;
+	}
 
 	/*
 	 * Append the child results together using the cheapest paths from each
 	 * union child.
 	 */
-	apath = (Path *) create_append_path(root, result_rel, cheapest_pathlist,
-										NIL, NIL, NULL, 0, false, -1);
+	apath = (Path *) create_append_path(root, result_rel, cheapest,
+										NIL, NULL, 0, false, -1);
 
 	/*
 	 * Estimate number of groups.  For now we just assume the output is unique
@@ -831,7 +863,7 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 		int			parallel_workers = 0;
 
 		/* Find the highest number of workers requested for any subpath. */
-		foreach(lc, partial_pathlist)
+		foreach(lc, partial.partial_subpaths)
 		{
 			Path	   *subpath = lfirst(lc);
 
@@ -850,14 +882,14 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 		if (enable_parallel_append)
 		{
 			parallel_workers = Max(parallel_workers,
-								   pg_leftmost_one_pos32(list_length(partial_pathlist)) + 1);
+								   pg_leftmost_one_pos32(list_length(partial.partial_subpaths)) + 1);
 			parallel_workers = Min(parallel_workers,
 								   max_parallel_workers_per_gather);
 		}
 		Assert(parallel_workers > 0);
 
 		papath = (Path *)
-			create_append_path(root, result_rel, NIL, partial_pathlist,
+			create_append_path(root, result_rel, partial,
 							   NIL, NULL, parallel_workers,
 							   enable_parallel_append, -1);
 		gpath = (Path *)
@@ -870,16 +902,37 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 		double		dNumGroups;
 		bool		can_sort = grouping_is_sortable(groupList);
 		bool		can_hash = grouping_is_hashable(groupList);
+		Path	   *first_path = linitial(cheapest.subpaths);
 
 		/*
-		 * XXX for the moment, take the number of distinct groups as equal to
-		 * the total input size, i.e., the worst case.  This is too
-		 * conservative, but it's not clear how to get a decent estimate of
-		 * the true size.  One should note as well the propensity of novices
-		 * to write UNION rather than UNION ALL even when they don't expect
-		 * any duplicates...
+		 * Estimate the number of UNION output rows.  In the case when only a
+		 * single UNION child remains, we can use estimate_num_groups() on
+		 * that child.  We must be careful not to do this when that child is
+		 * the result of some other set operation as the targetlist will
+		 * contain Vars with varno==0, which estimate_num_groups() wouldn't
+		 * like.
 		 */
-		dNumGroups = apath->rows;
+		if (list_length(cheapest.subpaths) == 1 &&
+			first_path->parent->reloptkind != RELOPT_UPPER_REL)
+		{
+			dNumGroups = estimate_num_groups(root,
+											 first_path->pathtarget->exprs,
+											 first_path->rows,
+											 NULL,
+											 NULL);
+		}
+		else
+		{
+			/*
+			 * Otherwise, for the moment, take the number of distinct groups
+			 * as equal to the total input size, i.e., the worst case.  This
+			 * is too conservative, but it's not clear how to get a decent
+			 * estimate of the true size.  One should note as well the
+			 * propensity of novices to write UNION rather than UNION ALL even
+			 * when they don't expect any duplicates...
+			 */
+			dNumGroups = apath->rows;
+		}
 
 		if (can_hash)
 		{
@@ -892,7 +945,7 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 			path = (Path *) create_agg_path(root,
 											result_rel,
 											apath,
-											create_pathtarget(root, tlist),
+											result_rel->reltarget,
 											AGG_HASHED,
 											AGGSPLIT_SIMPLE,
 											groupList,
@@ -908,7 +961,7 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 				path = (Path *) create_agg_path(root,
 												result_rel,
 												gpath,
-												create_pathtarget(root, tlist),
+												result_rel->reltarget,
 												AGG_HASHED,
 												AGGSPLIT_SIMPLE,
 												groupList,
@@ -929,11 +982,11 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 												 make_pathkeys_for_sortclauses(root, groupList, tlist),
 												 -1.0);
 
-			path = (Path *) create_upper_unique_path(root,
-													 result_rel,
-													 path,
-													 list_length(path->pathkeys),
-													 dNumGroups);
+			path = (Path *) create_unique_path(root,
+											   result_rel,
+											   path,
+											   list_length(path->pathkeys),
+											   dNumGroups);
 
 			add_path(result_rel, path);
 
@@ -946,11 +999,11 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 												 make_pathkeys_for_sortclauses(root, groupList, tlist),
 												 -1.0);
 
-				path = (Path *) create_upper_unique_path(root,
-														 result_rel,
-														 path,
-														 list_length(path->pathkeys),
-														 dNumGroups);
+				path = (Path *) create_unique_path(root,
+												   result_rel,
+												   path,
+												   list_length(path->pathkeys),
+												   dNumGroups);
 				add_path(result_rel, path);
 			}
 		}
@@ -965,16 +1018,17 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 
 			path = (Path *) create_merge_append_path(root,
 													 result_rel,
-													 ordered_pathlist,
+													 ordered.subpaths,
+													 NIL,
 													 union_pathkeys,
 													 NULL);
 
 			/* and make the MergeAppend unique */
-			path = (Path *) create_upper_unique_path(root,
-													 result_rel,
-													 path,
-													 list_length(tlist),
-													 dNumGroups);
+			path = (Path *) create_unique_path(root,
+											   result_rel,
+											   path,
+											   list_length(tlist),
+											   dNumGroups);
 
 			add_path(result_rel, path);
 		}
@@ -1130,7 +1184,85 @@ generate_nonunion_paths(SetOperationStmt *op, PlannerInfo *root,
 	/* Build result relation. */
 	result_rel = fetch_upper_rel(root, UPPERREL_SETOP,
 								 bms_union(lrel->relids, rrel->relids));
-	result_rel->reltarget = create_pathtarget(root, tlist);
+
+	/*
+	 * Create the PathTarget and set the width accordingly.  For EXCEPT, since
+	 * the set op result won't contain rows from the rpath, we only account
+	 * for the width of the lpath.  For INTERSECT, use both input paths.
+	 */
+	if (op->op == SETOP_EXCEPT)
+		result_rel->reltarget = create_setop_pathtarget(root, tlist,
+														list_make1(lpath));
+	else
+		result_rel->reltarget = create_setop_pathtarget(root, tlist,
+														list_make2(lpath, rpath));
+
+	/* Check for provably empty setop inputs and add short-circuit paths. */
+	if (op->op == SETOP_EXCEPT)
+	{
+		/*
+		 * For EXCEPTs, if the left side is dummy then there's no need to
+		 * inspect the right-hand side as scanning the right to find tuples to
+		 * remove won't make the left-hand input any more empty.
+		 */
+		if (is_dummy_rel(lrel))
+		{
+			mark_dummy_rel(result_rel);
+
+			return result_rel;
+		}
+
+		/* Handle EXCEPTs with dummy right input */
+		if (is_dummy_rel(rrel))
+		{
+			if (op->all)
+			{
+				Path	   *apath;
+				AppendPathInput append = {0};
+
+				append.subpaths = list_make1(lpath);
+
+				/*
+				 * EXCEPT ALL: If the right-hand input is dummy then we can
+				 * simply scan the left-hand input.  To keep createplan.c
+				 * happy, use a single child Append to handle the translation
+				 * between the set op targetlist and the targetlist of the
+				 * left input.  The Append will be removed in setrefs.c.
+				 */
+				apath = (Path *) create_append_path(root, result_rel,
+													append, NIL, NULL, 0,
+													false, -1);
+
+				add_path(result_rel, apath);
+
+				return result_rel;
+			}
+			else
+			{
+				/*
+				 * To make EXCEPT with a dummy RHS work means having to
+				 * deduplicate the left input.  That could be done with
+				 * AggPaths, but it doesn't seem worth the effort.  Let the
+				 * normal path generation code below handle this one.
+				 */
+			}
+		}
+	}
+	else
+	{
+		/*
+		 * For INTERSECT, if either input is a dummy rel then we can mark the
+		 * result_rel as dummy since intersecting with an empty relation can
+		 * never yield any results.  This is true regardless of INTERSECT or
+		 * INTERSECT ALL.
+		 */
+		if (is_dummy_rel(lrel) || is_dummy_rel(rrel))
+		{
+			mark_dummy_rel(result_rel);
+
+			return result_rel;
+		}
+	}
 
 	/*
 	 * Estimate number of distinct groups that we'll need hashtable entries
@@ -1503,7 +1635,7 @@ generate_append_tlist(List *colTypes, List *colCollations,
 	 * If the inputs all agree on type and typmod of a particular column, use
 	 * that typmod; else use -1.
 	 */
-	colTypmods = (int32 *) palloc(list_length(colTypes) * sizeof(int32));
+	colTypmods = palloc_array(int32, list_length(colTypes));
 
 	foreach(tlistl, input_tlists)
 	{
@@ -1618,4 +1750,39 @@ generate_setop_grouplist(SetOperationStmt *op, List *targetlist)
 	}
 	Assert(lg == NULL);
 	return grouplist;
+}
+
+/*
+ * create_setop_pathtarget
+ *		Do the normal create_pathtarget() work, plus set the resulting
+ *		PathTarget's width to the average width of the Paths in	child_pathlist
+ *		weighted using the estimated row count of each path.
+ *
+ * Note: This is required because set op target lists use varno==0, which
+ * results in a type default width estimate rather than one that's based on
+ * statistics of the columns from the set op children.
+ */
+static PathTarget *
+create_setop_pathtarget(PlannerInfo *root, List *tlist, List *child_pathlist)
+{
+	PathTarget *reltarget;
+	ListCell   *lc;
+	double		parent_rows = 0;
+	double		parent_size = 0;
+
+	reltarget = create_pathtarget(root, tlist);
+
+	/* Calculate the total rows and total size. */
+	foreach(lc, child_pathlist)
+	{
+		Path	   *path = (Path *) lfirst(lc);
+
+		parent_rows += path->rows;
+		parent_size += path->parent->reltarget->width * path->rows;
+	}
+
+	if (parent_rows > 0)
+		reltarget->width = rint(parent_size / parent_rows);
+
+	return reltarget;
 }

@@ -3,7 +3,7 @@
  * regress_injection.c
  *		Functions supporting test-specific subject matter.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -50,7 +50,7 @@ removable_cutoff(PG_FUNCTION_ARGS)
 	if (!PG_ARGISNULL(0))
 		rel = table_open(PG_GETARG_OID(0), AccessShareLock);
 
-	if (!rel->rd_rel->relisshared && autovacuum_start_daemon)
+	if (rel != NULL && !rel->rd_rel->relisshared && autovacuum_start_daemon)
 		elog(WARNING,
 			 "removable_cutoff(non-shared-rel) can move backward under autovacuum=on");
 

@@ -4,7 +4,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_basebackup/pg_basebackup.c
@@ -35,6 +35,7 @@
 #include "fe_utils/option_utils.h"
 #include "fe_utils/recovery_gen.h"
 #include "getopt_long.h"
+#include "libpq/protocol.h"
 #include "receivelog.h"
 #include "streamutil.h"
 
@@ -319,7 +320,7 @@ kill_bgchild_atexit(void)
 static void
 tablespace_list_append(const char *arg)
 {
-	TablespaceListCell *cell = (TablespaceListCell *) pg_malloc0(sizeof(TablespaceListCell));
+	TablespaceListCell *cell = pg_malloc0_object(TablespaceListCell);
 	char	   *dst;
 	char	   *dst_ptr;
 	const char *arg_ptr;
@@ -487,7 +488,7 @@ reached_end_position(XLogRecPtr segendpos, uint32 timeline,
 			if (r < 0)
 				pg_fatal("could not read from ready pipe: %m");
 
-			if (sscanf(xlogend, "%X/%X", &hi, &lo) != 2)
+			if (sscanf(xlogend, "%X/%08X", &hi, &lo) != 2)
 				pg_fatal("could not parse write-ahead log location \"%s\"",
 						 xlogend);
 			xlogendptr = ((uint64) hi) << 32 | lo;
@@ -622,14 +623,14 @@ StartLogStreamer(char *startpos, uint32 timeline, char *sysidentifier,
 				lo;
 	char		statusdir[MAXPGPATH];
 
-	param = pg_malloc0(sizeof(logstreamer_param));
+	param = pg_malloc0_object(logstreamer_param);
 	param->timeline = timeline;
 	param->sysidentifier = sysidentifier;
 	param->wal_compress_algorithm = wal_compress_algorithm;
 	param->wal_compress_level = wal_compress_level;
 
 	/* Convert the starting position */
-	if (sscanf(startpos, "%X/%X", &hi, &lo) != 2)
+	if (sscanf(startpos, "%X/%08X", &hi, &lo) != 2)
 		pg_fatal("could not parse write-ahead log location \"%s\"",
 				 startpos);
 	param->startptr = ((uint64) hi) << 32 | lo;
@@ -1069,12 +1070,9 @@ CreateBackupStreamer(char *archive_name, char *spclocation,
 	astreamer  *manifest_inject_streamer = NULL;
 	bool		inject_manifest;
 	bool		is_tar,
-				is_tar_gz,
-				is_tar_lz4,
-				is_tar_zstd,
 				is_compressed_tar;
+	pg_compress_algorithm compressed_tar_algorithm;
 	bool		must_parse_archive;
-	int			archive_name_len = strlen(archive_name);
 
 	/*
 	 * Normally, we emit the backup manifest as a separate file, but when
@@ -1083,24 +1081,13 @@ CreateBackupStreamer(char *archive_name, char *spclocation,
 	 */
 	inject_manifest = (format == 't' && strcmp(basedir, "-") == 0 && manifest);
 
-	/* Is this a tar archive? */
-	is_tar = (archive_name_len > 4 &&
-			  strcmp(archive_name + archive_name_len - 4, ".tar") == 0);
-
-	/* Is this a .tar.gz archive? */
-	is_tar_gz = (archive_name_len > 7 &&
-				 strcmp(archive_name + archive_name_len - 7, ".tar.gz") == 0);
-
-	/* Is this a .tar.lz4 archive? */
-	is_tar_lz4 = (archive_name_len > 8 &&
-				  strcmp(archive_name + archive_name_len - 8, ".tar.lz4") == 0);
-
-	/* Is this a .tar.zst archive? */
-	is_tar_zstd = (archive_name_len > 8 &&
-				   strcmp(archive_name + archive_name_len - 8, ".tar.zst") == 0);
+	/* Check whether it is a tar archive and its compression type */
+	is_tar = parse_tar_compress_algorithm(archive_name,
+										  &compressed_tar_algorithm);
 
 	/* Is this any kind of compressed tar? */
-	is_compressed_tar = is_tar_gz || is_tar_lz4 || is_tar_zstd;
+	is_compressed_tar = (is_tar &&
+						 compressed_tar_algorithm != PG_COMPRESSION_NONE);
 
 	/*
 	 * Injecting the manifest into a compressed tar file would be possible if
@@ -1127,7 +1114,7 @@ CreateBackupStreamer(char *archive_name, char *spclocation,
 						  (spclocation == NULL && writerecoveryconf));
 
 	/* At present, we only know how to parse tar archives. */
-	if (must_parse_archive && !is_tar && !is_compressed_tar)
+	if (must_parse_archive && !is_tar)
 	{
 		pg_log_error("cannot parse archive \"%s\"", archive_name);
 		pg_log_error_detail("Only tar archives can be parsed.");
@@ -1262,13 +1249,13 @@ CreateBackupStreamer(char *archive_name, char *spclocation,
 	 * If the user has requested a server compressed archive along with
 	 * archive extraction at client then we need to decompress it.
 	 */
-	if (format == 'p')
+	if (format == 'p' && is_compressed_tar)
 	{
-		if (is_tar_gz)
+		if (compressed_tar_algorithm == PG_COMPRESSION_GZIP)
 			streamer = astreamer_gzip_decompressor_new(streamer);
-		else if (is_tar_lz4)
+		else if (compressed_tar_algorithm == PG_COMPRESSION_LZ4)
 			streamer = astreamer_lz4_decompressor_new(streamer);
-		else if (is_tar_zstd)
+		else if (compressed_tar_algorithm == PG_COMPRESSION_ZSTD)
 			streamer = astreamer_zstd_decompressor_new(streamer);
 	}
 
@@ -1338,7 +1325,7 @@ ReceiveArchiveStreamChunk(size_t r, char *copybuf, void *callback_data)
 	/* Each CopyData message begins with a type byte. */
 	switch (GetCopyDataByte(r, copybuf, &cursor))
 	{
-		case 'n':
+		case PqBackupMsg_NewArchive:
 			{
 				/* New archive. */
 				char	   *archive_name;
@@ -1410,7 +1397,7 @@ ReceiveArchiveStreamChunk(size_t r, char *copybuf, void *callback_data)
 				break;
 			}
 
-		case 'd':
+		case PqMsg_CopyData:
 			{
 				/* Archive or manifest data. */
 				if (state->manifest_buffer != NULL)
@@ -1446,7 +1433,7 @@ ReceiveArchiveStreamChunk(size_t r, char *copybuf, void *callback_data)
 				break;
 			}
 
-		case 'p':
+		case PqBackupMsg_ProgressReport:
 			{
 				/*
 				 * Progress report.
@@ -1465,7 +1452,7 @@ ReceiveArchiveStreamChunk(size_t r, char *copybuf, void *callback_data)
 				break;
 			}
 
-		case 'm':
+		case PqBackupMsg_Manifest:
 			{
 				/*
 				 * Manifest data will be sent next. This message is not
@@ -2255,7 +2242,7 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 		 * value directly in the variable, and then set the flag that says
 		 * it's there.
 		 */
-		if (sscanf(xlogend, "%X/%X", &hi, &lo) != 2)
+		if (sscanf(xlogend, "%X/%08X", &hi, &lo) != 2)
 			pg_fatal("could not parse write-ahead log location \"%s\"",
 					 xlogend);
 		xlogendptr = ((uint64) hi) << 32 | lo;

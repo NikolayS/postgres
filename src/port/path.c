@@ -3,7 +3,7 @@
  * path.c
  *	  portable path handling routines
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -625,6 +625,23 @@ path_is_relative_and_below_cwd(const char *path)
 #endif
 	else
 		return true;
+}
+
+/*
+ * Detect whether a path is safe for use during archive extraction.
+ *
+ * This applies canonicalize_path(), then it checks that the path does
+ * not contain any parent directory references.
+ */
+bool
+path_is_safe_for_extraction(const char *path)
+{
+	char		buf[MAXPGPATH];
+
+	strlcpy(buf, path, sizeof(buf));
+	canonicalize_path(buf);
+
+	return path_is_relative_and_below_cwd(buf);
 }
 
 /*

@@ -18,7 +18,7 @@ select type, name, ident, level, total_bytes >= free_bytes
   from pg_backend_memory_contexts where level = 1;
 
 -- We can exercise some MemoryContext type stats functions.  Most of the
--- column values are too platform-dependant to display.
+-- column values are too platform-dependent to display.
 
 -- Ensure stats from the bump allocator look sane.  Bump isn't a commonly
 -- used context, but it is used in tuplesort.c, so open a cursor to keep
@@ -75,6 +75,9 @@ select count(*) = 1 as ok from pg_stat_wal;
 
 -- We expect no walreceiver running in this test
 select count(*) = 0 as ok from pg_stat_wal_receiver;
+
+-- We expect no recovery state in this test (running on primary)
+select count(*) = 0 as ok from pg_stat_recovery;
 
 -- This is to record the prevailing planner enable_foo settings during
 -- a regression test run.

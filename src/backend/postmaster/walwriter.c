@@ -31,7 +31,7 @@
  * should be killed by SIGQUIT and then a recovery cycle started.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -62,6 +62,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
+#include "utils/wait_event.h"
 
 
 /*
@@ -94,28 +95,24 @@ WalWriterMain(const void *startup_data, size_t startup_data_len)
 
 	Assert(startup_data_len == 0);
 
-	MyBackendType = B_WAL_WRITER;
 	AuxiliaryProcessMainCommon();
 
 	/*
 	 * Properly accept or ignore signals the postmaster might send us
-	 *
-	 * We have no particular use for SIGINT at the moment, but seems
-	 * reasonable to treat like SIGTERM.
 	 */
 	pqsignal(SIGHUP, SignalHandlerForConfigReload);
-	pqsignal(SIGINT, SignalHandlerForShutdownRequest);
+	pqsignal(SIGINT, PG_SIG_IGN);	/* no query to cancel */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	/* SIGQUIT handler was already set up by InitPostmasterChild */
-	pqsignal(SIGALRM, SIG_IGN);
-	pqsignal(SIGPIPE, SIG_IGN);
+	pqsignal(SIGALRM, PG_SIG_IGN);
+	pqsignal(SIGPIPE, PG_SIG_IGN);
 	pqsignal(SIGUSR1, procsignal_sigusr1_handler);
-	pqsignal(SIGUSR2, SIG_IGN); /* not used */
+	pqsignal(SIGUSR2, PG_SIG_IGN);	/* not used */
 
 	/*
 	 * Reset some signals that are accepted by postmaster but not here
 	 */
-	pqsignal(SIGCHLD, SIG_DFL);
+	pqsignal(SIGCHLD, PG_SIG_DFL);
 
 	/*
 	 * Create a memory context that we will do all our work in.  We do this so

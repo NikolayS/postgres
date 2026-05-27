@@ -12,7 +12,7 @@
  * respective utility commands.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	src/backend/parser/parse_utilcmd.c
@@ -23,6 +23,7 @@
 #include "postgres.h"
 
 #include "access/amapi.h"
+#include "access/attmap.h"
 #include "access/htup_details.h"
 #include "access/relation.h"
 #include "access/reloptions.h"
@@ -32,6 +33,7 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/partition.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
@@ -58,6 +60,8 @@
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/parser.h"
+#include "partitioning/partbounds.h"
+#include "partitioning/partdesc.h"
 #include "rewrite/rewriteManip.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -95,18 +99,6 @@ typedef struct
 	bool		ofType;			/* true if statement contains OF typename */
 } CreateStmtContext;
 
-/* State shared by transformCreateSchemaStmtElements and its subroutines */
-typedef struct
-{
-	const char *schemaname;		/* name of schema */
-	List	   *sequences;		/* CREATE SEQUENCE items */
-	List	   *tables;			/* CREATE TABLE items */
-	List	   *views;			/* CREATE VIEW items */
-	List	   *indexes;		/* CREATE INDEX items */
-	List	   *triggers;		/* CREATE TRIGGER items */
-	List	   *grants;			/* GRANT items */
-} CreateSchemaStmtContext;
-
 
 static void transformColumnDefinition(CreateStmtContext *cxt,
 									  ColumnDef *column);
@@ -130,11 +122,17 @@ static void transformFKConstraints(CreateStmtContext *cxt,
 								   bool isAddConstraint);
 static void transformCheckConstraints(CreateStmtContext *cxt,
 									  bool skipValidation);
-static void transformConstraintAttrs(CreateStmtContext *cxt,
+static void transformConstraintAttrs(ParseState *pstate,
 									 List *constraintList);
 static void transformColumnType(CreateStmtContext *cxt, ColumnDef *column);
-static void setSchemaName(const char *context_schema, char **stmt_schema_name);
-static void transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd);
+static void checkSchemaNameRV(ParseState *pstate, const char *context_schema,
+							  RangeVar *relation);
+static void checkSchemaNameList(const char *context_schema,
+								List *qualified_name);
+static CreateStmt *transformCreateSchemaCreateTable(ParseState *pstate,
+													CreateStmt *stmt,
+													List **fk_elements);
+static void transformPartitionCmd(CreateStmtContext *cxt, PartitionBoundSpec *bound);
 static List *transformPartitionRangeBounds(ParseState *pstate, List *blist,
 										   Relation parent);
 static void validateInfiniteBounds(ParseState *pstate, List *blist);
@@ -700,7 +698,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	}
 
 	/* Process column constraints, if any... */
-	transformConstraintAttrs(cxt, column->constraints);
+	transformConstraintAttrs(cxt->pstate, column->constraints);
 
 	/*
 	 * First, scan the column's constraints to see if a not-null constraint
@@ -915,7 +913,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 							 errmsg("primary key constraints are not supported on foreign tables"),
 							 parser_errposition(cxt->pstate,
 												constraint->location)));
-				/* FALL THRU */
+				pg_fallthrough;
 
 			case CONSTR_UNIQUE:
 				if (cxt->isforeign)
@@ -1279,6 +1277,28 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		lst = RelationGetNotNullConstraints(RelationGetRelid(relation), false,
 											true);
 		cxt->nnconstraints = list_concat(cxt->nnconstraints, lst);
+
+		/* Copy comments on not-null constraints */
+		if (table_like_clause->options & CREATE_TABLE_LIKE_COMMENTS)
+		{
+			foreach_node(Constraint, nnconstr, lst)
+			{
+				if ((comment = GetComment(get_relation_constraint_oid(RelationGetRelid(relation),
+																	  nnconstr->conname, false),
+										  ConstraintRelationId,
+										  0)) != NULL)
+				{
+					CommentStmt *stmt = makeNode(CommentStmt);
+
+					stmt->objtype = OBJECT_TABCONSTRAINT;
+					stmt->object = (Node *) list_make3(makeString(cxt->relation->schemaname),
+													   makeString(cxt->relation->relname),
+													   makeString(nnconstr->conname));
+					stmt->comment = comment;
+					cxt->alist = lappend(cxt->alist, stmt);
+				}
+			}
+		}
 	}
 
 	/*
@@ -1439,7 +1459,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 			char	   *ccname = constr->check[ccnum].ccname;
 			char	   *ccbin = constr->check[ccnum].ccbin;
 			bool		ccenforced = constr->check[ccnum].ccenforced;
-			bool		ccvalid = constr->check[ccnum].ccvalid;
 			bool		ccnoinherit = constr->check[ccnum].ccnoinherit;
 			Node	   *ccbin_node;
 			bool		found_whole_row;
@@ -1470,7 +1489,7 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 			n->conname = pstrdup(ccname);
 			n->location = -1;
 			n->is_enforced = ccenforced;
-			n->initially_valid = ccvalid;
+			n->initially_valid = ccenforced;	/* sic */
 			n->is_no_inherit = ccnoinherit;
 			n->raw_expr = NULL;
 			n->cooked_expr = nodeToString(ccbin_node);
@@ -1938,6 +1957,8 @@ generateClonedIndexStmt(RangeVar *heapRel, Relation source_idx,
 			}
 		}
 
+		iparam->location = -1;
+
 		index->indexParams = lappend(index->indexParams, iparam);
 	}
 
@@ -1968,6 +1989,8 @@ generateClonedIndexStmt(RangeVar *heapRel, Relation source_idx,
 
 		/* Copy the original index column name */
 		iparam->indexcolname = pstrdup(NameStr(attr->attname));
+
+		iparam->location = -1;
 
 		index->indexIncludingParams = lappend(index->indexIncludingParams, iparam);
 	}
@@ -2019,7 +2042,10 @@ generateClonedIndexStmt(RangeVar *heapRel, Relation source_idx,
  * extended statistic "source_statsid", for the rel identified by heapRel and
  * heapRelid.
  *
- * Attribute numbers in expression Vars are adjusted according to attmap.
+ * stxkeys in the source statistic holds attribute numbers from the parent
+ * relation.  Those attnums, along with the attribute numbers referenced by
+ * Vars inside the expression tree, are remapped to the new relation's
+ * numbering according to attmap.
  */
 static CreateStatsStmt *
 generateClonedExtStatsStmt(RangeVar *heapRel, Oid heapRelid,
@@ -2077,7 +2103,8 @@ generateClonedExtStatsStmt(RangeVar *heapRel, Oid heapRelid,
 		StatsElem  *selem = makeNode(StatsElem);
 		AttrNumber	attnum = statsrec->stxkeys.values[i];
 
-		selem->name = get_attname(heapRelid, attnum, false);
+		selem->name =
+			get_attname(heapRelid, attmap->attnums[attnum - 1], false);
 		selem->expr = NULL;
 
 		def_names = lappend(def_names, selem);
@@ -2548,7 +2575,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 		}
 
 		/* Close the index relation but keep the lock */
-		relation_close(index_rel, NoLock);
+		index_close(index_rel, NoLock);
 
 		index->indexOid = index_oid;
 	}
@@ -2737,7 +2764,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 
 			/*
 			 * The WITHOUT OVERLAPS part (if any) must be a range or
-			 * multirange type.
+			 * multirange type, or a domain over such a type.
 			 */
 			if (constraint->without_overlaps && lc == list_last_cell(constraint->keys))
 			{
@@ -2755,8 +2782,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 						const char *attname;
 
 						if (attr->attisdropped)
-							break;
-
+							continue;
 						attname = NameStr(attr->attname);
 						if (strcmp(attname, key) == 0)
 						{
@@ -2768,10 +2794,16 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 				}
 				if (found)
 				{
+					/* Look up column type if we didn't already */
 					if (!OidIsValid(typid) && column)
-						typid = typenameTypeId(NULL, column->typeName);
-
-					if (!OidIsValid(typid) || !(type_is_range(typid) || type_is_multirange(typid)))
+						typid = typenameTypeId(cxt->pstate,
+											   column->typeName);
+					/* Look through any domain */
+					if (OidIsValid(typid))
+						typid = getBaseType(typid);
+					/* Complain if not range/multirange */
+					if (!OidIsValid(typid) ||
+						!(type_is_range(typid) || type_is_multirange(typid)))
 						ereport(ERROR,
 								(errcode(ERRCODE_DATATYPE_MISMATCH),
 								 errmsg("column \"%s\" in WITHOUT OVERLAPS is not a range or multirange type", key),
@@ -2789,6 +2821,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			iparam->opclassopts = NIL;
 			iparam->ordering = SORTBY_DEFAULT;
 			iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
+			iparam->location = -1;
 			index->indexParams = lappend(index->indexParams, iparam);
 		}
 
@@ -2905,6 +2938,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 		iparam->collation = NIL;
 		iparam->opclass = NIL;
 		iparam->opclassopts = NIL;
+		iparam->location = -1;
 		index->indexIncludingParams = lappend(index->indexIncludingParams, iparam);
 	}
 
@@ -3489,6 +3523,287 @@ transformRuleStmt(RuleStmt *stmt, const char *queryString,
 
 
 /*
+ * checkPartition
+ * Check whether partRelOid is a leaf partition of the parent table (rel).
+ * isMerge: true indicates the operation is "ALTER TABLE ... MERGE PARTITIONS";
+ * false indicates the operation is "ALTER TABLE ... SPLIT PARTITION".
+ */
+static void
+checkPartition(Relation rel, Oid partRelOid, bool isMerge)
+{
+	Relation	partRel;
+
+	partRel = table_open(partRelOid, NoLock);
+
+	if (partRel->rd_rel->relkind != RELKIND_RELATION)
+		ereport(ERROR,
+				errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				errmsg("\"%s\" is not a table", RelationGetRelationName(partRel)),
+				isMerge
+				? errhint("ALTER TABLE ... MERGE PARTITIONS can only merge partitions that don't have sub-partitions.")
+				: errhint("ALTER TABLE ... SPLIT PARTITION can only split partitions that don't have sub-partitions."));
+
+	if (!partRel->rd_rel->relispartition)
+		ereport(ERROR,
+				errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				errmsg("\"%s\" is not a partition of partitioned table \"%s\"",
+					   RelationGetRelationName(partRel), RelationGetRelationName(rel)),
+				isMerge
+				? errhint("ALTER TABLE ... MERGE PARTITIONS can only merge partitions that don't have sub-partitions.")
+				: errhint("ALTER TABLE ... SPLIT PARTITION can only split partitions that don't have sub-partitions."));
+
+	if (get_partition_parent(partRelOid, false) != RelationGetRelid(rel))
+		ereport(ERROR,
+				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				errmsg("relation \"%s\" is not a partition of relation \"%s\"",
+					   RelationGetRelationName(partRel), RelationGetRelationName(rel)),
+				isMerge
+				? errhint("ALTER TABLE ... MERGE PARTITIONS can only merge partitions that don't have sub-partitions.")
+				: errhint("ALTER TABLE ... SPLIT PARTITION can only split partitions that don't have sub-partitions."));
+
+	table_close(partRel, NoLock);
+}
+
+/*
+ * transformPartitionCmdForSplit -
+ *		analyze the ALTER TABLE ... SPLIT PARTITION command
+ *
+ * For each new partition, sps->bound is set to the transformed value of bound.
+ * Does checks for bounds of new partitions.
+ */
+static void
+transformPartitionCmdForSplit(CreateStmtContext *cxt, PartitionCmd *partcmd)
+{
+	Relation	parent = cxt->rel;
+	PartitionKey key;
+	char		strategy;
+	Oid			splitPartOid;
+	Oid			defaultPartOid;
+	int			default_index = -1;
+	bool		isSplitPartDefault;
+	ListCell   *listptr,
+			   *listptr2;
+	List	   *splitlist;
+
+	splitlist = partcmd->partlist;
+	key = RelationGetPartitionKey(parent);
+	strategy = get_partition_strategy(key);
+	defaultPartOid = get_default_oid_from_partdesc(RelationGetPartitionDesc(parent, true));
+
+	/* Transform partition bounds for all partitions in the list: */
+	foreach_node(SinglePartitionSpec, sps, splitlist)
+	{
+		cxt->partbound = NULL;
+		transformPartitionCmd(cxt, sps->bound);
+		/* Assign the transformed value of the partition bound. */
+		sps->bound = cxt->partbound;
+	}
+
+	/*
+	 * Open and lock the partition, check ownership along the way. We need to
+	 * use AccessExclusiveLock here because this split partition will be
+	 * detached, then dropped in ATExecSplitPartition.
+	 */
+	splitPartOid = RangeVarGetRelidExtended(partcmd->name, AccessExclusiveLock,
+											0, RangeVarCallbackOwnsRelation,
+											NULL);
+
+	checkPartition(parent, splitPartOid, false);
+
+	switch (strategy)
+	{
+		case PARTITION_STRATEGY_LIST:
+		case PARTITION_STRATEGY_RANGE:
+			{
+				foreach_node(SinglePartitionSpec, sps, splitlist)
+				{
+					if (sps->bound->is_default)
+					{
+						if (default_index != -1)
+							ereport(ERROR,
+									errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+									errmsg("cannot specify more than one DEFAULT partition"),
+									parser_errposition(cxt->pstate, sps->name->location));
+
+						default_index = foreach_current_index(sps);
+					}
+				}
+			}
+			break;
+
+		case PARTITION_STRATEGY_HASH:
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("partition of hash-partitioned table cannot be split"));
+			break;
+
+		default:
+			elog(ERROR, "unexpected partition strategy: %d",
+				 (int) key->strategy);
+			break;
+	}
+
+	/* isSplitPartDefault: is the being split partition a DEFAULT partition? */
+	isSplitPartDefault = (defaultPartOid == splitPartOid);
+
+	if (isSplitPartDefault && default_index == -1)
+		ereport(ERROR,
+				errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				errmsg("cannot split DEFAULT partition \"%s\"",
+					   get_rel_name(splitPartOid)),
+				errhint("To split a DEFAULT partition, one of the new partitions must be DEFAULT."));
+
+	/*
+	 * If the partition being split is not the DEFAULT partition, but the
+	 * DEFAULT partition exists, then none of the resulting split partitions
+	 * can be the DEFAULT.
+	 */
+	if (!isSplitPartDefault && (default_index != -1) && OidIsValid(defaultPartOid))
+	{
+		SinglePartitionSpec *spsDef =
+			(SinglePartitionSpec *) list_nth(splitlist, default_index);
+
+		ereport(ERROR,
+				errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				errmsg("cannot split non-DEFAULT partition \"%s\"",
+					   get_rel_name(splitPartOid)),
+				errdetail("New partition cannot be DEFAULT because DEFAULT partition \"%s\" already exists.",
+						  get_rel_name(defaultPartOid)),
+				parser_errposition(cxt->pstate, spsDef->name->location));
+	}
+
+	foreach(listptr, splitlist)
+	{
+		Oid			nspid;
+		SinglePartitionSpec *sps = (SinglePartitionSpec *) lfirst(listptr);
+		RangeVar   *name = sps->name;
+
+		nspid = RangeVarGetCreationNamespace(sps->name);
+
+		/* Partitions in the list should have different names. */
+		for_each_cell(listptr2, splitlist, lnext(splitlist, listptr))
+		{
+			Oid			nspid2;
+			SinglePartitionSpec *sps2 = (SinglePartitionSpec *) lfirst(listptr2);
+			RangeVar   *name2 = sps2->name;
+
+			if (equal(name, name2))
+				ereport(ERROR,
+						errcode(ERRCODE_DUPLICATE_TABLE),
+						errmsg("partition with name \"%s\" is already used", name->relname),
+						parser_errposition(cxt->pstate, name2->location));
+
+			nspid2 = RangeVarGetCreationNamespace(sps2->name);
+
+			if (nspid2 == nspid && strcmp(name->relname, name2->relname) == 0)
+				ereport(ERROR,
+						errcode(ERRCODE_DUPLICATE_TABLE),
+						errmsg("partition with name \"%s\" is already used", name->relname),
+						parser_errposition(cxt->pstate, name2->location));
+		}
+	}
+
+	/* Then we should check partitions with transformed bounds. */
+	check_partitions_for_split(parent, splitPartOid, splitlist, cxt->pstate);
+}
+
+
+/*
+ * transformPartitionCmdForMerge -
+ *		analyze the ALTER TABLE ... MERGE PARTITIONS command
+ *
+ * Does simple checks for merged partitions. Calculates bound of the resulting
+ * partition.
+ */
+static void
+transformPartitionCmdForMerge(CreateStmtContext *cxt, PartitionCmd *partcmd)
+{
+	Oid			defaultPartOid;
+	Oid			partOid;
+	Relation	parent = cxt->rel;
+	PartitionKey key;
+	char		strategy;
+	ListCell   *listptr,
+			   *listptr2;
+	bool		isDefaultPart = false;
+	List	   *partOids = NIL;
+
+	key = RelationGetPartitionKey(parent);
+	strategy = get_partition_strategy(key);
+
+	if (strategy == PARTITION_STRATEGY_HASH)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("partition of hash-partitioned table cannot be merged"));
+
+	/* Does the partitioned table (parent) have a default partition? */
+	defaultPartOid = get_default_oid_from_partdesc(RelationGetPartitionDesc(parent, true));
+
+	foreach(listptr, partcmd->partlist)
+	{
+		RangeVar   *name = (RangeVar *) lfirst(listptr);
+
+		/* Partitions in the list should have different names. */
+		for_each_cell(listptr2, partcmd->partlist, lnext(partcmd->partlist, listptr))
+		{
+			RangeVar   *name2 = (RangeVar *) lfirst(listptr2);
+
+			if (equal(name, name2))
+				ereport(ERROR,
+						errcode(ERRCODE_DUPLICATE_TABLE),
+						errmsg("partition with name \"%s\" is already used", name->relname),
+						parser_errposition(cxt->pstate, name2->location));
+		}
+
+		/*
+		 * Search the DEFAULT partition in the list. Open and lock partitions
+		 * before calculating the boundary for resulting partition, we also
+		 * check for ownership along the way.  We need to use
+		 * AccessExclusiveLock here, because these merged partitions will be
+		 * detached and then dropped in ATExecMergePartitions.
+		 */
+		partOid = RangeVarGetRelidExtended(name, AccessExclusiveLock, 0,
+										   RangeVarCallbackOwnsRelation,
+										   NULL);
+		/* Is the current partition a DEFAULT partition? */
+		if (partOid == defaultPartOid)
+			isDefaultPart = true;
+
+		/*
+		 * Extended check because the same partition can have different names
+		 * (for example, "part_name" and "public.part_name").
+		 */
+		foreach(listptr2, partOids)
+		{
+			Oid			curOid = lfirst_oid(listptr2);
+
+			if (curOid == partOid)
+				ereport(ERROR,
+						errcode(ERRCODE_DUPLICATE_TABLE),
+						errmsg("partition with name \"%s\" is already used", name->relname),
+						parser_errposition(cxt->pstate, name->location));
+		}
+
+		checkPartition(parent, partOid, true);
+
+		partOids = lappend_oid(partOids, partOid);
+	}
+
+	/* Allocate the bound of the resulting partition. */
+	Assert(partcmd->bound == NULL);
+	partcmd->bound = makeNode(PartitionBoundSpec);
+
+	/* Fill the partition bound. */
+	partcmd->bound->strategy = strategy;
+	partcmd->bound->location = -1;
+	partcmd->bound->is_default = isDefaultPart;
+	if (!isDefaultPart)
+		calculate_partition_bound_for_merge(parent, partcmd->partlist,
+											partOids, partcmd->bound,
+											cxt->pstate);
+}
+
+/*
  * transformAlterTableStmt -
  *		parse analysis for ALTER TABLE
  *
@@ -3757,20 +4072,48 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 				{
 					PartitionCmd *partcmd = (PartitionCmd *) cmd->def;
 
-					transformPartitionCmd(&cxt, partcmd);
-					/* assign transformed value of the partition bound */
+					transformPartitionCmd(&cxt, partcmd->bound);
+					/* assign the transformed value of the partition bound */
 					partcmd->bound = cxt.partbound;
 				}
 
 				newcmds = lappend(newcmds, cmd);
 				break;
 
+			case AT_MergePartitions:
+				{
+					PartitionCmd *partcmd = (PartitionCmd *) cmd->def;
+
+					if (list_length(partcmd->partlist) < 2)
+						ereport(ERROR,
+								errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+								errmsg("list of partitions to be merged should include at least two partitions"));
+
+					transformPartitionCmdForMerge(&cxt, partcmd);
+					newcmds = lappend(newcmds, cmd);
+					break;
+				}
+
+			case AT_SplitPartition:
+				{
+					PartitionCmd *partcmd = (PartitionCmd *) cmd->def;
+
+					if (list_length(partcmd->partlist) < 2)
+						ereport(ERROR,
+								errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+								errmsg("list of new partitions should contain at least two partitions"));
+
+					transformPartitionCmdForSplit(&cxt, partcmd);
+					newcmds = lappend(newcmds, cmd);
+					break;
+				}
+
 			default:
 
 				/*
-				 * Currently, we shouldn't actually get here for subcommand
-				 * types that don't require transformation; but if we do, just
-				 * emit them unchanged.
+				 * Currently, we shouldn't actually get here for the
+				 * subcommand types that don't require transformation; but if
+				 * we do, just emit them unchanged.
 				 */
 				newcmds = lappend(newcmds, cmd);
 				break;
@@ -3864,9 +4207,12 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
  * NOTE: currently, attributes are only supported for FOREIGN KEY, UNIQUE,
  * EXCLUSION, and PRIMARY KEY constraints, but someday they ought to be
  * supported for other constraint types.
+ *
+ * NOTE: this must be idempotent in non-error cases; see
+ * transformCreateSchemaCreateTable.
  */
 static void
-transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
+transformConstraintAttrs(ParseState *pstate, List *constraintList)
 {
 	Constraint *lastprimarycon = NULL;
 	bool		saw_deferrability = false;
@@ -3895,12 +4241,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced DEFERRABLE clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_deferrability)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple DEFERRABLE/NOT DEFERRABLE clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_deferrability = true;
 				lastprimarycon->deferrable = true;
 				break;
@@ -3910,12 +4256,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced NOT DEFERRABLE clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_deferrability)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple DEFERRABLE/NOT DEFERRABLE clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_deferrability = true;
 				lastprimarycon->deferrable = false;
 				if (saw_initially &&
@@ -3923,7 +4269,7 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				break;
 
 			case CONSTR_ATTR_DEFERRED:
@@ -3931,12 +4277,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced INITIALLY DEFERRED clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_initially)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_initially = true;
 				lastprimarycon->initdeferred = true;
 
@@ -3949,7 +4295,7 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				break;
 
 			case CONSTR_ATTR_IMMEDIATE:
@@ -3957,12 +4303,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced INITIALLY IMMEDIATE clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_initially)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_initially = true;
 				lastprimarycon->initdeferred = false;
 				break;
@@ -3974,12 +4320,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced ENFORCED clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_enforced)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple ENFORCED/NOT ENFORCED clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_enforced = true;
 				lastprimarycon->is_enforced = true;
 				break;
@@ -3991,12 +4337,12 @@ transformConstraintAttrs(CreateStmtContext *cxt, List *constraintList)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("misplaced NOT ENFORCED clause"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				if (saw_enforced)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("multiple ENFORCED/NOT ENFORCED clauses not allowed"),
-							 parser_errposition(cxt->pstate, con->location)));
+							 parser_errposition(pstate, con->location)));
 				saw_enforced = true;
 				lastprimarycon->is_enforced = false;
 
@@ -4054,51 +4400,45 @@ transformColumnType(CreateStmtContext *cxt, ColumnDef *column)
  * transformCreateSchemaStmtElements -
  *	  analyzes the elements of a CREATE SCHEMA statement
  *
- * Split the schema element list from a CREATE SCHEMA statement into
- * individual commands and place them in the result list in an order
- * such that there are no forward references (e.g. GRANT to a table
- * created later in the list). Note that the logic we use for determining
- * forward references is presently quite incomplete.
+ * This presently has two responsibilities.  We verify that no subcommands are
+ * trying to create objects outside the new schema.  We also pull out any
+ * foreign-key constraint clauses embedded in CREATE TABLE subcommands, and
+ * convert them to ALTER TABLE ADD CONSTRAINT commands appended to the list.
+ * This supports forward references in foreign keys, which is required by the
+ * SQL standard.
+ *
+ * We used to try to re-order the commands in a way that would work even if
+ * the user-written order would not, but that's too hard (perhaps impossible)
+ * to do correctly with not-yet-parse-analyzed commands.  Now we'll just
+ * execute the elements in the order given, except for foreign keys.
  *
  * "schemaName" is the name of the schema that will be used for the creation
- * of the objects listed, that may be compiled from the schema name defined
+ * of the objects listed.  It may be obtained from the schema name defined
  * in the statement or a role specification.
- *
- * SQL also allows constraints to make forward references, so thumb through
- * the table columns and move forward references to a posterior alter-table
- * command.
  *
  * The result is a list of parse nodes that still need to be analyzed ---
  * but we can't analyze the later commands until we've executed the earlier
  * ones, because of possible inter-object references.
  *
- * Note: this breaks the rules a little bit by modifying schema-name fields
- * within passed-in structs.  However, the transformation would be the same
- * if done over, so it should be all right to scribble on the input to this
- * extent.
+ * Note it's important that we not modify the input data structure.  We create
+ * a new result List, and we copy any CREATE TABLE subcommands that we might
+ * modify.
  */
 List *
-transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
+transformCreateSchemaStmtElements(ParseState *pstate, List *schemaElts,
+								  const char *schemaName)
 {
-	CreateSchemaStmtContext cxt;
-	List	   *result;
-	ListCell   *elements;
-
-	cxt.schemaname = schemaName;
-	cxt.sequences = NIL;
-	cxt.tables = NIL;
-	cxt.views = NIL;
-	cxt.indexes = NIL;
-	cxt.triggers = NIL;
-	cxt.grants = NIL;
+	List	   *elements = NIL;
+	List	   *fk_elements = NIL;
+	ListCell   *lc;
 
 	/*
-	 * Run through each schema element in the schema element list. Separate
-	 * statements by type, and do preliminary analysis.
+	 * Run through each schema element in the schema element list.  Check
+	 * target schema names, and collect the list of actions to be done.
 	 */
-	foreach(elements, schemaElts)
+	foreach(lc, schemaElts)
 	{
-		Node	   *element = lfirst(elements);
+		Node	   *element = lfirst(lc);
 
 		switch (nodeTag(element))
 		{
@@ -4106,8 +4446,8 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 				{
 					CreateSeqStmt *elp = (CreateSeqStmt *) element;
 
-					setSchemaName(cxt.schemaname, &elp->sequence->schemaname);
-					cxt.sequences = lappend(cxt.sequences, element);
+					checkSchemaNameRV(pstate, schemaName, elp->sequence);
+					elements = lappend(elements, element);
 				}
 				break;
 
@@ -4115,12 +4455,12 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 				{
 					CreateStmt *elp = (CreateStmt *) element;
 
-					setSchemaName(cxt.schemaname, &elp->relation->schemaname);
-
-					/*
-					 * XXX todo: deal with constraints
-					 */
-					cxt.tables = lappend(cxt.tables, element);
+					checkSchemaNameRV(pstate, schemaName, elp->relation);
+					/* Pull out any foreign key clauses, add to fk_elements */
+					elp = transformCreateSchemaCreateTable(pstate,
+														   elp,
+														   &fk_elements);
+					elements = lappend(elements, elp);
 				}
 				break;
 
@@ -4128,12 +4468,8 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 				{
 					ViewStmt   *elp = (ViewStmt *) element;
 
-					setSchemaName(cxt.schemaname, &elp->view->schemaname);
-
-					/*
-					 * XXX todo: deal with references between views
-					 */
-					cxt.views = lappend(cxt.views, element);
+					checkSchemaNameRV(pstate, schemaName, elp->view);
+					elements = lappend(elements, element);
 				}
 				break;
 
@@ -4141,8 +4477,8 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 				{
 					IndexStmt  *elp = (IndexStmt *) element;
 
-					setSchemaName(cxt.schemaname, &elp->relation->schemaname);
-					cxt.indexes = lappend(cxt.indexes, element);
+					checkSchemaNameRV(pstate, schemaName, elp->relation);
+					elements = lappend(elements, element);
 				}
 				break;
 
@@ -4150,13 +4486,75 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 				{
 					CreateTrigStmt *elp = (CreateTrigStmt *) element;
 
-					setSchemaName(cxt.schemaname, &elp->relation->schemaname);
-					cxt.triggers = lappend(cxt.triggers, element);
+					checkSchemaNameRV(pstate, schemaName, elp->relation);
+					elements = lappend(elements, element);
+				}
+				break;
+
+			case T_CreateDomainStmt:
+				{
+					CreateDomainStmt *elp = (CreateDomainStmt *) element;
+
+					checkSchemaNameList(schemaName, elp->domainname);
+					elements = lappend(elements, element);
+				}
+				break;
+
+			case T_CreateFunctionStmt:
+				{
+					CreateFunctionStmt *elp = (CreateFunctionStmt *) element;
+
+					checkSchemaNameList(schemaName, elp->funcname);
+					elements = lappend(elements, element);
+				}
+				break;
+
+				/*
+				 * CREATE TYPE can produce a DefineStmt, but also
+				 * CreateEnumStmt, CreateRangeStmt, and CompositeTypeStmt.
+				 * Allowing DefineStmt also provides support for several other
+				 * commands: currently, CREATE AGGREGATE, CREATE COLLATION,
+				 * CREATE OPERATOR, and text search objects.
+				 */
+
+			case T_DefineStmt:
+				{
+					DefineStmt *elp = (DefineStmt *) element;
+
+					checkSchemaNameList(schemaName, elp->defnames);
+					elements = lappend(elements, element);
+				}
+				break;
+
+			case T_CreateEnumStmt:
+				{
+					CreateEnumStmt *elp = (CreateEnumStmt *) element;
+
+					checkSchemaNameList(schemaName, elp->typeName);
+					elements = lappend(elements, element);
+				}
+				break;
+
+			case T_CreateRangeStmt:
+				{
+					CreateRangeStmt *elp = (CreateRangeStmt *) element;
+
+					checkSchemaNameList(schemaName, elp->typeName);
+					elements = lappend(elements, element);
+				}
+				break;
+
+			case T_CompositeTypeStmt:
+				{
+					CompositeTypeStmt *elp = (CompositeTypeStmt *) element;
+
+					checkSchemaNameRV(pstate, schemaName, elp->typevar);
+					elements = lappend(elements, element);
 				}
 				break;
 
 			case T_GrantStmt:
-				cxt.grants = lappend(cxt.grants, element);
+				elements = lappend(elements, element);
 				break;
 
 			default:
@@ -4165,43 +4563,231 @@ transformCreateSchemaStmtElements(List *schemaElts, const char *schemaName)
 		}
 	}
 
-	result = NIL;
-	result = list_concat(result, cxt.sequences);
-	result = list_concat(result, cxt.tables);
-	result = list_concat(result, cxt.views);
-	result = list_concat(result, cxt.indexes);
-	result = list_concat(result, cxt.triggers);
-	result = list_concat(result, cxt.grants);
-
-	return result;
+	return list_concat(elements, fk_elements);
 }
 
 /*
- * setSchemaName
- *		Set or check schema name in an element of a CREATE SCHEMA command
+ * checkSchemaNameRV
+ *		Check schema name in an element of a CREATE SCHEMA command,
+ *		where the element's name is given by a RangeVar
+ *
+ * It's okay if the command doesn't specify a target schema name, because
+ * CreateSchemaCommand will set up the default creation schema to be the
+ * new schema.  But if a target schema name is given, it had better match.
+ * We also have to check that the command doesn't say CREATE TEMP, since
+ * that would likewise put the object into the wrong schema.
  */
 static void
-setSchemaName(const char *context_schema, char **stmt_schema_name)
+checkSchemaNameRV(ParseState *pstate, const char *context_schema,
+				  RangeVar *relation)
 {
-	if (*stmt_schema_name == NULL)
-		*stmt_schema_name = unconstify(char *, context_schema);
-	else if (strcmp(context_schema, *stmt_schema_name) != 0)
+	if (relation->schemaname != NULL &&
+		strcmp(context_schema, relation->schemaname) != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_SCHEMA_DEFINITION),
 				 errmsg("CREATE specifies a schema (%s) "
 						"different from the one being created (%s)",
-						*stmt_schema_name, context_schema)));
+						relation->schemaname, context_schema),
+				 parser_errposition(pstate, relation->location)));
+
+	if (relation->relpersistence == RELPERSISTENCE_TEMP)
+	{
+		/* spell this error the same as in RangeVarAdjustRelationPersistence */
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+				 errmsg("cannot create temporary relation in non-temporary schema"),
+				 parser_errposition(pstate, relation->location)));
+	}
+}
+
+/*
+ * checkSchemaNameList
+ *		Check schema name in an element of a CREATE SCHEMA command,
+ *		where the element's name is given by a List
+ *
+ * Much as above, but we don't have to worry about TEMP.
+ * Sadly, this also means we don't have a parse location to report.
+ */
+static void
+checkSchemaNameList(const char *context_schema, List *qualified_name)
+{
+	char	   *obj_schema;
+	char	   *obj_name;
+
+	DeconstructQualifiedName(qualified_name, &obj_schema, &obj_name);
+	if (obj_schema != NULL &&
+		strcmp(context_schema, obj_schema) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_SCHEMA_DEFINITION),
+				 errmsg("CREATE specifies a schema (%s) "
+						"different from the one being created (%s)",
+						obj_schema, context_schema)));
+}
+
+/*
+ * transformCreateSchemaCreateTable
+ *		Process one CreateStmt for transformCreateSchemaStmtElements.
+ *
+ * We remove any foreign-key clauses in the statement and convert them into
+ * ALTER TABLE commands, which we append to *fk_elements.
+ */
+static CreateStmt *
+transformCreateSchemaCreateTable(ParseState *pstate,
+								 CreateStmt *stmt,
+								 List **fk_elements)
+{
+	CreateStmt *newstmt;
+	List	   *newElts = NIL;
+	ListCell   *lc;
+
+	/*
+	 * Flat-copy the CreateStmt node, allowing us to replace its tableElts
+	 * list without damaging the input data structure.  Most sub-nodes will be
+	 * shared with the input, though.
+	 */
+	newstmt = makeNode(CreateStmt);
+	memcpy(newstmt, stmt, sizeof(CreateStmt));
+
+	/* Scan for foreign-key constraints */
+	foreach(lc, stmt->tableElts)
+	{
+		Node	   *element = lfirst(lc);
+		AlterTableStmt *alterstmt;
+		AlterTableCmd *altercmd;
+
+		if (IsA(element, Constraint))
+		{
+			Constraint *constr = (Constraint *) element;
+
+			if (constr->contype != CONSTR_FOREIGN)
+			{
+				/* Other constraint types pass through unchanged */
+				newElts = lappend(newElts, constr);
+				continue;
+			}
+
+			/* Make it into an ALTER TABLE ADD CONSTRAINT command */
+			altercmd = makeNode(AlterTableCmd);
+			altercmd->subtype = AT_AddConstraint;
+			altercmd->name = NULL;
+			altercmd->def = (Node *) copyObject(constr);
+
+			alterstmt = makeNode(AlterTableStmt);
+			alterstmt->relation = copyObject(stmt->relation);
+			alterstmt->cmds = list_make1(altercmd);
+			alterstmt->objtype = OBJECT_TABLE;
+
+			*fk_elements = lappend(*fk_elements, alterstmt);
+		}
+		else if (IsA(element, ColumnDef))
+		{
+			ColumnDef  *entry = (ColumnDef *) element;
+			ColumnDef  *newentry;
+			List	   *entryconstraints;
+			bool		afterFK = false;
+
+			/*
+			 * We must preprocess the list of column constraints to attach
+			 * attributes such as DEFERRED to the appropriate constraint node.
+			 * Do this on a copy.  (But execution of the CreateStmt will run
+			 * transformConstraintAttrs on the copy, so we are nonetheless
+			 * relying on transformConstraintAttrs to be idempotent.)
+			 */
+			entryconstraints = copyObject(entry->constraints);
+			transformConstraintAttrs(pstate, entryconstraints);
+
+			/* Scan the column constraints ... */
+			foreach_node(Constraint, colconstr, entryconstraints)
+			{
+				switch (colconstr->contype)
+				{
+					case CONSTR_FOREIGN:
+						/* colconstr is already a copy, OK to modify */
+						colconstr->fk_attrs = list_make1(makeString(entry->colname));
+
+						/* Make it into an ALTER TABLE ADD CONSTRAINT command */
+						altercmd = makeNode(AlterTableCmd);
+						altercmd->subtype = AT_AddConstraint;
+						altercmd->name = NULL;
+						altercmd->def = (Node *) colconstr;
+
+						alterstmt = makeNode(AlterTableStmt);
+						alterstmt->relation = copyObject(stmt->relation);
+						alterstmt->cmds = list_make1(altercmd);
+						alterstmt->objtype = OBJECT_TABLE;
+
+						*fk_elements = lappend(*fk_elements, alterstmt);
+
+						/* Remove the Constraint node from entryconstraints */
+						entryconstraints =
+							foreach_delete_current(entryconstraints, colconstr);
+
+						/*
+						 * Immediately-following attribute constraints should
+						 * be dropped, too.
+						 */
+						afterFK = true;
+						break;
+
+						/*
+						 * Column constraint lists separate a Constraint node
+						 * from its attributes (e.g. NOT ENFORCED); so a
+						 * column-level foreign key constraint may be
+						 * represented by multiple Constraint nodes.  After
+						 * transformConstraintAttrs, the foreign key
+						 * Constraint node contains all required information,
+						 * making it okay to put into *fk_elements as a
+						 * stand-alone Constraint.  But since we removed the
+						 * foreign key Constraint node from entryconstraints,
+						 * we must remove any dependent attribute nodes too,
+						 * else the later re-execution of
+						 * transformConstraintAttrs will misbehave.
+						 */
+					case CONSTR_ATTR_DEFERRABLE:
+					case CONSTR_ATTR_NOT_DEFERRABLE:
+					case CONSTR_ATTR_DEFERRED:
+					case CONSTR_ATTR_IMMEDIATE:
+					case CONSTR_ATTR_ENFORCED:
+					case CONSTR_ATTR_NOT_ENFORCED:
+						if (afterFK)
+							entryconstraints =
+								foreach_delete_current(entryconstraints,
+													   colconstr);
+						break;
+
+					default:
+						/* Any following constraint attributes are unrelated */
+						afterFK = false;
+						break;
+				}
+			}
+
+			/* Now make a modified ColumnDef to put into newElts */
+			newentry = makeNode(ColumnDef);
+			memcpy(newentry, entry, sizeof(ColumnDef));
+			newentry->constraints = entryconstraints;
+			newElts = lappend(newElts, newentry);
+		}
+		else
+		{
+			/* Other node types pass through unchanged */
+			newElts = lappend(newElts, element);
+		}
+	}
+
+	newstmt->tableElts = newElts;
+	return newstmt;
 }
 
 /*
  * transformPartitionCmd
- *		Analyze the ATTACH/DETACH PARTITION command
+ *		Analyze the ATTACH/DETACH/SPLIT PARTITION command
  *
- * In case of the ATTACH PARTITION command, cxt->partbound is set to the
- * transformed value of cmd->bound.
+ * In case of the ATTACH/SPLIT PARTITION command, cxt->partbound is set to the
+ * transformed value of bound.
  */
 static void
-transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd)
+transformPartitionCmd(CreateStmtContext *cxt, PartitionBoundSpec *bound)
 {
 	Relation	parentRel = cxt->rel;
 
@@ -4210,9 +4796,9 @@ transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd)
 		case RELKIND_PARTITIONED_TABLE:
 			/* transform the partition bound, if any */
 			Assert(RelationGetPartitionKey(parentRel) != NULL);
-			if (cmd->bound != NULL)
+			if (bound != NULL)
 				cxt->partbound = transformPartitionBound(cxt->pstate, parentRel,
-														 cmd->bound);
+														 bound);
 			break;
 		case RELKIND_PARTITIONED_INDEX:
 
@@ -4220,7 +4806,7 @@ transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd)
 			 * A partitioned index cannot have a partition bound set.  ALTER
 			 * INDEX prevents that with its grammar, but not ALTER TABLE.
 			 */
-			if (cmd->bound != NULL)
+			if (bound != NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 						 errmsg("\"%s\" is not a partitioned table",
@@ -4418,11 +5004,13 @@ transformPartitionRangeBounds(ParseState *pstate, List *blist,
 	int			i,
 				j;
 
-	i = j = 0;
+	j = 0;
 	foreach(lc, blist)
 	{
 		Node	   *expr = lfirst(lc);
 		PartitionRangeDatum *prd = NULL;
+
+		i = foreach_current_index(lc);
 
 		/*
 		 * Infinite range bounds -- "minvalue" and "maxvalue" -- get passed in
@@ -4501,7 +5089,6 @@ transformPartitionRangeBounds(ParseState *pstate, List *blist,
 			prd = makeNode(PartitionRangeDatum);
 			prd->kind = PARTITION_RANGE_DATUM_VALUE;
 			prd->value = (Node *) value;
-			++i;
 		}
 
 		prd->location = exprLocation(expr);

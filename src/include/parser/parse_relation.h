@@ -4,7 +4,7 @@
  *	  prototypes for parse_relation.c.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/parser/parse_relation.h
@@ -15,6 +15,7 @@
 #define PARSE_RELATION_H
 
 #include "parser/parse_node.h"
+#include "storage/lockdefs.h"
 
 
 extern ParseNamespaceItem *refnameNamespaceItem(ParseState *pstate,
@@ -44,7 +45,7 @@ extern Node *colNameToVar(ParseState *pstate, const char *colname, bool localonl
 extern void markNullableIfNeeded(ParseState *pstate, Var *var);
 extern void markVarForSelectPriv(ParseState *pstate, Var *var);
 extern Relation parserOpenTable(ParseState *pstate, const RangeVar *relation,
-								int lockmode);
+								LOCKMODE lockmode);
 extern ParseNamespaceItem *addRangeTableEntry(ParseState *pstate,
 											  RangeVar *relation,
 											  Alias *alias,
@@ -52,7 +53,7 @@ extern ParseNamespaceItem *addRangeTableEntry(ParseState *pstate,
 											  bool inFromCl);
 extern ParseNamespaceItem *addRangeTableEntryForRelation(ParseState *pstate,
 														 Relation rel,
-														 int lockmode,
+														 LOCKMODE lockmode,
 														 Alias *alias,
 														 bool inh,
 														 bool inFromCl);
@@ -81,6 +82,14 @@ extern ParseNamespaceItem *addRangeTableEntryForTableFunc(ParseState *pstate,
 														  Alias *alias,
 														  bool lateral,
 														  bool inFromCl);
+extern ParseNamespaceItem *addRangeTableEntryForGraphTable(ParseState *pstate,
+														   Oid graphid,
+														   GraphPattern *graph_pattern,
+														   List *columns,
+														   List *colnames,
+														   Alias *alias,
+														   bool lateral,
+														   bool inFromCl);
 extern ParseNamespaceItem *addRangeTableEntryForJoin(ParseState *pstate,
 													 List *colnames,
 													 ParseNamespaceColumn *nscolumns,
@@ -127,6 +136,5 @@ extern int	attnameAttNum(Relation rd, const char *attname, bool sysColOK);
 extern const NameData *attnumAttName(Relation rd, int attid);
 extern Oid	attnumTypeId(Relation rd, int attid);
 extern Oid	attnumCollationId(Relation rd, int attid);
-extern bool isQueryUsingTempRelation(Query *query);
 
 #endif							/* PARSE_RELATION_H */

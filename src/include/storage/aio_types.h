@@ -5,7 +5,7 @@
  *    "include burden".
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/aio_types.h
@@ -107,7 +107,7 @@ typedef struct PgAioResult
 	/* of type PgAioResultStatus, see above */
 	uint32		status:PGAIO_RESULT_STATUS_BITS;
 
-	/* meaning defined by callback->error */
+	/* meaning defined by callback->report */
 	uint32		error_data:PGAIO_RESULT_ERROR_BITS;
 
 	int32		result;

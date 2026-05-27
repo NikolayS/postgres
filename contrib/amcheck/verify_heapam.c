@@ -3,7 +3,7 @@
  * verify_heapam.c
  *	  Functions to check postgresql heap relations for corruption
  *
- * Copyright (c) 2016-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2026, PostgreSQL Global Development Group
  *
  *	  contrib/amcheck/verify_heapam.c
  *-------------------------------------------------------------------------
@@ -24,11 +24,13 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
+#include "storage/lwlock.h"
 #include "storage/procarray.h"
 #include "storage/read_stream.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
+#include "utils/tuplestore.h"
 
 PG_FUNCTION_INFO_V1(verify_heapam);
 
@@ -73,7 +75,7 @@ typedef enum SkipPages
  */
 typedef struct ToastedAttribute
 {
-	struct varatt_external toast_pointer;
+	varatt_external toast_pointer;
 	BlockNumber blkno;			/* block in main table */
 	OffsetNumber offnum;		/* offset in main table */
 	AttrNumber	attnum;			/* attribute in main table */
@@ -526,17 +528,17 @@ verify_heapam(PG_FUNCTION_ARGS)
 				if (rdoffnum < FirstOffsetNumber)
 				{
 					report_corruption(&ctx,
-									  psprintf("line pointer redirection to item at offset %u precedes minimum offset %u",
-											   (unsigned) rdoffnum,
-											   (unsigned) FirstOffsetNumber));
+									  psprintf("line pointer redirection to item at offset %d precedes minimum offset %d",
+											   rdoffnum,
+											   FirstOffsetNumber));
 					continue;
 				}
 				if (rdoffnum > maxoff)
 				{
 					report_corruption(&ctx,
-									  psprintf("line pointer redirection to item at offset %u exceeds maximum offset %u",
-											   (unsigned) rdoffnum,
-											   (unsigned) maxoff));
+									  psprintf("line pointer redirection to item at offset %d exceeds maximum offset %d",
+											   rdoffnum,
+											   maxoff));
 					continue;
 				}
 
@@ -550,22 +552,22 @@ verify_heapam(PG_FUNCTION_ARGS)
 				if (!ItemIdIsUsed(rditem))
 				{
 					report_corruption(&ctx,
-									  psprintf("redirected line pointer points to an unused item at offset %u",
-											   (unsigned) rdoffnum));
+									  psprintf("redirected line pointer points to an unused item at offset %d",
+											   rdoffnum));
 					continue;
 				}
 				else if (ItemIdIsDead(rditem))
 				{
 					report_corruption(&ctx,
-									  psprintf("redirected line pointer points to a dead item at offset %u",
-											   (unsigned) rdoffnum));
+									  psprintf("redirected line pointer points to a dead item at offset %d",
+											   rdoffnum));
 					continue;
 				}
 				else if (ItemIdIsRedirected(rditem))
 				{
 					report_corruption(&ctx,
-									  psprintf("redirected line pointer points to another redirected line pointer at offset %u",
-											   (unsigned) rdoffnum));
+									  psprintf("redirected line pointer points to another redirected line pointer at offset %d",
+											   rdoffnum));
 					continue;
 				}
 
@@ -601,10 +603,10 @@ verify_heapam(PG_FUNCTION_ARGS)
 			if (ctx.lp_off + ctx.lp_len > BLCKSZ)
 			{
 				report_corruption(&ctx,
-								  psprintf("line pointer to page offset %u with length %u ends beyond maximum page offset %u",
+								  psprintf("line pointer to page offset %u with length %u ends beyond maximum page offset %d",
 										   ctx.lp_off,
 										   ctx.lp_len,
-										   (unsigned) BLCKSZ));
+										   BLCKSZ));
 				continue;
 			}
 
@@ -678,16 +680,16 @@ verify_heapam(PG_FUNCTION_ARGS)
 				if (!HeapTupleHeaderIsHeapOnly(next_htup))
 				{
 					report_corruption(&ctx,
-									  psprintf("redirected line pointer points to a non-heap-only tuple at offset %u",
-											   (unsigned) nextoffnum));
+									  psprintf("redirected line pointer points to a non-heap-only tuple at offset %d",
+											   nextoffnum));
 				}
 
 				/* HOT chains should not intersect. */
 				if (predecessor[nextoffnum] != InvalidOffsetNumber)
 				{
 					report_corruption(&ctx,
-									  psprintf("redirect line pointer points to offset %u, but offset %u also points there",
-											   (unsigned) nextoffnum, (unsigned) predecessor[nextoffnum]));
+									  psprintf("redirect line pointer points to offset %d, but offset %d also points there",
+											   nextoffnum, predecessor[nextoffnum]));
 					continue;
 				}
 
@@ -719,8 +721,8 @@ verify_heapam(PG_FUNCTION_ARGS)
 			if (predecessor[nextoffnum] != InvalidOffsetNumber)
 			{
 				report_corruption(&ctx,
-								  psprintf("tuple points to new version at offset %u, but offset %u also points there",
-										   (unsigned) nextoffnum, (unsigned) predecessor[nextoffnum]));
+								  psprintf("tuple points to new version at offset %d, but offset %d also points there",
+										   nextoffnum, predecessor[nextoffnum]));
 				continue;
 			}
 
@@ -743,15 +745,15 @@ verify_heapam(PG_FUNCTION_ARGS)
 				HeapTupleHeaderIsHeapOnly(next_htup))
 			{
 				report_corruption(&ctx,
-								  psprintf("non-heap-only update produced a heap-only tuple at offset %u",
-										   (unsigned) nextoffnum));
+								  psprintf("non-heap-only update produced a heap-only tuple at offset %d",
+										   nextoffnum));
 			}
 			if ((curr_htup->t_infomask2 & HEAP_HOT_UPDATED) &&
 				!HeapTupleHeaderIsHeapOnly(next_htup))
 			{
 				report_corruption(&ctx,
-								  psprintf("heap-only update produced a non-heap only tuple at offset %u",
-										   (unsigned) nextoffnum));
+								  psprintf("heap-only update produced a non-heap only tuple at offset %d",
+										   nextoffnum));
 			}
 
 			/*
@@ -772,10 +774,10 @@ verify_heapam(PG_FUNCTION_ARGS)
 				TransactionIdIsInProgress(curr_xmin))
 			{
 				report_corruption(&ctx,
-								  psprintf("tuple with in-progress xmin %u was updated to produce a tuple at offset %u with committed xmin %u",
-										   (unsigned) curr_xmin,
-										   (unsigned) ctx.offnum,
-										   (unsigned) next_xmin));
+								  psprintf("tuple with in-progress xmin %u was updated to produce a tuple at offset %d with committed xmin %u",
+										   curr_xmin,
+										   ctx.offnum,
+										   next_xmin));
 			}
 
 			/*
@@ -788,16 +790,16 @@ verify_heapam(PG_FUNCTION_ARGS)
 			{
 				if (xmin_commit_status[nextoffnum] == XID_IN_PROGRESS)
 					report_corruption(&ctx,
-									  psprintf("tuple with aborted xmin %u was updated to produce a tuple at offset %u with in-progress xmin %u",
-											   (unsigned) curr_xmin,
-											   (unsigned) ctx.offnum,
-											   (unsigned) next_xmin));
+									  psprintf("tuple with aborted xmin %u was updated to produce a tuple at offset %d with in-progress xmin %u",
+											   curr_xmin,
+											   ctx.offnum,
+											   next_xmin));
 				else if (xmin_commit_status[nextoffnum] == XID_COMMITTED)
 					report_corruption(&ctx,
-									  psprintf("tuple with aborted xmin %u was updated to produce a tuple at offset %u with committed xmin %u",
-											   (unsigned) curr_xmin,
-											   (unsigned) ctx.offnum,
-											   (unsigned) next_xmin));
+									  psprintf("tuple with aborted xmin %u was updated to produce a tuple at offset %d with committed xmin %u",
+											   curr_xmin,
+											   ctx.offnum,
+											   next_xmin));
 			}
 		}
 
@@ -1660,11 +1662,11 @@ static bool
 check_tuple_attribute(HeapCheckContext *ctx)
 {
 	Datum		attdatum;
-	struct varlena *attr;
+	varlena    *attr;
 	char	   *tp;				/* pointer to the tuple data */
 	uint16		infomask;
 	CompactAttribute *thisatt;
-	struct varatt_external toast_pointer;
+	varatt_external toast_pointer;
 
 	infomask = ctx->tuphdr->t_infomask;
 	thisatt = TupleDescCompactAttr(RelationGetDescr(ctx->rel), ctx->attnum);
@@ -1754,7 +1756,7 @@ check_tuple_attribute(HeapCheckContext *ctx)
 	 * We go further, because we need to check if the toast datum is corrupt.
 	 */
 
-	attr = (struct varlena *) DatumGetPointer(attdatum);
+	attr = (varlena *) DatumGetPointer(attdatum);
 
 	/*
 	 * Now we follow the logic of detoast_external_attr(), with the same
@@ -1838,7 +1840,7 @@ check_tuple_attribute(HeapCheckContext *ctx)
 	{
 		ToastedAttribute *ta;
 
-		ta = (ToastedAttribute *) palloc0(sizeof(ToastedAttribute));
+		ta = palloc0_object(ToastedAttribute);
 
 		VARATT_EXTERNAL_GET_POINTER(ta->toast_pointer, attr);
 		ta->blkno = ctx->blkno;
@@ -1942,7 +1944,7 @@ check_tuple(HeapCheckContext *ctx, bool *xmin_commit_status_ok,
 	if (RelationGetDescr(ctx->rel)->natts < ctx->natts)
 	{
 		report_corruption(ctx,
-						  psprintf("number of attributes %u exceeds maximum expected for table %u",
+						  psprintf("number of attributes %u exceeds maximum %u expected for table",
 								   ctx->natts,
 								   RelationGetDescr(ctx->rel)->natts));
 		return;

@@ -1,5 +1,5 @@
 
-# Copyright (c) 2023-2025, PostgreSQL Global Development Group
+# Copyright (c) 2023-2026, PostgreSQL Global Development Group
 
 =pod
 
@@ -110,6 +110,29 @@ sub adjust_database_contents
 			'contrib_regression_test_extensions',
 			'drop extension if exists test_ext_cine',
 			'drop extension if exists test_ext7');
+	}
+
+	# btree_gist inet/cidr indexes cannot be upgraded to v19
+	if ($old_version < 19)
+	{
+		if ($dbnames{"contrib_regression_btree_gist"})
+		{
+			_add_st($result, 'contrib_regression_btree_gist',
+				"drop index if exists public.inettmp_a_a1_idx");
+			_add_st($result, 'contrib_regression_btree_gist',
+				"drop index if exists public.inetidx");
+			_add_st($result, 'contrib_regression_btree_gist',
+				"drop index public.cidridx");
+		}
+		if ($dbnames{"regression_btree_gist"})
+		{
+			_add_st($result, 'regression_btree_gist',
+				"drop index if exists public.inettmp_a_a1_idx");
+			_add_st($result, 'regression_btree_gist',
+				"drop index if exists public.inetidx");
+			_add_st($result, 'regression_btree_gist',
+				"drop index public.cidridx");
+		}
 	}
 
 	# we removed these test-support functions in v18
@@ -251,6 +274,32 @@ sub adjust_database_contents
 			'drop operator if exists public.=> (bigint, NONE)');
 	}
 
+	# Version 19 changed the output format of pg_lsn.  To avoid output
+	# differences, set all pg_lsn columns to NULL if the old version is
+	# older than 19.
+	if ($old_version < 19)
+	{
+		if ($old_version >= '9.5')
+		{
+			_add_st($result, 'regression',
+				"update brintest set lsncol = NULL");
+		}
+
+		if ($old_version >= 12)
+		{
+			_add_st($result, 'regression',
+				"update tab_core_types set pg_lsn = NULL");
+		}
+
+		if ($old_version >= 14)
+		{
+			_add_st($result, 'regression',
+				"update brintest_multi set lsncol = NULL");
+			_add_st($result, 'regression',
+				"update brintest_bloom set lsncol = NULL");
+		}
+	}
+
 	return $result;
 }
 
@@ -304,8 +353,8 @@ sub adjust_old_dumpfile
 	# Version comments will certainly not match.
 	$dump =~ s/^-- Dumped from database version.*\n//mg;
 
-	# Same with version argument to pg_restore_relation_stats() or
-	# pg_restore_attribute_stats().
+	# Same with version argument to pg_restore_relation_stats(),
+	# pg_restore_attribute_stats() or pg_restore_extended_stats().
 	$dump =~ s {\n(\s+'version',) '\d+'::integer,$}
 		{$1 '000000'::integer,}mg;
 
@@ -654,8 +703,8 @@ sub adjust_new_dumpfile
 	# Version comments will certainly not match.
 	$dump =~ s/^-- Dumped from database version.*\n//mg;
 
-	# Same with version argument to pg_restore_relation_stats() or
-	# pg_restore_attribute_stats().
+	# Same with version argument to pg_restore_relation_stats(),
+	# pg_restore_attribute_stats() or pg_restore_extended_stats().
 	$dump =~ s {\n(\s+'version',) '\d+'::integer,$}
 		{$1 '000000'::integer,}mg;
 

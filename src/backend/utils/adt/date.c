@@ -3,7 +3,7 @@
  * date.c
  *	  implements DATE and TIME data types specified in SQL standard
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  *
@@ -27,6 +27,7 @@
 #include "common/int.h"
 #include "libpq/pqformat.h"
 #include "miscadmin.h"
+#include "nodes/miscnodes.h"
 #include "nodes/supportnodes.h"
 #include "parser/scansup.h"
 #include "utils/array.h"
@@ -36,14 +37,6 @@
 #include "utils/numeric.h"
 #include "utils/skipsupport.h"
 #include "utils/sortsupport.h"
-
-/*
- * gcc's -ffast-math switch breaks routines that expect exact results from
- * expressions like timeval / SECS_PER_HOUR, where timeval is double.
- */
-#ifdef __FAST_MATH__
-#error -ffast-math is known to break this code
-#endif
 
 
 /* common code for timetypmodin and timetztypmodin */
@@ -357,7 +350,7 @@ GetSQLCurrentTime(int32 typmod)
 
 	GetCurrentTimeUsec(tm, &fsec, &tz);
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 	tm2timetz(tm, fsec, tz, result);
 	AdjustTimeForTypmod(&(result->time), typmod);
 	return result;
@@ -615,23 +608,20 @@ date_mii(PG_FUNCTION_ARGS)
 /*
  * Promote date to timestamp.
  *
- * On successful conversion, *overflow is set to zero if it's not NULL.
+ * If the date falls out of the valid range for the timestamp type, error
+ * handling proceeds based on escontext.
  *
- * If the date is finite but out of the valid range for timestamp, then:
- * if overflow is NULL, we throw an out-of-range error.
- * if overflow is not NULL, we store +1 or -1 there to indicate the sign
- * of the overflow, and return the appropriate timestamp infinity.
+ * If escontext is NULL, we throw an out-of-range error (hard error).
+ * If escontext is not NULL, we return NOBEGIN or NOEND for lower bound or
+ * upper bound overflow, respectively, and record a soft error.
  *
- * Note: *overflow = -1 is actually not possible currently, since both
- * datatypes have the same lower bound, Julian day zero.
+ * Note: Lower bound overflow is currently not possible, as both date and
+ * timestamp datatypes share the same lower boundary: Julian day zero.
  */
 Timestamp
-date2timestamp_opt_overflow(DateADT dateVal, int *overflow)
+date2timestamp_safe(DateADT dateVal, Node *escontext)
 {
 	Timestamp	result;
-
-	if (overflow)
-		*overflow = 0;
 
 	if (DATE_IS_NOBEGIN(dateVal))
 		TIMESTAMP_NOBEGIN(result);
@@ -645,18 +635,10 @@ date2timestamp_opt_overflow(DateADT dateVal, int *overflow)
 		 */
 		if (dateVal >= (TIMESTAMP_END_JULIAN - POSTGRES_EPOCH_JDATE))
 		{
-			if (overflow)
-			{
-				*overflow = 1;
-				TIMESTAMP_NOEND(result);
-				return result;
-			}
-			else
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
-						 errmsg("date out of range for timestamp")));
-			}
+			TIMESTAMP_NOEND(result);
+			ereturn(escontext, result,
+					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+					 errmsg("date out of range for timestamp")));
 		}
 
 		/* date is days since 2000, timestamp is microseconds since same... */
@@ -672,29 +654,26 @@ date2timestamp_opt_overflow(DateADT dateVal, int *overflow)
 static TimestampTz
 date2timestamp(DateADT dateVal)
 {
-	return date2timestamp_opt_overflow(dateVal, NULL);
+	return date2timestamp_safe(dateVal, NULL);
 }
 
 /*
  * Promote date to timestamp with time zone.
  *
- * On successful conversion, *overflow is set to zero if it's not NULL.
+ * If the date falls out of the valid range for the timestamp type, error
+ * handling proceeds based on escontext.
  *
- * If the date is finite but out of the valid range for timestamptz, then:
- * if overflow is NULL, we throw an out-of-range error.
- * if overflow is not NULL, we store +1 or -1 there to indicate the sign
- * of the overflow, and return the appropriate timestamptz infinity.
+ * If escontext is NULL, we throw an out-of-range error (hard error).
+ * If escontext is not NULL, we return NOBEGIN or NOEND for lower bound or
+ * upper bound overflow, respectively, and record a soft error.
  */
 TimestampTz
-date2timestamptz_opt_overflow(DateADT dateVal, int *overflow)
+date2timestamptz_safe(DateADT dateVal, Node *escontext)
 {
 	TimestampTz result;
 	struct pg_tm tt,
 			   *tm = &tt;
 	int			tz;
-
-	if (overflow)
-		*overflow = 0;
 
 	if (DATE_IS_NOBEGIN(dateVal))
 		TIMESTAMP_NOBEGIN(result);
@@ -708,18 +687,10 @@ date2timestamptz_opt_overflow(DateADT dateVal, int *overflow)
 		 */
 		if (dateVal >= (TIMESTAMP_END_JULIAN - POSTGRES_EPOCH_JDATE))
 		{
-			if (overflow)
-			{
-				*overflow = 1;
-				TIMESTAMP_NOEND(result);
-				return result;
-			}
-			else
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
-						 errmsg("date out of range for timestamp")));
-			}
+			TIMESTAMP_NOEND(result);
+			ereturn(escontext, result,
+					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+					 errmsg("date out of range for timestamp")));
 		}
 
 		j2date(dateVal + POSTGRES_EPOCH_JDATE,
@@ -737,38 +708,18 @@ date2timestamptz_opt_overflow(DateADT dateVal, int *overflow)
 		 */
 		if (!IS_VALID_TIMESTAMP(result))
 		{
-			if (overflow)
-			{
-				if (result < MIN_TIMESTAMP)
-				{
-					*overflow = -1;
-					TIMESTAMP_NOBEGIN(result);
-				}
-				else
-				{
-					*overflow = 1;
-					TIMESTAMP_NOEND(result);
-				}
-			}
+			if (result < MIN_TIMESTAMP)
+				TIMESTAMP_NOBEGIN(result);
 			else
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
-						 errmsg("date out of range for timestamp")));
-			}
+				TIMESTAMP_NOEND(result);
+
+			ereturn(escontext, result,
+					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+					 errmsg("date out of range for timestamp")));
 		}
 	}
 
 	return result;
-}
-
-/*
- * Promote date to timestamptz, throwing error for overflow.
- */
-static TimestampTz
-date2timestamptz(DateADT dateVal)
-{
-	return date2timestamptz_opt_overflow(dateVal, NULL);
 }
 
 /*
@@ -808,15 +759,16 @@ int32
 date_cmp_timestamp_internal(DateADT dateVal, Timestamp dt2)
 {
 	Timestamp	dt1;
-	int			overflow;
+	ErrorSaveContext escontext = {T_ErrorSaveContext};
 
-	dt1 = date2timestamp_opt_overflow(dateVal, &overflow);
-	if (overflow > 0)
+	dt1 = date2timestamp_safe(dateVal, (Node *) &escontext);
+	if (escontext.error_occurred)
 	{
+		Assert(TIMESTAMP_IS_NOEND(dt1));	/* NOBEGIN case cannot occur */
+
 		/* dt1 is larger than any finite timestamp, but less than infinity */
 		return TIMESTAMP_IS_NOEND(dt2) ? -1 : +1;
 	}
-	Assert(overflow == 0);		/* -1 case cannot occur */
 
 	return timestamp_cmp_internal(dt1, dt2);
 }
@@ -888,18 +840,22 @@ int32
 date_cmp_timestamptz_internal(DateADT dateVal, TimestampTz dt2)
 {
 	TimestampTz dt1;
-	int			overflow;
+	ErrorSaveContext escontext = {T_ErrorSaveContext};
 
-	dt1 = date2timestamptz_opt_overflow(dateVal, &overflow);
-	if (overflow > 0)
+	dt1 = date2timestamptz_safe(dateVal, (Node *) &escontext);
+
+	if (escontext.error_occurred)
 	{
-		/* dt1 is larger than any finite timestamp, but less than infinity */
-		return TIMESTAMP_IS_NOEND(dt2) ? -1 : +1;
-	}
-	if (overflow < 0)
-	{
-		/* dt1 is less than any finite timestamp, but more than -infinity */
-		return TIMESTAMP_IS_NOBEGIN(dt2) ? +1 : -1;
+		if (TIMESTAMP_IS_NOEND(dt1))
+		{
+			/* dt1 is larger than any finite timestamp, but less than infinity */
+			return TIMESTAMP_IS_NOEND(dt2) ? -1 : +1;
+		}
+		if (TIMESTAMP_IS_NOBEGIN(dt1))
+		{
+			/* dt1 is less than any finite timestamp, but more than -infinity */
+			return TIMESTAMP_IS_NOBEGIN(dt2) ? +1 : -1;
+		}
 	}
 
 	return timestamptz_cmp_internal(dt1, dt2);
@@ -1350,7 +1306,9 @@ date_timestamp(PG_FUNCTION_ARGS)
 	DateADT		dateVal = PG_GETARG_DATEADT(0);
 	Timestamp	result;
 
-	result = date2timestamp(dateVal);
+	result = date2timestamp_safe(dateVal, fcinfo->context);
+	if (SOFT_ERROR_OCCURRED(fcinfo->context))
+		PG_RETURN_NULL();
 
 	PG_RETURN_TIMESTAMP(result);
 }
@@ -1363,6 +1321,31 @@ timestamp_date(PG_FUNCTION_ARGS)
 {
 	Timestamp	timestamp = PG_GETARG_TIMESTAMP(0);
 	DateADT		result;
+
+	result = timestamp2date_safe(timestamp, fcinfo->context);
+	if (SOFT_ERROR_OCCURRED(fcinfo->context))
+		PG_RETURN_NULL();
+
+	PG_RETURN_DATEADT(result);
+}
+
+/*
+ * Convert timestamp to date.
+ *
+ * If the timestamp falls out of the valid range for the date type, error
+ * handling proceeds based on escontext.
+ *
+ * If escontext is NULL, we throw an out-of-range error (hard error).
+ * If escontext is not NULL, we return NOBEGIN or NOEND for lower bound or
+ * upper bound overflow, respectively, and record a soft error.
+ *
+ * Note: given the ranges of the types, overflow is only possible at
+ * the lower bound of the range, but we don't assume that in this code.
+ */
+DateADT
+timestamp2date_safe(Timestamp timestamp, Node *escontext)
+{
+	DateADT		result;
 	struct pg_tm tt,
 			   *tm = &tt;
 	fsec_t		fsec;
@@ -1374,14 +1357,21 @@ timestamp_date(PG_FUNCTION_ARGS)
 	else
 	{
 		if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) != 0)
-			ereport(ERROR,
+		{
+			if (timestamp < 0)
+				DATE_NOBEGIN(result);
+			else
+				DATE_NOEND(result); /* not actually reachable */
+
+			ereturn(escontext, result,
 					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 					 errmsg("timestamp out of range")));
+		}
 
 		result = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday) - POSTGRES_EPOCH_JDATE;
 	}
 
-	PG_RETURN_DATEADT(result);
+	return result;
 }
 
 
@@ -1394,7 +1384,9 @@ date_timestamptz(PG_FUNCTION_ARGS)
 	DateADT		dateVal = PG_GETARG_DATEADT(0);
 	TimestampTz result;
 
-	result = date2timestamptz(dateVal);
+	result = date2timestamptz_safe(dateVal, fcinfo->context);
+	if (SOFT_ERROR_OCCURRED(fcinfo->context))
+		PG_RETURN_NULL();
 
 	PG_RETURN_TIMESTAMP(result);
 }
@@ -1408,6 +1400,31 @@ timestamptz_date(PG_FUNCTION_ARGS)
 {
 	TimestampTz timestamp = PG_GETARG_TIMESTAMP(0);
 	DateADT		result;
+
+	result = timestamptz2date_safe(timestamp, fcinfo->context);
+	if (SOFT_ERROR_OCCURRED(fcinfo->context))
+		PG_RETURN_NULL();
+
+	PG_RETURN_DATEADT(result);
+}
+
+/*
+ * Convert timestamptz to date.
+ *
+ * If the timestamp falls out of the valid range for the date type, error
+ * handling proceeds based on escontext.
+ *
+ * If escontext is NULL, we throw an out-of-range error (hard error).
+ * If escontext is not NULL, we return NOBEGIN or NOEND for lower bound or
+ * upper bound overflow, respectively, and record a soft error.
+ *
+ * Note: given the ranges of the types, overflow is only possible at
+ * the lower bound of the range, but we don't assume that in this code.
+ */
+DateADT
+timestamptz2date_safe(TimestampTz timestamp, Node *escontext)
+{
+	DateADT		result;
 	struct pg_tm tt,
 			   *tm = &tt;
 	fsec_t		fsec;
@@ -1420,14 +1437,21 @@ timestamptz_date(PG_FUNCTION_ARGS)
 	else
 	{
 		if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
-			ereport(ERROR,
+		{
+			if (timestamp < 0)
+				DATE_NOBEGIN(result);
+			else
+				DATE_NOEND(result); /* not actually reachable */
+
+			ereturn(escontext, result,
 					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 					 errmsg("timestamp out of range")));
+		}
 
 		result = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday) - POSTGRES_EPOCH_JDATE;
 	}
 
-	PG_RETURN_DATEADT(result);
+	return result;
 }
 
 
@@ -1979,7 +2003,7 @@ timestamp_time(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) != 0)
-		ereport(ERROR,
+		ereturn(fcinfo->context, (Datum) 0,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("timestamp out of range")));
 
@@ -2010,7 +2034,7 @@ timestamptz_time(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
-		ereport(ERROR,
+		ereturn(fcinfo->context, (Datum) 0,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("timestamp out of range")));
 
@@ -2056,7 +2080,7 @@ time_interval(PG_FUNCTION_ARGS)
 	TimeADT		time = PG_GETARG_TIMEADT(0);
 	Interval   *result;
 
-	result = (Interval *) palloc(sizeof(Interval));
+	result = palloc_object(Interval);
 
 	result->time = time;
 	result->day = 0;
@@ -2080,7 +2104,7 @@ interval_time(PG_FUNCTION_ARGS)
 	TimeADT		result;
 
 	if (INTERVAL_NOT_FINITE(span))
-		ereport(ERROR,
+		ereturn(fcinfo->context, (Datum) 0,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("cannot convert infinite interval to time")));
 
@@ -2101,7 +2125,7 @@ time_mi_time(PG_FUNCTION_ARGS)
 	TimeADT		time2 = PG_GETARG_TIMEADT(1);
 	Interval   *result;
 
-	result = (Interval *) palloc(sizeof(Interval));
+	result = palloc_object(Interval);
 
 	result->month = 0;
 	result->day = 0;
@@ -2368,7 +2392,7 @@ timetz_in(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 	}
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 	tm2timetz(tm, fsec, tz, result);
 	AdjustTimeForTypmod(&(result->time), typmod);
 
@@ -2407,7 +2431,7 @@ timetz_recv(PG_FUNCTION_ARGS)
 	int32		typmod = PG_GETARG_INT32(2);
 	TimeTzADT  *result;
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = pq_getmsgint64(buf);
 
@@ -2493,7 +2517,7 @@ timetz_scale(PG_FUNCTION_ARGS)
 	int32		typmod = PG_GETARG_INT32(1);
 	TimeTzADT  *result;
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = time->time;
 	result->zone = time->zone;
@@ -2669,7 +2693,7 @@ timetz_pl_interval(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("cannot add infinite interval to time")));
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = time->time + span->time;
 	result->time -= result->time / USECS_PER_DAY * USECS_PER_DAY;
@@ -2696,7 +2720,7 @@ timetz_mi_interval(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("cannot subtract infinite interval from time")));
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = time->time - span->time;
 	result->time -= result->time / USECS_PER_DAY * USECS_PER_DAY;
@@ -2903,7 +2927,7 @@ time_timetz(PG_FUNCTION_ARGS)
 	time2tm(time, tm, &fsec);
 	tz = DetermineTimeZoneOffset(tm, session_timezone);
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = time;
 	result->zone = tz;
@@ -2929,11 +2953,11 @@ timestamptz_timetz(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
-		ereport(ERROR,
+		ereturn(fcinfo->context, (Datum) 0,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("timestamp out of range")));
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	tm2timetz(tm, fsec, tz, result);
 
@@ -3166,7 +3190,7 @@ timetz_zone(PG_FUNCTION_ARGS)
 					 errmsg("timestamp out of range")));
 	}
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = t->time + (t->zone - tz) * USECS_PER_SEC;
 	/* C99 modulo has the wrong sign convention for negative input */
@@ -3207,7 +3231,7 @@ timetz_izone(PG_FUNCTION_ARGS)
 
 	tz = -(zone->time / USECS_PER_SEC);
 
-	result = (TimeTzADT *) palloc(sizeof(TimeTzADT));
+	result = palloc_object(TimeTzADT);
 
 	result->time = time->time + (time->zone - tz) * USECS_PER_SEC;
 	/* C99 modulo has the wrong sign convention for negative input */

@@ -249,18 +249,18 @@ static struct cvec *getcvec(struct vars *v, int nchrs, int nranges);
 static void freecvec(struct cvec *cv);
 
 /* === regc_pg_locale.c === */
-static int	pg_wc_isdigit(pg_wchar c);
-static int	pg_wc_isalpha(pg_wchar c);
-static int	pg_wc_isalnum(pg_wchar c);
-static int	pg_wc_isword(pg_wchar c);
-static int	pg_wc_isupper(pg_wchar c);
-static int	pg_wc_islower(pg_wchar c);
-static int	pg_wc_isgraph(pg_wchar c);
-static int	pg_wc_isprint(pg_wchar c);
-static int	pg_wc_ispunct(pg_wchar c);
-static int	pg_wc_isspace(pg_wchar c);
-static pg_wchar pg_wc_toupper(pg_wchar c);
-static pg_wchar pg_wc_tolower(pg_wchar c);
+static int	regc_wc_isdigit(pg_wchar c);
+static int	regc_wc_isalpha(pg_wchar c);
+static int	regc_wc_isalnum(pg_wchar c);
+static int	regc_wc_isword(pg_wchar c);
+static int	regc_wc_isupper(pg_wchar c);
+static int	regc_wc_islower(pg_wchar c);
+static int	regc_wc_isgraph(pg_wchar c);
+static int	regc_wc_isprint(pg_wchar c);
+static int	regc_wc_ispunct(pg_wchar c);
+static int	regc_wc_isspace(pg_wchar c);
+static pg_wchar regc_wc_toupper(pg_wchar c);
+static pg_wchar regc_wc_tolower(pg_wchar c);
 
 /* === regc_locale.c === */
 static chr	element(struct vars *v, const chr *startp, const chr *endp);
@@ -561,6 +561,7 @@ moresubs(struct vars *v,
 	assert(wanted > 0 && (size_t) wanted >= v->nsubs);
 	n = (size_t) wanted * 3 / 2 + 1;
 
+	/* n is bounded by the number of states, so no chance of overflow here */
 	if (v->subs == v->sub10)
 	{
 		p = (struct subre **) MALLOC(n * sizeof(struct subre *));
@@ -975,7 +976,7 @@ parseqatom(struct vars *v,
 			/* legal in EREs due to specification botch */
 			NOTE(REG_UPBOTCH);
 			/* fall through into case PLAIN */
-			/* FALLTHROUGH */
+			pg_fallthrough;
 		case PLAIN:
 			onechr(v, v->nextvalue, lp, rp);
 			okcolors(v->nfa, v->cm);
@@ -2405,8 +2406,8 @@ newlacon(struct vars *v,
 	else
 	{
 		n = v->nlacons;
-		newlacons = (struct subre *) REALLOC(v->lacons,
-											 (n + 1) * sizeof(struct subre));
+		/* better use REALLOC_ARRAY here, as struct subre is big */
+		newlacons = REALLOC_ARRAY(v->lacons, struct subre, n + 1);
 	}
 	if (newlacons == NULL)
 	{

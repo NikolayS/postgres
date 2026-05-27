@@ -4,7 +4,7 @@
  *	  Support for finding the values associated with Param nodes.
  *
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -166,13 +166,12 @@ paramlist_param_ref(ParseState *pstate, ParamRef *pref)
 Size
 EstimateParamListSpace(ParamListInfo paramLI)
 {
-	int			i;
 	Size		sz = sizeof(int);
 
 	if (paramLI == NULL || paramLI->numParams <= 0)
 		return sz;
 
-	for (i = 0; i < paramLI->numParams; i++)
+	for (int i = 0; i < paramLI->numParams; i++)
 	{
 		ParamExternData *prm;
 		ParamExternData prmdata;
@@ -229,7 +228,6 @@ void
 SerializeParamList(ParamListInfo paramLI, char **start_address)
 {
 	int			nparams;
-	int			i;
 
 	/* Write number of parameters. */
 	if (paramLI == NULL || paramLI->numParams <= 0)
@@ -240,7 +238,7 @@ SerializeParamList(ParamListInfo paramLI, char **start_address)
 	*start_address += sizeof(int);
 
 	/* Write each parameter in turn. */
-	for (i = 0; i < nparams; i++)
+	for (int i = 0; i < nparams; i++)
 	{
 		ParamExternData *prm;
 		ParamExternData prmdata;

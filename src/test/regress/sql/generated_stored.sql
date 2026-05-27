@@ -217,6 +217,10 @@ COPY gtest1 FROM stdin;
 
 COPY gtest1 (a, b) FROM stdin;
 
+COPY gtest1 FROM stdin WHERE b <> 10;
+
+COPY gtest1 FROM stdin WHERE gtest1 IS NULL;
+
 SELECT * FROM gtest1 ORDER BY a;
 
 TRUNCATE gtest3;
@@ -234,6 +238,9 @@ COPY gtest3 FROM stdin;
 COPY gtest3 (a, b) FROM stdin;
 
 SELECT * FROM gtest3 ORDER BY a;
+
+-- COPY JSON should exclude generated columns, same as text/CSV
+COPY gtest1 TO stdout WITH (FORMAT json);
 
 -- null values
 CREATE TABLE gtest2 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (NULL) STORED);
@@ -340,12 +347,46 @@ CREATE TABLE gtest21a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (nullif(a, 0
 INSERT INTO gtest21a (a) VALUES (1);  -- ok
 INSERT INTO gtest21a (a) VALUES (0);  -- violates constraint
 
-CREATE TABLE gtest21b (a int PRIMARY KEY, b int GENERATED ALWAYS AS (nullif(a, 0)) STORED);
+-- also check with table constraint syntax
+CREATE TABLE gtest21ax (a int PRIMARY KEY, b int GENERATED ALWAYS AS (nullif(a, 0)) STORED, CONSTRAINT cc NOT NULL b);
+INSERT INTO gtest21ax (a) VALUES (0);  -- violates constraint
+INSERT INTO gtest21ax (a) VALUES (1);  --ok
+-- SET EXPRESSION supports not null constraint
+ALTER TABLE gtest21ax ALTER COLUMN b SET EXPRESSION AS (nullif(a, 1)); --error
+DROP TABLE gtest21ax;
+
+CREATE TABLE gtest21ax (a int PRIMARY KEY, b int GENERATED ALWAYS AS (nullif(a, 0)) STORED);
+ALTER TABLE gtest21ax ADD CONSTRAINT cc NOT NULL b;
+INSERT INTO gtest21ax (a) VALUES (0);  -- violates constraint
+DROP TABLE gtest21ax;
+
+CREATE TABLE gtest21b (a int, b int GENERATED ALWAYS AS (nullif(a, 0)) STORED);
 ALTER TABLE gtest21b ALTER COLUMN b SET NOT NULL;
 INSERT INTO gtest21b (a) VALUES (1);  -- ok
-INSERT INTO gtest21b (a) VALUES (0);  -- violates constraint
+INSERT INTO gtest21b (a) VALUES (2), (0);  -- violates constraint
+INSERT INTO gtest21b (a) VALUES (NULL);  -- error
 ALTER TABLE gtest21b ALTER COLUMN b DROP NOT NULL;
 INSERT INTO gtest21b (a) VALUES (0);  -- ok now
+
+-- not-null constraint with partitioned table
+CREATE TABLE gtestnn_parent (
+    f1 int,
+    f2 bigint,
+    f3 bigint GENERATED ALWAYS AS (nullif(f1, 1) + nullif(f2, 10)) STORED NOT NULL
+) PARTITION BY RANGE (f1);
+CREATE TABLE gtestnn_child PARTITION OF gtestnn_parent FOR VALUES FROM (1) TO (5);
+CREATE TABLE gtestnn_childdef PARTITION OF gtestnn_parent default;
+-- check the error messages
+INSERT INTO gtestnn_parent VALUES (2, 2, default), (3, 5, default), (14, 12, default);  -- ok
+INSERT INTO gtestnn_parent VALUES (1, 2, default);  -- error
+INSERT INTO gtestnn_parent VALUES (2, 10, default);  -- error
+ALTER TABLE gtestnn_parent ALTER COLUMN f3 SET EXPRESSION AS (nullif(f1, 2) + nullif(f2, 11));  -- error
+INSERT INTO gtestnn_parent VALUES (10, 11, default);  -- ok
+SELECT * FROM gtestnn_parent ORDER BY f1, f2, f3;
+-- test ALTER TABLE ADD COLUMN
+ALTER TABLE gtestnn_parent ADD COLUMN c int NOT NULL GENERATED ALWAYS AS (nullif(f1, 14) + nullif(f2, 10)) STORED;  -- error
+ALTER TABLE gtestnn_parent ADD COLUMN c int NOT NULL GENERATED ALWAYS AS (nullif(f1, 13) + nullif(f2, 5)) STORED;  -- error
+ALTER TABLE gtestnn_parent ADD COLUMN c int NOT NULL GENERATED ALWAYS AS (nullif(f1, 4) + nullif(f2, 6)) STORED;  -- ok
 
 -- index constraints
 CREATE TABLE gtest22a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a / 2) STORED UNIQUE);
@@ -418,6 +459,11 @@ CREATE TYPE gtestdomain1range AS range (subtype = gtestdomain1);
 CREATE TABLE gtest24r (a int PRIMARY KEY, b gtestdomain1range GENERATED ALWAYS AS (gtestdomain1range(a, a + 5)) STORED);
 INSERT INTO gtest24r (a) VALUES (4);  -- ok
 INSERT INTO gtest24r (a) VALUES (6);  -- error
+
+CREATE TABLE gtest24at (a int PRIMARY KEY);
+ALTER TABLE gtest24at ADD COLUMN b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED;  -- ok
+CREATE TABLE gtest24ata (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED);
+ALTER TABLE gtest24ata ALTER COLUMN b TYPE gtestdomain1;  -- ok
 
 CREATE DOMAIN gtestdomainnn AS int CHECK (VALUE IS NOT NULL);
 CREATE TABLE gtest24nn (a int, b gtestdomainnn GENERATED ALWAYS AS (a * 2) STORED);
@@ -500,7 +546,10 @@ SELECT tableoid::regclass, * FROM gtest_parent ORDER BY 1, 2, 3;
 
 -- generated columns in partition key (not allowed)
 CREATE TABLE gtest_part_key (f1 date NOT NULL, f2 bigint, f3 bigint GENERATED ALWAYS AS (f2 * 2) STORED) PARTITION BY RANGE (f3);
+CREATE TABLE gtest_part_key (f1 date NOT NULL, f2 bigint, f3 bigint GENERATED ALWAYS AS (f2 * 2) STORED) PARTITION BY RANGE ((f3));
 CREATE TABLE gtest_part_key (f1 date NOT NULL, f2 bigint, f3 bigint GENERATED ALWAYS AS (f2 * 2) STORED) PARTITION BY RANGE ((f3 * 3));
+CREATE TABLE gtest_part_key (f1 date NOT NULL, f2 bigint, f3 bigint GENERATED ALWAYS AS (f2 * 2) STORED) PARTITION BY RANGE ((gtest_part_key));
+CREATE TABLE gtest_part_key (f1 date NOT NULL, f2 bigint, f3 bigint GENERATED ALWAYS AS (f2 * 2) STORED) PARTITION BY RANGE ((gtest_part_key is not null));
 
 -- ALTER TABLE ... ADD COLUMN
 CREATE TABLE gtest25 (a int PRIMARY KEY);
@@ -530,6 +579,14 @@ ALTER TABLE gtest27 ALTER COLUMN x TYPE numeric;
 SELECT * FROM gtest27;
 ALTER TABLE gtest27 ALTER COLUMN x TYPE boolean USING x <> 0;  -- error
 ALTER TABLE gtest27 ALTER COLUMN x DROP DEFAULT;  -- error
+-- test not-null checking during table rewrite
+INSERT INTO gtest27 (a, b) VALUES (NULL, NULL);
+ALTER TABLE gtest27
+  DROP COLUMN x,
+  ALTER COLUMN a TYPE bigint,
+  ALTER COLUMN b TYPE bigint,
+  ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) STORED NOT NULL;  -- error
+DELETE FROM gtest27 WHERE a IS NULL AND b IS NULL;
 -- It's possible to alter the column types this way:
 ALTER TABLE gtest27
   DROP COLUMN x,
@@ -595,6 +652,19 @@ ALTER TABLE gtest30_1 ALTER COLUMN b DROP EXPRESSION;  -- error
 CREATE TABLE gtest31_1 (a int, b text GENERATED ALWAYS AS ('hello') STORED, c text);
 CREATE TABLE gtest31_2 (x int, y gtest31_1);
 ALTER TABLE gtest31_1 ALTER COLUMN b TYPE varchar;  -- fails
+
+-- bug #18970: these cases are unsupported, but make sure they fail cleanly
+ALTER TABLE gtest31_2 ADD CONSTRAINT cc CHECK ((y).b IS NOT NULL);
+ALTER TABLE gtest31_1 ALTER COLUMN b SET EXPRESSION AS ('hello1');
+ALTER TABLE gtest31_2 DROP CONSTRAINT cc;
+
+CREATE STATISTICS gtest31_2_stat ON ((y).b is not null) FROM gtest31_2;
+ALTER TABLE gtest31_1 ALTER COLUMN b SET EXPRESSION AS ('hello2');
+DROP STATISTICS gtest31_2_stat;
+
+CREATE INDEX gtest31_2_y_idx ON gtest31_2(((y).b));
+ALTER TABLE gtest31_1 ALTER COLUMN b SET EXPRESSION AS ('hello3');
+
 DROP TABLE gtest31_1, gtest31_2;
 
 -- Check it for a partitioned table, too
@@ -731,6 +801,29 @@ CREATE TABLE gtest28b (LIKE gtest28a INCLUDING GENERATED);
 
 \d gtest28*
 
+-- rule actions referring to generated columns:
+-- NEW.b in a rule action should reflect the generated column's new value
+CREATE TABLE gtest_rule (a int, b int GENERATED ALWAYS AS (a * 2) STORED);
+CREATE TABLE gtest_rule_log (op text, old_b int, new_b int);
+CREATE RULE gtest_rule_upd AS ON UPDATE TO gtest_rule
+  DO ALSO INSERT INTO gtest_rule_log VALUES ('UPD', OLD.b, NEW.b);
+CREATE RULE gtest_rule_ins AS ON INSERT TO gtest_rule
+  DO ALSO INSERT INTO gtest_rule_log VALUES ('INS', NULL, NEW.b);
+INSERT INTO gtest_rule (a) VALUES (1);
+UPDATE gtest_rule SET a = 10;
+UPDATE gtest_rule SET a = (SELECT max(b) FROM gtest_rule);
+SELECT * FROM gtest_rule_log;
+DROP RULE gtest_rule_upd ON gtest_rule;
+DROP RULE gtest_rule_ins ON gtest_rule;
+DROP TABLE gtest_rule_log;
+
+-- rule quals referring to generated columns:
+-- NEW.b in the rule qual should reflect the generated column's new value
+CREATE RULE gtest_rule_qual AS ON UPDATE TO gtest_rule WHERE NEW.b > 100
+  DO INSTEAD NOTHING;
+UPDATE gtest_rule SET a = 100;
+SELECT * FROM gtest_rule;
+DROP TABLE gtest_rule;
 
 -- sanity check of system catalog
 SELECT attrelid, attname, attgenerated FROM pg_attribute WHERE attgenerated NOT IN ('', 's', 'v');

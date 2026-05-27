@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 backend_sources += files(
   'nbtcompare.c',
@@ -6,6 +6,7 @@ backend_sources += files(
   'nbtinsert.c',
   'nbtpage.c',
   'nbtpreprocesskeys.c',
+  'nbtreadpage.c',
   'nbtree.c',
   'nbtsearch.c',
   'nbtsort.c',

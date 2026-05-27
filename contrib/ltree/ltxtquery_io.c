@@ -64,7 +64,7 @@ gettoken_query(QPRS_STATE *state, int32 *val, int32 *lenval, char **strval, uint
 
 	for (;;)
 	{
-		charlen = pg_mblen(state->buf);
+		charlen = pg_mblen_cstr(state->buf);
 
 		switch (state->state)
 		{
@@ -154,7 +154,7 @@ gettoken_query(QPRS_STATE *state, int32 *val, int32 *lenval, char **strval, uint
 static bool
 pushquery(QPRS_STATE *state, int32 type, int32 val, int32 distance, int32 lenval, uint16 flag)
 {
-	NODE	   *tmp = (NODE *) palloc(sizeof(NODE));
+	NODE	   *tmp = palloc_object(NODE);
 
 	tmp->type = type;
 	tmp->val = val;
@@ -277,7 +277,7 @@ makepol(QPRS_STATE *state)
 			case ERR:
 				if (SOFT_ERROR_OCCURRED(state->escontext))
 					return ERR;
-				/* fall through */
+				pg_fallthrough;
 			default:
 				ereturn(state->escontext, ERR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
@@ -294,33 +294,71 @@ makepol(QPRS_STATE *state)
 	return END;
 }
 
-static void
-findoprnd(ITEM *ptr, int32 *pos)
+/*
+ * Recursively fill the "left" fields of an ITEM array that represents
+ * a valid postfix tree.
+ *
+ *	state: only needed for error reporting
+ *	ptr: starting element of array
+ *	pos: in/out argument, the array index this call is responsible to fill
+ *
+ * At exit, *pos has been incremented to point after the sub-tree whose
+ * top is the entry-time value of *pos.
+ *
+ * Returns true if okay, false if error (the only possible error is
+ * overflow of a "left" field).
+ */
+static bool
+findoprnd(QPRS_STATE *state, ITEM *ptr, int32 *pos)
 {
+	int32		mypos;
+
 	/* since this function recurses, it could be driven to stack overflow. */
 	check_stack_depth();
 
-	if (ptr[*pos].type == VAL || ptr[*pos].type == VALTRUE)
+	/* get the position this call is supposed to update */
+	mypos = *pos;
+
+	/* in all cases, we should increment *pos to advance over this item */
+	(*pos)++;
+
+	if (ptr[mypos].type == VAL || ptr[mypos].type == VALTRUE)
 	{
-		ptr[*pos].left = 0;
-		(*pos)++;
+		/* base case: a VAL has no operand, so just set its left to zero */
+		ptr[mypos].left = 0;
 	}
-	else if (ptr[*pos].val == (int32) '!')
+	else if (ptr[mypos].val == (int32) '!')
 	{
-		ptr[*pos].left = 1;
-		(*pos)++;
-		findoprnd(ptr, pos);
+		/* unary operator, likewise easy: operand is just after it */
+		ptr[mypos].left = 1;
+		/* recurse to scan operand */
+		if (!findoprnd(state, ptr, pos))
+			return false;
 	}
 	else
 	{
-		ITEM	   *curitem = &ptr[*pos];
-		int32		tmp = *pos;
+		/* binary operator */
+		int32		delta;
 
-		(*pos)++;
-		findoprnd(ptr, pos);
-		curitem->left = *pos - tmp;
-		findoprnd(ptr, pos);
+		/* recurse to scan right operand */
+		if (!findoprnd(state, ptr, pos))
+			return false;
+		/* we must fill left with offset to left operand's top */
+		/* delta can't overflow, see LTXTQUERY_TOO_BIG ... */
+		delta = *pos - mypos;
+		/* ... but it might be too large to fit in the 16-bit left field */
+		Assert(delta > 0);
+		if (unlikely(delta > PG_INT16_MAX))
+			ereturn(state->escontext, false,
+					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+					 errmsg("ltxtquery is too large")));
+		ptr[mypos].left = (int16) delta;
+		/* recurse to scan left operand */
+		if (!findoprnd(state, ptr, pos))
+			return false;
 	}
+
+	return true;
 }
 
 
@@ -337,11 +375,6 @@ queryin(char *buf, struct Node *escontext)
 	ITEM	   *ptr;
 	NODE	   *tmp;
 	int32		pos = 0;
-
-#ifdef BS_DEBUG
-	char		pbuf[16384],
-			   *cur;
-#endif
 
 	/* init state */
 	state.buf = buf;
@@ -396,7 +429,10 @@ queryin(char *buf, struct Node *escontext)
 
 	/* set left operand's position for every operator */
 	pos = 0;
-	findoprnd(ptr, &pos);
+	if (!findoprnd(&state, ptr, &pos))
+		return NULL;
+	/* if successful, findoprnd should have scanned the whole array */
+	Assert(pos == state.num);
 
 	return query;
 }
@@ -543,7 +579,7 @@ infix(INFIX *in, bool first)
 		nrm.curpol = in->curpol;
 		nrm.op = in->op;
 		nrm.buflen = 16;
-		nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+		nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 
 		/* get right operand */
 		infix(&nrm, false);
@@ -582,7 +618,7 @@ ltxtq_out(PG_FUNCTION_ARGS)
 
 	nrm.curpol = GETQUERY(query);
 	nrm.buflen = 32;
-	nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+	nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 	*(nrm.cur) = '\0';
 	nrm.op = GETOPERAND(query);
 	infix(&nrm, true);
@@ -615,7 +651,7 @@ ltxtq_send(PG_FUNCTION_ARGS)
 
 	nrm.curpol = GETQUERY(query);
 	nrm.buflen = 32;
-	nrm.cur = nrm.buf = (char *) palloc(sizeof(char) * nrm.buflen);
+	nrm.cur = nrm.buf = palloc_array(char, nrm.buflen);
 	*(nrm.cur) = '\0';
 	nrm.op = GETOPERAND(query);
 	infix(&nrm, true);

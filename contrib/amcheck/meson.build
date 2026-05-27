@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, PostgreSQL Global Development Group
+# Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
 amcheck_sources = files(
   'verify_common.c',
@@ -49,6 +49,7 @@ tests += {
       't/003_cic_2pc.pl',
       't/004_verify_nbtree_unique.pl',
       't/005_pitr.pl',
+      't/006_verify_gin.pl',
     ],
   },
 }

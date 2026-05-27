@@ -6,7 +6,7 @@
  * the whole archive to a single file, and astreamer_extractor writes
  * each archive member to a separate file in a given directory.
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/fe_utils/astreamer_file.c
@@ -82,7 +82,7 @@ astreamer_plain_writer_new(char *pathname, FILE *file)
 {
 	astreamer_plain_writer *streamer;
 
-	streamer = palloc0(sizeof(astreamer_plain_writer));
+	streamer = palloc0_object(astreamer_plain_writer);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_plain_writer_ops;
 
@@ -189,7 +189,7 @@ astreamer_extractor_new(const char *basepath,
 {
 	astreamer_extractor *streamer;
 
-	streamer = palloc0(sizeof(astreamer_extractor));
+	streamer = palloc0_object(astreamer_extractor);
 	*((const astreamer_ops **) &streamer->base.bbs_ops) =
 		&astreamer_extractor_ops;
 	streamer->basepath = pstrdup(basepath);
@@ -218,6 +218,10 @@ astreamer_extractor_content(astreamer *streamer, astreamer_member *member,
 		case ASTREAMER_MEMBER_HEADER:
 			Assert(mystreamer->file == NULL);
 
+			if (!path_is_safe_for_extraction(member->pathname))
+				pg_fatal("tar member has unsafe path name: \"%s\"",
+						 member->pathname);
+
 			/* Prepend basepath. */
 			snprintf(mystreamer->filename, sizeof(mystreamer->filename),
 					 "%s/%s", mystreamer->basepath, member->pathname);
@@ -228,20 +232,28 @@ astreamer_extractor_content(astreamer *streamer, astreamer_member *member,
 				mystreamer->filename[fnamelen - 1] = '\0';
 
 			/* Dispatch based on file type. */
-			if (member->is_directory)
+			if (member->is_regular)
+				mystreamer->file =
+					create_file_for_extract(mystreamer->filename,
+											member->mode);
+			else if (member->is_directory)
 				extract_directory(mystreamer->filename, member->mode);
-			else if (member->is_link)
+			else if (member->is_symlink)
 			{
 				const char *linktarget = member->linktarget;
 
 				if (mystreamer->link_map)
 					linktarget = mystreamer->link_map(linktarget);
+
+				if (!is_absolute_path(linktarget) &&
+					!path_is_safe_for_extraction(member->linktarget))
+				{
+					pg_fatal("link target has unsafe path name: \"%s\"",
+							 member->linktarget);
+				}
+
 				extract_link(mystreamer->filename, linktarget);
 			}
-			else
-				mystreamer->file =
-					create_file_for_extract(mystreamer->filename,
-											member->mode);
 
 			/* Report output file change. */
 			if (mystreamer->report_output_file)
@@ -266,7 +278,9 @@ astreamer_extractor_content(astreamer *streamer, astreamer_member *member,
 		case ASTREAMER_MEMBER_TRAILER:
 			if (mystreamer->file == NULL)
 				break;
-			fclose(mystreamer->file);
+			if (fclose(mystreamer->file) != 0)
+				pg_fatal("could not close file \"%s\": %m",
+						 mystreamer->filename);
 			mystreamer->file = NULL;
 			break;
 

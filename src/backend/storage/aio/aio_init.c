@@ -3,7 +3,7 @@
  * aio_init.c
  *    AIO - Subsystem Initialization
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -23,28 +23,32 @@
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
+#include "storage/subsystems.h"
 #include "utils/guc.h"
 
 
+static void AioShmemRequest(void *arg);
+static void AioShmemInit(void *arg);
+static void AioShmemAttach(void *arg);
 
-static Size
-AioCtlShmemSize(void)
-{
-	Size		sz;
+const ShmemCallbacks AioShmemCallbacks = {
+	.request_fn = AioShmemRequest,
+	.init_fn = AioShmemInit,
+	.attach_fn = AioShmemAttach,
+};
 
-	/* pgaio_ctl itself */
-	sz = offsetof(PgAioCtl, io_handles);
-
-	return sz;
-}
+static PgAioBackend *AioBackendShmemPtr;
+static PgAioHandle *AioHandleShmemPtr;
+static struct iovec *AioHandleIOVShmemPtr;
+static uint64 *AioHandleDataShmemPtr;
 
 static uint32
 AioProcs(void)
 {
 	/*
 	 * While AIO workers don't need their own AIO context, we can't currently
-	 * guarantee nothing gets assigned to the a ProcNumber for an IO worker if
-	 * we just subtracted MAX_IO_WORKERS.
+	 * guarantee that nothing gets assigned to an IO worker's ProcNumber if we
+	 * just subtracted MAX_IO_WORKERS.
 	 */
 	return MaxBackends + NUM_AUXILIARY_PROCS;
 }
@@ -113,12 +117,15 @@ AioChooseMaxConcurrency(void)
 	return Min(max_proportional_pins, 64);
 }
 
-Size
-AioShmemSize(void)
+/*
+ * Register AIO subsystem's shared memory needs.
+ */
+static void
+AioShmemRequest(void *arg)
 {
-	Size		sz = 0;
-
 	/*
+	 * Resolve io_max_concurrency if not already done
+	 *
 	 * We prefer to report this value's source as PGC_S_DYNAMIC_DEFAULT.
 	 * However, if the DBA explicitly set io_max_concurrency = -1 in the
 	 * config file, then PGC_S_DYNAMIC_DEFAULT will fail to override that and
@@ -136,48 +143,52 @@ AioShmemSize(void)
 							PGC_S_OVERRIDE);
 	}
 
-	sz = add_size(sz, AioCtlShmemSize());
-	sz = add_size(sz, AioBackendShmemSize());
-	sz = add_size(sz, AioHandleShmemSize());
-	sz = add_size(sz, AioHandleIOVShmemSize());
-	sz = add_size(sz, AioHandleDataShmemSize());
+	ShmemRequestStruct(.name = "AioCtl",
+					   .size = sizeof(PgAioCtl),
+					   .ptr = (void **) &pgaio_ctl,
+		);
 
-	/* Reserve space for method specific resources. */
-	if (pgaio_method_ops->shmem_size)
-		sz = add_size(sz, pgaio_method_ops->shmem_size());
+	ShmemRequestStruct(.name = "AioBackend",
+					   .size = AioBackendShmemSize(),
+					   .ptr = (void **) &AioBackendShmemPtr,
+		);
 
-	return sz;
+	ShmemRequestStruct(.name = "AioHandle",
+					   .size = AioHandleShmemSize(),
+					   .ptr = (void **) &AioHandleShmemPtr,
+		);
+
+	ShmemRequestStruct(.name = "AioHandleIOV",
+					   .size = AioHandleIOVShmemSize(),
+					   .ptr = (void **) &AioHandleIOVShmemPtr,
+		);
+
+	ShmemRequestStruct(.name = "AioHandleData",
+					   .size = AioHandleDataShmemSize(),
+					   .ptr = (void **) &AioHandleDataShmemPtr,
+		);
+
+	if (pgaio_method_ops->shmem_callbacks.request_fn)
+		pgaio_method_ops->shmem_callbacks.request_fn(pgaio_method_ops->shmem_callbacks.opaque_arg);
 }
 
-void
-AioShmemInit(void)
+/*
+ * Initialize AIO shared memory during postmaster startup.
+ */
+static void
+AioShmemInit(void *arg)
 {
-	bool		found;
 	uint32		io_handle_off = 0;
 	uint32		iovec_off = 0;
 	uint32		per_backend_iovecs = io_max_concurrency * io_max_combine_limit;
 
-	pgaio_ctl = (PgAioCtl *)
-		ShmemInitStruct("AioCtl", AioCtlShmemSize(), &found);
-
-	if (found)
-		goto out;
-
-	memset(pgaio_ctl, 0, AioCtlShmemSize());
-
 	pgaio_ctl->io_handle_count = AioProcs() * io_max_concurrency;
 	pgaio_ctl->iovec_count = AioProcs() * per_backend_iovecs;
 
-	pgaio_ctl->backend_state = (PgAioBackend *)
-		ShmemInitStruct("AioBackend", AioBackendShmemSize(), &found);
-
-	pgaio_ctl->io_handles = (PgAioHandle *)
-		ShmemInitStruct("AioHandle", AioHandleShmemSize(), &found);
-
-	pgaio_ctl->iovecs = (struct iovec *)
-		ShmemInitStruct("AioHandleIOV", AioHandleIOVShmemSize(), &found);
-	pgaio_ctl->handle_data = (uint64 *)
-		ShmemInitStruct("AioHandleData", AioHandleDataShmemSize(), &found);
+	pgaio_ctl->backend_state = AioBackendShmemPtr;
+	pgaio_ctl->io_handles = AioHandleShmemPtr;
+	pgaio_ctl->iovecs = AioHandleIOVShmemPtr;
+	pgaio_ctl->handle_data = AioHandleDataShmemPtr;
 
 	for (int procno = 0; procno < AioProcs(); procno++)
 	{
@@ -212,10 +223,15 @@ AioShmemInit(void)
 		}
 	}
 
-out:
-	/* Initialize IO method specific resources. */
-	if (pgaio_method_ops->shmem_init)
-		pgaio_method_ops->shmem_init(!found);
+	if (pgaio_method_ops->shmem_callbacks.init_fn)
+		pgaio_method_ops->shmem_callbacks.init_fn(pgaio_method_ops->shmem_callbacks.opaque_arg);
+}
+
+static void
+AioShmemAttach(void *arg)
+{
+	if (pgaio_method_ops->shmem_callbacks.attach_fn)
+		pgaio_method_ops->shmem_callbacks.attach_fn(pgaio_method_ops->shmem_callbacks.opaque_arg);
 }
 
 void

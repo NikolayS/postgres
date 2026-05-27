@@ -3,7 +3,7 @@
  * tsrank.c
  *		rank tsvector by tsquery
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -160,7 +160,7 @@ SortAndUniqItems(TSQuery q, int *size)
 			  **ptr,
 			  **prevptr;
 
-	ptr = res = (QueryOperand **) palloc(sizeof(QueryOperand *) * *size);
+	ptr = res = palloc_array(QueryOperand *, *size);
 
 	/* Collect all operands from the tree to res */
 	while ((*size)--)
@@ -225,7 +225,7 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 		pfree(item);
 		return calc_rank_or(w, t, q);
 	}
-	pos = (WordEntryPosVector **) palloc0(sizeof(WordEntryPosVector *) * q->size);
+	pos = palloc0_array(WordEntryPosVector *, q->size);
 
 	/* A dummy WordEntryPos array to use when haspos is false */
 	posnull.npos = 1;
@@ -313,6 +313,7 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 
 		while (entry - firstentry < nitem)
 		{
+			/* Identify the weight data to use */
 			if (entry->haspos)
 			{
 				dimt = POSDATALEN(t, entry);
@@ -324,6 +325,33 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 				post = posnull.pos;
 			}
 
+			/*
+			 * Compute the score for this term, then add it to "res".
+			 *
+			 * The ideal score for a term is the weighted harmonic sum:
+			 *
+			 * resj = sum(wi / i^2, i = 1..noccurrences)
+			 *
+			 * where wi is the weight of the i-th occurrence and weights are
+			 * sorted in descending order so that the highest-weight
+			 * occurrence gets the smallest divisor (i=1) and thus contributes
+			 * the most.
+			 *
+			 * This result should be divided by pi^2/6 ~= 1.64493406685, which
+			 * is the limit of sum(1/i^2, i=1..inf). This normalizes the score
+			 * to the [0, 1] range.
+			 *
+			 * As an approximation for efficiency, we skip doing a sort and
+			 * instead just promote the single highest-weight occurrence to
+			 * position i=1. This is done by taking the raw (unsorted) sum
+			 * resj, subtracting the maximum weight's actual contribution
+			 * wjm/(jm+1)^2, and adding back its corrected contribution
+			 * wjm/1^2 = wjm.
+			 *
+			 * The remaining occurrences are left in their original order.
+			 */
+
+			/* calculate harmonic sum without re-ordering */
 			resj = 0.0;
 			wjm = -1.0;
 			jm = 0;
@@ -336,14 +364,9 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 					jm = j;
 				}
 			}
-/*
-			limit (sum(1/i^2),i=1,inf) = pi^2/6
-			resj = sum(wi/i^2),i=1,noccurrence,
-			wi - should be sorted desc,
-			don't sort for now, just choose maximum weight. This should be corrected
-			Oleg Bartunov
-*/
-			res = res + (wjm + resj - wjm / ((jm + 1) * (jm + 1))) / 1.64493406685;
+
+			/* apply correction as explained above, then add to res */
+			res = res + (resj - wjm / ((jm + 1) * (jm + 1)) + wjm) / 1.64493406685;
 
 			entry++;
 		}
@@ -743,7 +766,7 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 				cur = 0;
 	DocRepresentation *doc;
 
-	doc = (DocRepresentation *) palloc(sizeof(DocRepresentation) * len);
+	doc = palloc_array(DocRepresentation, len);
 
 	/*
 	 * Iterate through query to make DocRepresentation for words and it's
@@ -815,7 +838,7 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 		 * Join QueryItem per WordEntry and its position
 		 */
 		storage.pos = doc->pos;
-		storage.data.query.items = palloc(sizeof(QueryItem *) * qr->query->size);
+		storage.data.query.items = palloc_array(QueryItem *, qr->query->size);
 		storage.data.query.items[0] = doc->data.map.item;
 		storage.data.query.nitem = 1;
 
@@ -832,7 +855,7 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 				*wptr = storage;
 				wptr++;
 				storage.pos = rptr->pos;
-				storage.data.query.items = palloc(sizeof(QueryItem *) * qr->query->size);
+				storage.data.query.items = palloc_array(QueryItem *, qr->query->size);
 				storage.data.query.items[0] = rptr->data.map.item;
 				storage.data.query.nitem = 1;
 			}
@@ -878,8 +901,7 @@ calc_rank_cd(const float4 *arrdata, TSVector txt, TSQuery query, int method)
 	}
 
 	qr.query = query;
-	qr.operandData = (QueryRepresentationOperand *)
-		palloc0(sizeof(QueryRepresentationOperand) * query->size);
+	qr.operandData = palloc0_array(QueryRepresentationOperand, query->size);
 
 	doc = get_docrep(txt, &qr, &doclen);
 	if (!doc)

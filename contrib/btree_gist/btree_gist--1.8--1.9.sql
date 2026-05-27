@@ -1,197 +1,40 @@
-/* contrib/btree_gist/btree_gist--1.7--1.8.sql */
+/* contrib/btree_gist/btree_gist--1.8--1.9.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "ALTER EXTENSION btree_gist UPDATE TO '1.9'" to load this file. \quit
 
-CREATE FUNCTION gbt_bit_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+--
+-- Mark gist_inet_ops and gist_cidr_ops opclasses as non-default.
+-- This is the first step on the way to eventually removing them.
+--
+-- There's no SQL command for this, so fake it with a manual update on
+-- pg_opclass.
+--
+DO LANGUAGE plpgsql
+$$
+DECLARE
+  my_schema pg_catalog.text := pg_catalog.quote_ident(pg_catalog.current_schema());
+  old_path pg_catalog.text := pg_catalog.current_setting('search_path');
+BEGIN
+-- for safety, transiently set search_path to just pg_catalog+pg_temp
+PERFORM pg_catalog.set_config('search_path', 'pg_catalog, pg_temp', true);
 
-CREATE FUNCTION gbt_varbit_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+UPDATE pg_catalog.pg_opclass
+SET opcdefault = false
+WHERE opcmethod = (SELECT oid FROM pg_catalog.pg_am WHERE amname = 'gist') AND
+      opcname IN ('gist_inet_ops', 'gist_cidr_ops') AND
+      opcnamespace = my_schema::pg_catalog.regnamespace;
 
-CREATE FUNCTION gbt_bool_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+PERFORM pg_catalog.set_config('search_path', old_path, true);
+END
+$$;
 
-CREATE FUNCTION gbt_bytea_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
 
-CREATE FUNCTION gbt_cash_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_date_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_enum_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_float4_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_float8_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_inet_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_int2_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_int4_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_int8_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_intv_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_macaddr_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_macad8_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_numeric_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_oid_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_text_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_bpchar_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_time_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_ts_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-CREATE FUNCTION gbt_uuid_sortsupport(internal)
-RETURNS void
-AS 'MODULE_PATHNAME'
-LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
-
-ALTER OPERATOR FAMILY gist_bit_ops USING gist ADD
-	FUNCTION	11  (bit, bit) gbt_bit_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_vbit_ops USING gist ADD
-	FUNCTION	11  (varbit, varbit) gbt_varbit_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_bool_ops USING gist ADD
-	FUNCTION	11  (bool, bool) gbt_bool_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_bytea_ops USING gist ADD
-	FUNCTION	11  (bytea, bytea) gbt_bytea_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_cash_ops USING gist ADD
-	FUNCTION	11  (money, money) gbt_cash_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_date_ops USING gist ADD
-	FUNCTION	11  (date, date) gbt_date_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_enum_ops USING gist ADD
-	FUNCTION	11  (anyenum, anyenum) gbt_enum_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_float4_ops USING gist ADD
-	FUNCTION	11  (float4, float4) gbt_float4_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_float8_ops USING gist ADD
-	FUNCTION	11  (float8, float8) gbt_float8_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_inet_ops USING gist ADD
-	FUNCTION	11  (inet, inet) gbt_inet_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_cidr_ops USING gist ADD
-	FUNCTION	11  (cidr, cidr) gbt_inet_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_int2_ops USING gist ADD
-	FUNCTION	11  (int2, int2) gbt_int2_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_int4_ops USING gist ADD
-	FUNCTION	11  (int4, int4) gbt_int4_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_int8_ops USING gist ADD
-	FUNCTION	11  (int8, int8) gbt_int8_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_interval_ops USING gist ADD
-	FUNCTION	11  (interval, interval) gbt_intv_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_macaddr_ops USING gist ADD
-	FUNCTION	11  (macaddr, macaddr) gbt_macaddr_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_macaddr8_ops USING gist ADD
-	FUNCTION	11  (macaddr8, macaddr8) gbt_macad8_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_numeric_ops USING gist ADD
-	FUNCTION	11  (numeric, numeric) gbt_numeric_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_oid_ops USING gist ADD
-	FUNCTION	11  (oid, oid) gbt_oid_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_text_ops USING gist ADD
-	FUNCTION	11  (text, text) gbt_text_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_bpchar_ops USING gist ADD
-	FUNCTION	11  (bpchar, bpchar) gbt_bpchar_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_time_ops USING gist ADD
-	FUNCTION	11  (time, time) gbt_time_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_timetz_ops USING gist ADD
-	FUNCTION	11  (timetz, timetz) gbt_time_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_timestamp_ops USING gist ADD
-	FUNCTION	11  (timestamp, timestamp) gbt_ts_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_timestamptz_ops USING gist ADD
-	FUNCTION	11  (timestamptz, timestamptz) gbt_ts_sortsupport (internal) ;
-
-ALTER OPERATOR FAMILY gist_uuid_ops USING gist ADD
-	FUNCTION	11  (uuid, uuid) gbt_uuid_sortsupport (internal) ;
+-- Fix parallel-safety markings overlooked in btree_gist--1.6--1.7.sql.
+ALTER FUNCTION gbt_bool_consistent(internal, bool, smallint, oid, internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_compress(internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_fetch(internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_penalty(internal, internal, internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_picksplit(internal, internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_union(internal, internal) PARALLEL SAFE;
+ALTER FUNCTION gbt_bool_same(gbtreekey2, gbtreekey2, internal) PARALLEL SAFE;

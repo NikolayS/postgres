@@ -3,7 +3,7 @@
  * tsvector_parser.c
  *	  Parser for tsvector
  *
- * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -58,7 +58,7 @@ init_tsvector_parser(char *input, int flags, Node *escontext)
 {
 	TSVectorParseState state;
 
-	state = (TSVectorParseState) palloc(sizeof(struct TSVectorParseStateData));
+	state = palloc_object(struct TSVectorParseStateData);
 	state->prsbuf = input;
 	state->bufstart = input;
 	state->len = 32;
@@ -208,8 +208,7 @@ gettoken_tsvector(TSVectorParseState state,
 				PRSSYNTAXERROR;
 			else if (!isspace((unsigned char) *state->prsbuf))
 			{
-				COPYCHAR(curpos, state->prsbuf);
-				curpos += pg_mblen(state->prsbuf);
+				curpos += ts_copychar_cstr(curpos, state->prsbuf);
 				statecode = WAITENDWORD;
 			}
 		}
@@ -223,8 +222,7 @@ gettoken_tsvector(TSVectorParseState state,
 			else
 			{
 				RESIZEPRSBUF;
-				COPYCHAR(curpos, state->prsbuf);
-				curpos += pg_mblen(state->prsbuf);
+				curpos += ts_copychar_cstr(curpos, state->prsbuf);
 				Assert(oldstate != 0);
 				statecode = oldstate;
 			}
@@ -259,8 +257,7 @@ gettoken_tsvector(TSVectorParseState state,
 			else
 			{
 				RESIZEPRSBUF;
-				COPYCHAR(curpos, state->prsbuf);
-				curpos += pg_mblen(state->prsbuf);
+				curpos += ts_copychar_cstr(curpos, state->prsbuf);
 			}
 		}
 		else if (statecode == WAITENDCMPLX)
@@ -279,8 +276,7 @@ gettoken_tsvector(TSVectorParseState state,
 			else
 			{
 				RESIZEPRSBUF;
-				COPYCHAR(curpos, state->prsbuf);
-				curpos += pg_mblen(state->prsbuf);
+				curpos += ts_copychar_cstr(curpos, state->prsbuf);
 			}
 		}
 		else if (statecode == WAITCHARCMPLX)
@@ -288,8 +284,7 @@ gettoken_tsvector(TSVectorParseState state,
 			if (!state->is_web && t_iseq(state->prsbuf, '\''))
 			{
 				RESIZEPRSBUF;
-				COPYCHAR(curpos, state->prsbuf);
-				curpos += pg_mblen(state->prsbuf);
+				curpos += ts_copychar_cstr(curpos, state->prsbuf);
 				statecode = WAITENDCMPLX;
 			}
 			else
@@ -300,7 +295,7 @@ gettoken_tsvector(TSVectorParseState state,
 					PRSSYNTAXERROR;
 				if (state->oprisdelim)
 				{
-					/* state->prsbuf+=pg_mblen(state->prsbuf); */
+					/* state->prsbuf+=pg_mblen_cstr(state->prsbuf); */
 					RETURN_TOKEN;
 				}
 				else
@@ -322,13 +317,13 @@ gettoken_tsvector(TSVectorParseState state,
 				if (posalen == 0)
 				{
 					posalen = 4;
-					pos = (WordEntryPos *) palloc(sizeof(WordEntryPos) * posalen);
+					pos = palloc_array(WordEntryPos, posalen);
 					npos = 0;
 				}
 				else if (npos + 1 >= posalen)
 				{
 					posalen *= 2;
-					pos = (WordEntryPos *) repalloc(pos, sizeof(WordEntryPos) * posalen);
+					pos = repalloc_array(pos, WordEntryPos, posalen);
 				}
 				npos++;
 				WEP_SETPOS(pos[npos - 1], LIMITPOS(atoi(state->prsbuf)));
@@ -383,6 +378,6 @@ gettoken_tsvector(TSVectorParseState state,
 				 statecode);
 
 		/* get next char */
-		state->prsbuf += pg_mblen(state->prsbuf);
+		state->prsbuf += pg_mblen_cstr(state->prsbuf);
 	}
 }
