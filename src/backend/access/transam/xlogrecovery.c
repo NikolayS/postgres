@@ -363,7 +363,8 @@ static bool recoveryStopsAfter(XLogReaderState *record);
 static char *getRecoveryStopReason(void);
 static void recoveryPausesHere(bool endOfRecovery);
 static bool recoveryApplyDelay(XLogReaderState *record);
-static void ConfirmRecoveryPaused(void);
+/* Exposed for the logical-slot-conflict recovery-pause logic in standby.c. */
+void ConfirmRecoveryPaused(void);
 
 static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
 							  int emode, bool fetching_ckpt,
@@ -386,7 +387,8 @@ static int	XLogFileRead(XLogSegNo segno, TimeLineID tli,
 						 XLogSource source, bool notfoundOk);
 static int	XLogFileReadAnyTLI(XLogSegNo segno, XLogSource source);
 
-static bool CheckForStandbyTrigger(void);
+/* Exposed for the logical-slot-conflict recovery-pause logic in standby.c. */
+bool CheckForStandbyTrigger(void);
 static void SetPromoteIsTriggered(void);
 static bool HotStandbyActiveInReplay(void);
 
@@ -3083,7 +3085,7 @@ SetRecoveryPause(bool recoveryPause)
  * Confirm the recovery pause by setting the recovery pause state to
  * RECOVERY_PAUSED.
  */
-static void
+void
 ConfirmRecoveryPaused(void)
 {
 	/* If recovery pause is requested then set it paused */
@@ -4438,7 +4440,7 @@ SetPromoteIsTriggered(void)
 /*
  * Check whether a promote request has arrived.
  */
-static bool
+bool
 CheckForStandbyTrigger(void)
 {
 	if (LocalPromoteIsTriggered)
