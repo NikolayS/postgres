@@ -96,6 +96,21 @@ const char *recoveryTargetName;
 XLogRecPtr	recoveryTargetLSN;
 int			recovery_min_apply_delay = 0;
 
+/*
+ * If true, when WAL replay on a standby is about to invalidate an otherwise-
+ * active logical replication slot because a catalog PRUNE_ON_ACCESS record's
+ * snapshotConflictHorizon has overtaken the slot's catalog_xmin, pause replay
+ * instead and give an operator a chance to drain (or drop) the slot.
+ *
+ * Motivated by blueprints/LOGICAL_DECODING_ARCHIVED_WALS.md §4.2.3 / US-4:
+ * an archive-only logical-decoding standby cannot feed hot_standby_feedback
+ * to the primary, so it has no natural way to keep the primary's catalog
+ * horizon pinned. Without this GUC, any logical slot created on such a
+ * standby is invalidated the first time replay applies a catalog vacuum
+ * record whose horizon exceeds the slot's catalog_xmin.
+ */
+bool		recovery_pause_on_logical_slot_conflict = false;
+
 /* options formerly taken from recovery.conf for XLOG streaming */
 char	   *PrimaryConnInfo = NULL;
 char	   *PrimarySlotName = NULL;
@@ -4439,6 +4454,10 @@ SetPromoteIsTriggered(void)
 
 /*
  * Check whether a promote request has arrived.
+ */
+/*
+ * Non-static: MaybePauseOnLogicalSlotConflict needs this to break its wait
+ * loop on promotion, same as recoveryPausesHere does.
  */
 bool
 CheckForStandbyTrigger(void)
