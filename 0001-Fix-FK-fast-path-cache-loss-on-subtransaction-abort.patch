@@ -1,0 +1,85 @@
+From: Nikolay Samokhvalov <nik@postgres.ai>
+Subject: [PATCH] Fix FK fast-path cache loss on internal subtransaction abort
+
+ri_FastPathSubXactCallback() unconditionally NULLed the fast-path cache
+on any SUBXACT_EVENT_ABORT_SUB, even when the cache's resources (open
+relations, slots) were created in the parent transaction's ResourceOwner
+and were not released by the subxact abort.  This discarded pending FK
+existence checks for rows that remain live, silently bypassing FK
+constraint enforcement.
+
+The bug is triggered when an AFTER ROW trigger on the FK table causes an
+internal subtransaction abort (e.g., PL/pgSQL BEGIN...EXCEPTION...END
+block) while the fast-path batch still has unflushed entries.
+
+Fix: track the SubTransactionId at cache-creation time.  In the
+SubXactCallback, only tear down the cache when the aborting subxact
+encompasses the creation point (create_subid >= mySubid), matching the
+pattern used by portal and relcache subxact tracking.
+
+---
+ src/backend/utils/adt/ri_triggers.c | 22 +++++++++++++++-------
+ 1 file changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/src/backend/utils/adt/ri_triggers.c b/src/backend/utils/adt/ri_triggers.c
+index dc89c68..ea17ea8 100644
+--- a/src/backend/utils/adt/ri_triggers.c
++++ b/src/backend/utils/adt/ri_triggers.c
+@@ -261,6 +261,7 @@ static dclist_head ri_constraint_cache_valid_list;
+
+ static HTAB *ri_fastpath_cache = NULL;
+ static bool ri_fastpath_callback_registered = false;
++static SubTransactionId ri_fastpath_create_subid = InvalidSubTransactionId;
+
+ /*
+  * Local function prototypes
+@@ -4188,6 +4189,7 @@ ri_FastPathTeardown(void)
+ 	hash_destroy(ri_fastpath_cache);
+ 	ri_fastpath_cache = NULL;
+ 	ri_fastpath_callback_registered = false;
++	ri_fastpath_create_subid = InvalidSubTransactionId;
+ }
+
+ static bool ri_fastpath_xact_callback_registered = false;
+@@ -4202,6 +4204,7 @@ ri_FastPathXactCallback(XactEvent event, void *arg)
+ 	 */
+ 	ri_fastpath_cache = NULL;
+ 	ri_fastpath_callback_registered = false;
++	ri_fastpath_create_subid = InvalidSubTransactionId;
+ }
+
+ static void
+@@ -4211,12 +4214,20 @@ ri_FastPathSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
+ 	if (event == SUBXACT_EVENT_ABORT_SUB)
+ 	{
+ 		/*
+-		 * ResourceOwner already released relations.  NULL the static pointers
+-		 * so the still-registered batch callback becomes a no-op for the rest
+-		 * of this transaction.
++		 * Only tear down if the cache was created within the aborting
++		 * subtransaction (or one of its children).  SubTransactionIds are
++		 * assigned monotonically, so create_subid >= mySubid means the
++		 * cache's resources are owned by this subxact's ResourceOwner and
++		 * were already released.  If the cache was created in a parent
++		 * context (create_subid < mySubid), its resources are still live
++		 * and the pending FK checks must not be discarded.
+ 		 */
+-		ri_fastpath_cache = NULL;
+-		ri_fastpath_callback_registered = false;
++		if (ri_fastpath_create_subid >= mySubid)
++		{
++			ri_fastpath_cache = NULL;
++			ri_fastpath_callback_registered = false;
++			ri_fastpath_create_subid = InvalidSubTransactionId;
++		}
+ 	}
+ }
+
+@@ -4255,6 +4266,7 @@ ri_FastPathGetEntry(const RI_ConstraintInfo *riinfo, Relation fk_rel)
+ 										16,
+ 										&ctl,
+ 										HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
++		ri_fastpath_create_subid = GetCurrentSubTransactionId();
+ 	}
+
+ 	entry = hash_search(ri_fastpath_cache, &riinfo->constraint_id,
