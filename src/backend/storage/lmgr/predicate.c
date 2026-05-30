@@ -3994,19 +3994,30 @@ CheckForSerializableConflictOut(Relation relation, TransactionId xid, Snapshot s
 				&& (!SxactIsReadOnly(MySerializableXact)
 					|| conflictCommitSeqNo
 					<= MySerializableXact->SeqNo.lastCommitBeforeSnapshot))
+			{
+				/*
+				 * Doom ourselves before raising the error, so a savepoint
+				 * cannot swallow it and let the transaction commit.
+				 */
+				MySerializableXact->flags |= SXACT_FLAG_DOOMED;
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("could not serialize access due to read/write dependencies among transactions"),
 						 errdetail_internal("Reason code: Canceled on conflict out to old pivot %u.", xid),
 						 errhint("The transaction might succeed if retried.")));
+			}
 
 			if (SxactHasSummaryConflictIn(MySerializableXact)
 				|| !dlist_is_empty(&MySerializableXact->inConflicts))
+			{
+				/* See comment above: doom ourselves before raising the error. */
+				MySerializableXact->flags |= SXACT_FLAG_DOOMED;
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("could not serialize access due to read/write dependencies among transactions"),
 						 errdetail_internal("Reason code: Canceled on identification as a pivot, with conflict out to old committed transaction %u.", xid),
 						 errhint("The transaction might succeed if retried.")));
+			}
 
 			MySerializableXact->flags |= SXACT_FLAG_SUMMARY_CONFLICT_OUT;
 		}
@@ -4040,6 +4051,8 @@ CheckForSerializableConflictOut(Relation relation, TransactionId xid, Snapshot s
 		}
 		else
 		{
+			/* See comment above: doom ourselves before raising the error. */
+			MySerializableXact->flags |= SXACT_FLAG_DOOMED;
 			LWLockRelease(SerializableXactHashLock);
 			ereport(ERROR,
 					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
@@ -4589,6 +4602,12 @@ OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *reader,
 		 */
 		if (MySerializableXact == writer)
 		{
+			/*
+			 * Mark ourselves doomed before raising the error.  Otherwise a
+			 * subtransaction abort (ROLLBACK TO SAVEPOINT) could swallow this
+			 * error and let the transaction commit anyway, defeating SSI.
+			 */
+			MySerializableXact->flags |= SXACT_FLAG_DOOMED;
 			LWLockRelease(SerializableXactHashLock);
 			ereport(ERROR,
 					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
@@ -4598,10 +4617,13 @@ OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *reader,
 		}
 		else if (SxactIsPrepared(writer))
 		{
-			LWLockRelease(SerializableXactHashLock);
-
 			/* if we're not the writer, we have to be the reader */
 			Assert(MySerializableXact == reader);
+
+			/* See comment above: doom ourselves before raising the error. */
+			MySerializableXact->flags |= SXACT_FLAG_DOOMED;
+			LWLockRelease(SerializableXactHashLock);
+
 			ereport(ERROR,
 					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 					 errmsg("could not serialize access due to read/write dependencies among transactions"),
