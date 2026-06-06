@@ -1,7 +1,13 @@
-Subject: PG19 FK fast path runs user code mid-flush: OOB write + two
- integrity bypasses
+Subject: PG19 FK fast path: OOB write and missed FK checks during batched
+ flush
 
 Hackers,
+
+I identified these issues during recent security research.  While they have
+clear security implications (OOB write, integrity bypass), I am reporting
+them directly to -hackers rather than security@ because they are isolated to
+19beta1, absent in PG18 and earlier; I don't have patches, only
+reproducibility.
 
 The new FK existence-check fast path in src/backend/utils/adt/ri_triggers.c
 (ri_FastPath*) runs user-defined code in the middle of a deferred batch
