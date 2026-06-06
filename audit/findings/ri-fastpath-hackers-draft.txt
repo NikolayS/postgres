@@ -21,9 +21,9 @@ pg_constraint OID) and probes the PK index in groups, flushing when a
 per-constraint buffer reaches RI_FASTPATH_BATCH_SIZE (64) or when the
 trigger-firing pass ends (ri_FastPathEndBatch, an AfterTriggerBatchCallback).
 For a cross-type FK the flush calls the column's cast function
-(ri_FastPathFlushArray, the FunctionCall3 around line 3069) and the equality
-operator -- arbitrary user code, mid-flush.  Line numbers below are
-approximate (from a 19beta1-era tree; anchor on the function names).
+(ri_FastPathFlushArray, the FunctionCall3 at line 3069) and the equality
+operator -- arbitrary user code, mid-flush.  Line numbers below are from a
+REL_19_BETA1 build (commit 4b0bf07).
 
 Unprivileged vehicle (defects 1 and 3).  No superuser, no contrib: a role
 creates a type it owns and an IMPLICIT cast from it to the PK type with a
@@ -33,10 +33,11 @@ single-column FK, no GUC (fast path is unconditional for non-partitioned,
 non-temporal FKs, per ri_fastpath_is_applicable).
 
 
-[1] ri_FastPathBatchAdd (around line 2858): out-of-bounds write on re-entry
+[1] ri_FastPathBatchAdd (line 2859): out-of-bounds write on re-entry
 
 The write precedes the bound check, and batch_count is reset to 0 only at
-end of flush, so it is 64 throughout a full-batch flush:
+end of flush (ri_FastPathBatchFlush, line 2971), so it is 64 throughout a
+full-batch flush:
 
     fpentry->batch[fpentry->batch_count] = ExecCopySlotHeapTuple(newslot);
     fpentry->batch_count++;
@@ -44,20 +45,26 @@ end of flush, so it is 64 throughout a full-batch flush:
         ri_FastPathBatchFlush(fpentry, fk_rel, riinfo);
 
 There is no re-entrancy guard and ri_FastPathGetEntry returns the same
-entry, so user code that does DML on the same table during the flush
-re-enters with batch_count == 64 and writes batch[64], one past the array
-(aliasing the batch_count field, then a wild index/oversized memset around
-line 3054).
+entry, so user code that does DML on the same table during a full-batch
+flush re-enters with batch_count == 64 and writes batch[64], one past the
+array, overwriting the adjacent batch_count field (struct layout, lines
+250-251).  A single re-entrant row only stomps batch_count, which is then
+reset to 0 before reuse; the crash manifests once the re-entrant insert is
+itself large enough to fill and flush a batch, so the stomped batch_count is
+used as an array index (batch[garbage]) and as nvals in
+memset(matched, 0, nvals * sizeof(bool)) (line 3054).
 
-Repro:
+Repro (non-superuser; reliable SIGSEGV on --enable-cassert -O0; under -O2
+the out-of-bounds write is of undefined effect, so a clean run there does
+not disprove it):
 
     create table parent(id int primary key);
-    insert into parent select g from generate_series(1,64) g;
+    insert into parent select g from generate_series(1,2000) g;
     create type vch as (v int);
     create function vcast(vch) returns int language plpgsql as $$
     begin
       if $1.v = 64 then
-        insert into child values (row(1)::vch);   -- re-enter same table
+        insert into child select row(g)::vch from generate_series(1001,1064) g;
       end if;
       return $1.v;
     end$$;
@@ -65,14 +72,13 @@ Repro:
     create table child(a vch);
     alter table child add constraint child_fkey
       foreign key (a) references parent(id);
-    insert into child select row(g)::vch from generate_series(1,64) g;
-    -- writes batch[64].  On --enable-cassert -O0 this SIGSEGVs reliably
-    -- (cluster restart).  Under -O2 it is an out-of-bounds write of
-    -- undefined effect, so a clean run there does not disprove the bug.
+    insert into child select row(g)::vch from generate_series(1,64) g;  -- crash
+    -- gdb: crash at ri_FastPathBatchAdd line 2866 with batch_count holding a
+    -- stomped HeapTuple pointer's low bits, i.e. batch[64] overwrote
+    -- batch_count; backend SIGSEGVs and the cluster restarts.
 
 
-[2] ri_FastPathSubXactCallback (around line 4207): batch dropped on subxact
-abort
+[2] ri_FastPathSubXactCallback (line 4208): batch dropped on subxact abort
 
 On SUBXACT_EVENT_ABORT_SUB the callback discards the whole cache:
 
@@ -118,16 +124,19 @@ itself valid.  No cast needed:
     -- 999, 0  (orphans still present)
 
 Controls (no EXCEPTION; between-statement SAVEPOINT; DEFERRABLE INITIALLY
-DEFERRED) behave correctly.
+DEFERRED) all behave correctly (FK violation raised, no orphans).  The whole
+statement's buffered batch is discarded, not just the aborting row's check.
+The abort path also emits "WARNING: resource was not closed" (relation /
+index / TupleDesc), a resource leak consistent with the missing flush.
 
 
-[3] ri_FastPathEndBatch (around line 4132): cross-table re-entry drops a check
+[3] ri_FastPathEndBatch (line 4133): cross-table re-entry drops a check
 
-EndBatch flushes by iterating the cache with hash_seq_search (around line
-4143).  If flush-time user code INSERTs into a different fast-path FK table,
+EndBatch flushes by iterating the cache with hash_seq_search (line 4143).
+If flush-time user code INSERTs into a different fast-path FK table,
 ri_FastPathGetEntry adds a new cache entry mid-scan; it can land in a bucket
 hash_seq_search already passed and is never reached.  ri_FastPathTeardown
-(around line 4164) then hash_destroys the cache without flushing entries
+(line 4165) then hash_destroys the cache (line 4188) without flushing entries
 that still have batch_count > 0, so that buffered check is discarded.  This
 survives a
 per-entry guard for [1] (different entry, not a re-entry of the busy one):
