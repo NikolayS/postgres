@@ -18,6 +18,7 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#include "utils/injection_point.h"
 #include "utils/inval.h"
 #include "utils/pgstat_internal.h"
 #include "utils/syscache.h"
@@ -112,8 +113,10 @@ pgstat_init_function_usage(FunctionCallInfo fcinfo,
 		AcceptInvalidationMessages();
 		if (!SearchSysCacheExists1(PROCOID, ObjectIdGetDatum(fcinfo->flinfo->fn_oid)))
 		{
-			pgstat_drop_entry(PGSTAT_KIND_FUNCTION, MyDatabaseId,
-							  fcinfo->flinfo->fn_oid);
+			INJECTION_POINT("function-call-before-dropped-stats-drop", NULL);
+			if (!pgstat_drop_entry(PGSTAT_KIND_FUNCTION, MyDatabaseId,
+								   fcinfo->flinfo->fn_oid))
+				pgstat_request_entry_refs_gc();
 			ereport(ERROR, errcode(ERRCODE_UNDEFINED_FUNCTION),
 					errmsg("function call to dropped function"));
 		}

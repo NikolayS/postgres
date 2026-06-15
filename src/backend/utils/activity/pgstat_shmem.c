@@ -918,13 +918,18 @@ pgstat_drop_entry_internal(PgStatShared_HashEntry *shent,
 	 * backends to release their references.
 	 */
 	if (shent->dropped)
-		elog(ERROR,
-			 "trying to drop stats entry already dropped: kind=%s dboid=%u objid=%" PRIu64 " refcount=%u generation=%u",
-			 pgstat_get_kind_info(shent->key.kind)->name,
-			 shent->key.dboid,
-			 shent->key.objid,
-			 pg_atomic_read_u32(&shent->refcount),
-			 pg_atomic_read_u32(&shent->generation));
+	{
+		/*
+		 * Stats drops can race with non-transactional drops of already-stale
+		 * entries, for example when function stats are created for a function
+		 * whose catalog tuple was concurrently removed.  The first drop already
+		 * consumed the valid-entry refcount; treat later drops as requests to
+		 * wait for remaining local references to go away.
+		 */
+		if (!hstat)
+			dshash_release_lock(pgStatLocal.shared_hash, shent);
+		return false;
+	}
 	shent->dropped = true;
 
 	/* release refcount marking entry as not dropped */

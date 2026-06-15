@@ -1,0 +1,45 @@
+Parsed test spec with 4 sessions
+
+starting permutation: call_proc drop_proc wait_drop_stop wake_call_start wait_call_drop_stop fetch_stats wake_call_drop wake_drop
+step call_proc: CALL proc_test(); <waiting ...>
+step drop_proc: DROP PROCEDURE proc_test(); <waiting ...>
+step wait_drop_stop: 
+	SELECT wait_for_injection_point(
+		'function-stats-drop-drop',
+		'pgstat-before-drop-function-stats');
+
+wait_for_injection_point
+------------------------
+                        
+(1 row)
+
+step wake_call_start: 
+	SELECT FROM injection_points_wakeup('function-call-before-pgstat-init');
+
+step wait_call_drop_stop: 
+	SELECT wait_for_injection_point(
+		'function-stats-drop-call',
+		'function-call-before-dropped-stats-drop');
+
+wait_for_injection_point
+------------------------
+                        
+(1 row)
+
+step fetch_stats: 
+	SELECT pg_stat_get_function_calls(oid) FROM proc_test_oid;
+
+pg_stat_get_function_calls
+--------------------------
+                         0
+(1 row)
+
+step wake_call_drop: 
+	SELECT FROM injection_points_wakeup('function-call-before-dropped-stats-drop');
+
+step call_proc: <... completed>
+ERROR:  function call to dropped function
+step wake_drop: 
+	SELECT FROM injection_points_wakeup('pgstat-before-drop-function-stats');
+
+step drop_proc: <... completed>

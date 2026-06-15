@@ -14,6 +14,7 @@
 
 #include "access/xact.h"
 #include "pgstat.h"
+#include "utils/injection_point.h"
 #include "utils/memutils.h"
 #include "utils/pgstat_internal.h"
 
@@ -85,6 +86,8 @@ AtEOXact_PgStat_DroppedStats(PgStat_SubXactStatus *xact_state, bool isCommit)
 			 * Transaction that dropped an object committed. Drop the stats
 			 * too.
 			 */
+			if (it->kind == PGSTAT_KIND_FUNCTION)
+				INJECTION_POINT("pgstat-before-drop-function-stats", NULL);
 			if (!pgstat_drop_entry(it->kind, it->dboid, objid))
 				not_freed_count++;
 		}
