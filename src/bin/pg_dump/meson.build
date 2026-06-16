@@ -105,6 +105,7 @@ tests += {
       't/006_pg_dump_compress.pl',
 	  't/007_pg_dumpall.pl',
       't/010_dump_connstr.pl',
+      't/012_pg_dump_empty_excluded_data.pl',
     ],
   },
 }
