@@ -15,6 +15,7 @@ $node->init;
 $node->start;
 
 my $src_db = 'empty_excl_src';
+my $dst_db = 'empty_excl_dst';
 my $dumpdir = "$tempdir/empty_excl_dump";
 
 $node->safe_psql(
@@ -117,5 +118,24 @@ my ($keep_dat) = grep { $_ ne "$dumpdir/${skip_dumpid}.dat" } @datfiles;
 ok(defined $keep_dat && -s $keep_dat > 0,
 	'included table has a non-empty data file')
   if defined $skip_dumpid;
+
+$node->safe_psql('postgres', "CREATE DATABASE $dst_db");
+
+$node->command_ok(
+	[
+		'pg_restore',
+		'--dbname' => $node->connstr($dst_db),
+		$dumpdir,
+	],
+	'restore dump with empty excluded data file');
+
+is(
+	$node->safe_psql($dst_db, 'SELECT count(*) FROM keep_data'),
+	'2',
+	'included table data restored');
+is(
+	$node->safe_psql($dst_db, 'SELECT count(*) FROM skip_data'),
+	'0',
+	'excluded table restored with no rows');
 
 done_testing();
