@@ -96,6 +96,24 @@ const char *recoveryTargetName;
 XLogRecPtr	recoveryTargetLSN;
 int			recovery_min_apply_delay = 0;
 
+/*
+ * If true, when WAL replay on a standby is about to invalidate an otherwise-
+ * active logical replication slot because a catalog PRUNE_ON_ACCESS record's
+ * snapshotConflictHorizon has overtaken the slot's catalog_xmin, pause replay
+ * instead. Replay auto-resumes once the consumer has drained the slot past
+ * the pause point (or the slot is dropped, advanced, or otherwise no longer
+ * blocking); pg_wal_replay_resume() also forces continuation. See
+ * MaybePauseOnLogicalSlotConflict() in standby.c.
+ *
+ * Motivated by blueprints/LOGICAL_DECODING_ARCHIVED_WALS.md §4.2.3 / US-4:
+ * an archive-only logical-decoding standby cannot feed hot_standby_feedback
+ * to the primary, so it has no natural way to keep the primary's catalog
+ * horizon pinned. Without this GUC, any logical slot created on such a
+ * standby is invalidated the first time replay applies a catalog vacuum
+ * record whose horizon exceeds the slot's catalog_xmin.
+ */
+bool		recovery_pause_on_logical_slot_conflict = false;
+
 /* options formerly taken from recovery.conf for XLOG streaming */
 char	   *PrimaryConnInfo = NULL;
 char	   *PrimarySlotName = NULL;
@@ -363,7 +381,8 @@ static bool recoveryStopsAfter(XLogReaderState *record);
 static char *getRecoveryStopReason(void);
 static void recoveryPausesHere(bool endOfRecovery);
 static bool recoveryApplyDelay(XLogReaderState *record);
-static void ConfirmRecoveryPaused(void);
+/* Exposed for the logical-slot-conflict recovery-pause logic in standby.c. */
+void ConfirmRecoveryPaused(void);
 
 static XLogRecord *ReadRecord(XLogPrefetcher *xlogprefetcher,
 							  int emode, bool fetching_ckpt,
@@ -386,7 +405,8 @@ static int	XLogFileRead(XLogSegNo segno, TimeLineID tli,
 						 XLogSource source, bool notfoundOk);
 static int	XLogFileReadAnyTLI(XLogSegNo segno, XLogSource source);
 
-static bool CheckForStandbyTrigger(void);
+/* Exposed for the logical-slot-conflict recovery-pause logic in standby.c. */
+bool CheckForStandbyTrigger(void);
 static void SetPromoteIsTriggered(void);
 static bool HotStandbyActiveInReplay(void);
 
@@ -3083,7 +3103,7 @@ SetRecoveryPause(bool recoveryPause)
  * Confirm the recovery pause by setting the recovery pause state to
  * RECOVERY_PAUSED.
  */
-static void
+void
 ConfirmRecoveryPaused(void)
 {
 	/* If recovery pause is requested then set it paused */
@@ -4438,7 +4458,11 @@ SetPromoteIsTriggered(void)
 /*
  * Check whether a promote request has arrived.
  */
-static bool
+/*
+ * Non-static: MaybePauseOnLogicalSlotConflict needs this to break its wait
+ * loop on promotion, same as recoveryPausesHere does.
+ */
+bool
 CheckForStandbyTrigger(void)
 {
 	if (LocalPromoteIsTriggered)
