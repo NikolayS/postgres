@@ -1,0 +1,117 @@
+Subject: Re: Add wait events for server logging destination writes
+
+Hi Seongjun,
+
+(cc Andrey, Kyotaro, Michael)
+
+Thanks for the patch -- as promised, here are Linux and Windows results,
+plus a code review of v4. tl;dr: it builds clean and the new events show
+up at runtime on both platforms; I'm +1 on the approach.
+
+== Testing ==
+
+I ran two kinds of checks in GitHub Actions on a fork, plus a local Linux
+reproduction. The verification driver and the raw runs are public:
+
+  Windows runtime check (MSVC/meson, windows-latest):
+    https://github.com/NikolayS/postgres/actions/runs/27526323592
+    workflow: .github/workflows/windows-waitevents.yml
+
+The methodology mirrors your benchmark: 8 backends each emit a large
+RAISE LOG payload in a tight loop while a separate connection samples
+pg_stat_activity, tallied by wait_event.
+
+Linux (v4-0001, meson debug build, gcc 13; 8 x logspam(50000),
+~20 ms sampling for 20 s):
+
+  logging_collector = on   (syslogger pipe -> write_pipe_chunks)
+    wait_event       samples    pct
+    (NULL)              4228   53.7%
+    IO/SysloggerWrite   3652   46.3%
+
+  logging_collector = off  (stderr -> write_console)
+    wait_event       samples    pct
+    IO/StderrWrite      1376   17.6%
+    (remainder NULL / other)
+
+Windows (v4-0002, MSVC/meson, log_destination = 'stderr,eventlog'):
+  The job builds PostgreSQL, drives the same workload into the
+  stderr+eventlog destinations, and asserts the new events appear.
+  IO/EventlogWrite was observed in pg_stat_activity (the run is green;
+  the job fails hard if EventlogWrite is never sampled), and the
+  WriteConsoleW branch of StderrWrite was exercised as well. That should
+  close the one open item from the v4 posting -- EventlogWrite was
+  previously only build-confirmed.
+
+Two notes on the numbers:
+
+- The NULL share is higher here than in your run because these are debug
+  builds on fast CI storage, so each write returns quickly and the
+  backends spend most of their time formatting messages on-CPU. The point
+  stands: the time that *is* spent blocked on the log write is now
+  attributable instead of showing as NULL. On a saturated pipe or a slow
+  log device -- exactly Andrey's network-HDD case -- this share grows and
+  is precisely the situation the patch makes visible.
+
+- Incidentally, this is also a small piece of empirical evidence on the
+  nesting concern below: even under heavy logging the events stay a
+  minority of samples and I saw no sign of them masking other waits, which
+  is consistent with log output normally being emitted outside other
+  wait_event regions.
+
+== Code review ==
+
+I read the v4 diff against master. It's tight and I think it's basically
+committable. Details:
+
+- write_pipe_chunks(): both write() calls are wrapped -- the loop body and
+  the final chunk. Good; the loop is the path that fires on large
+  messages, so missing it would have undercounted exactly your benchmark
+  case.
+
+- write_console(): the leaf write(fileno(stderr), ...) is wrapped (and the
+  WriteConsoleW() path in 0002). Correct -- that's the one routine, two
+  encodings.
+
+- write_syslog(): both syslog() sites (split-message loop and the
+  short-message branch) are wrapped. One optional thought: the first-call
+  openlog() just above can also block while connecting to /dev/log;
+  wrapping the whole body under SYSLOG_WRITE would catch that too. Minor,
+  take it or leave it.
+
+- The instrumentation uses only pgstat_report_wait_start()/end(), which
+  are allocation-free and safe before MyProc setup, so it's fine on the
+  error-reporting paths. Agreed.
+
+- Placement in wait_event_names.txt is alphabetical within WaitEventIO,
+  and since monitoring.sgml is generated from that file there's no
+  separate doc hunk to keep in sync. Good.
+
+On the open discussion points:
+
+- Naming: I'll go with the consensus to keep SysloggerWrite/StderrWrite/
+  SyslogWrite as-is, since each name tracks the routine it wraps and the
+  descriptions disambiguate. The one thing I'd ask for is the code comment
+  and commit-message line you already agreed to with Andrey: that the
+  on-disk write happens in write_syslogger_file() in the syslogger, which
+  has no shared memory and isn't in pg_stat_activity, so the backend-side
+  SysloggerWrite is where the stall becomes visible. That removes the only
+  real chance of misreading the name.
+
+- Single-slot / nesting: I agree with your reading. This is a pre-existing
+  property of pgstat_report_wait_end() writing 0 unconditionally, and
+  following the existing convention is the right call rather than adding
+  save/restore here. I would not add the "report only when the slot is 0"
+  guard by default -- it would hide the logging write in precisely the
+  backed-up cases we care about. A short comment at the sites noting the
+  single-slot behavior is enough.
+
+- EventlogWrite appearing in the event list on all platforms: agreed,
+  leave it; the description already says Windows.
+
+So: +1 from me, builds clean on Linux (meson/gcc) and Windows (MSVC/meson),
+and the events are confirmed at runtime on both. Happy to re-run the
+Windows job against v5 once you fold in the comment/commit-message tweaks.
+
+Thanks,
+Nikolay
