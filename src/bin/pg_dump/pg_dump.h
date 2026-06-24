@@ -413,6 +413,7 @@ typedef struct _tableDataInfo
 	DumpableObject dobj;
 	TableInfo  *tdtable;		/* link to table to dump */
 	char	   *filtercond;		/* WHERE condition to limit rows dumped */
+	bool		emptyExcludedData;	/* excluded by --exclude-table-data */
 } TableDataInfo;
 
 typedef struct _indxInfo

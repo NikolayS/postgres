@@ -721,6 +721,40 @@ PostgreSQL documentation
      </varlistentry>
 
      <varlistentry>
+      <term><option>--create-empty-files-for-excluded-data</option></term>
+      <listitem>
+       <para>
+        When used together with <option>--exclude-table-data</option> or
+        <option>--exclude-table-data-and-children</option> in directory output
+        format (<option>-Fd</option> or <option>--format=directory</option>),
+        still create a <literal>TABLE DATA</literal> archive entry (including
+        the usual <command>COPY</command> statement) for each excluded table,
+        but do not dump the table's rows.  A data file named after the table's
+        dump ID (for example <filename>3541.dat</filename>) is created
+        containing only a <literal>\.</literal> COPY end marker as a
+        placeholder.
+       </para>
+       <para>
+        This option is intended for workflows where excluded table data is
+        loaded separately after the dump is taken, for example by replacing
+        the placeholder data file with externally produced data before
+        restore.
+       </para>
+       <para>
+        <option>--create-empty-files-for-excluded-data</option> cannot be used
+        without <option>--exclude-table-data</option> or
+        <option>--exclude-table-data-and-children</option>.  It is only
+        supported when directory output format is selected
+        (<option>-Fd</option> or <option>--format=directory</option>) and
+        data is being dumped as <command>COPY</command> (the default).
+        It cannot be used with <option>--inserts</option>,
+        <option>--column-inserts</option>, or
+        <option>--rows-per-insert</option>.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><option>--disable-dollar-quoting</option></term>
       <listitem>
        <para>
