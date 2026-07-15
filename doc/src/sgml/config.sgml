@@ -8055,6 +8055,75 @@ local0.*    /var/log/postgresql
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-log_object_drops" xreflabel="log_object_drops">
+      <term><varname>log_object_drops</varname> (<type>boolean</type>)
+      <indexterm>
+        <primary><varname>log_object_drops</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+      <para>
+        Causes <command>DROP TABLE</command> and <command>DROP DATABASE</command>
+        operations to be logged with their commit LSN (Log Sequence Number).
+        The commit LSN represents the point in the write-ahead log where the
+        drop operation becomes durable and visible to other transactions.
+      </para>
+
+      <para>
+        Each logged entry includes the schema name, table name, OID, and the
+        commit LSN. For example:
+        <programlisting>
+        LOG:  DROP TABLE: relation "public.employees" (OID 16384), commit LSN: 0/015D4A48
+        LOG:  DROP DATABASE: database "testdb" (OID 16385), commit LSN: 0/015D4B20
+        </programlisting>
+      </para>
+
+      <para>
+        Logged operations include: direct <command>DROP TABLE</command> statements,
+        tables dropped via <command>DROP SCHEMA CASCADE</command>,
+        partitioned tables and their partitions, tables in inheritance hierarchies,
+        and <command>DROP DATABASE</command> commands.
+        Operations that are rolled back (via <command>ROLLBACK</command> or
+        <command>ROLLBACK TO SAVEPOINT</command>) are not logged.
+        Temporary tables are not logged, since their contents cannot be
+        recovered by point-in-time recovery.
+      </para>
+
+      <para>
+        This parameter is useful for tracking and auditing destructive operations,
+        and for coordinating with external systems that monitor the write-ahead log.
+        Note that enabling this option may generate substantial log volume
+        when dropping schemas or databases containing many tables.
+      </para>
+
+      <para>
+        The default is <literal>off</literal>. Only superusers and users with
+        the appropriate <literal>SET</literal> privilege can change this setting.
+      </para>
+
+      <para>
+        <emphasis>Using the logged LSN for point-in-time recovery.</emphasis>
+        The logged value is the LSN at which the <emphasis>commit</emphasis>
+        record of the transaction that performed the drop begins, which is the
+        value <xref linkend="guc-recovery-target-lsn"/> compares against. To
+        recover the dropped object, recovery must stop
+        <emphasis>before</emphasis> that record is replayed.
+        Because <xref linkend="guc-recovery-target-inclusive"/> defaults to
+        <literal>on</literal>, which stops recovery <emphasis>after</emphasis>
+        the target LSN, setting <varname>recovery_target_lsn</varname> to the
+        logged LSN alone would replay the drop and lose the object again.
+        You must also set <varname>recovery_target_inclusive</varname> to
+        <literal>off</literal>:
+        <programlisting>
+recovery_target_lsn = '0/015D4A48'   # the commit LSN from the log message
+recovery_target_inclusive = off      # required: stop BEFORE the drop commits
+</programlisting>
+        With these settings, recovery stops just short of the drop, and the
+        object is present in the recovered cluster. Note that any transaction
+        that committed after this LSN is also not recovered.
+      </para>
+      </listitem>
+     </varlistentry>
 
      <varlistentry id="guc-log-duration" xreflabel="log_duration">
       <term><varname>log_duration</varname> (<type>boolean</type>)

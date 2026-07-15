@@ -18,6 +18,7 @@
 #include "access/htup_details.h"
 #include "access/table.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
@@ -71,6 +72,7 @@
 #include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_user_mapping.h"
+#include "utils/guc.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
@@ -182,6 +184,185 @@ static bool stack_address_present_add_flags(const ObjectAddress *object,
 											ObjectAddressStack *stack);
 static void DeleteInitPrivs(const ObjectAddress *object);
 
+/* Kind of object recorded for drop logging */
+typedef enum DropLogKind
+{
+	DROP_LOG_TABLE,
+	DROP_LOG_DATABASE,
+} DropLogKind;
+
+/* Structure to hold information about a dropped object */
+typedef struct DropObjectInfo
+{
+	DropLogKind kind;
+	Oid			objoid;
+	char		objname[NAMEDATALEN];
+	char		schemaname[NAMEDATALEN];	/* only used for DROP_LOG_TABLE */
+	SubTransactionId subxid;
+	bool		valid;
+} DropObjectInfo;
+
+/* Per-transaction list of dropped objects */
+static List *pending_object_drops = NIL;
+static bool drop_object_callback_registered = false;
+
+static void DropObjectXactCallback(XactEvent event, void *arg, XLogRecPtr lsn);
+static void DropObjectSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
+									  SubTransactionId parentSubid, void *arg);
+
+/*
+ * Record a dropped object so that its commit LSN can be logged once the
+ * transaction commits.  Logging is deferred to the commit callback because
+ * only the commit LSN is meaningful for point-in-time recovery: the LSN of
+ * the catalog change itself is useless to a DBA, as the drop does not become
+ * durable (and other backends cannot observe it) until the commit record is
+ * written.  Deferring also means a drop that is later rolled back is never
+ * logged at all.
+ */
+static void
+RegisterDropObject(DropLogKind kind, Oid objoid, const char *objname,
+				   const char *schemaname)
+{
+	DropObjectInfo *info;
+	MemoryContext oldcontext;
+
+	if (!drop_object_callback_registered)
+	{
+		RegisterXactCallback(DropObjectXactCallback, NULL);
+		RegisterSubXactCallback(DropObjectSubXactCallback, NULL);
+		drop_object_callback_registered = true;
+	}
+
+	oldcontext = MemoryContextSwitchTo(TopTransactionContext);
+
+	info = (DropObjectInfo *) palloc(sizeof(DropObjectInfo));
+	info->kind = kind;
+	info->objoid = objoid;
+	strlcpy(info->objname, objname, NAMEDATALEN);
+	strlcpy(info->schemaname, schemaname ? schemaname : "", NAMEDATALEN);
+	info->subxid = GetCurrentSubTransactionId();
+	info->valid = true;
+
+	pending_object_drops = lappend(pending_object_drops, info);
+
+	MemoryContextSwitchTo(oldcontext);
+}
+
+/*
+ * RegisterDropDatabaseForLogging
+ *		Record a DROP DATABASE for commit-LSN logging.
+ *
+ * Exposed for dbcommands.c, which does not go through performDeletion().
+ */
+void
+RegisterDropDatabaseForLogging(Oid dboid, const char *dbname)
+{
+	RegisterDropObject(DROP_LOG_DATABASE, dboid, dbname, NULL);
+}
+
+/*
+ * SubXactCallback - handle ROLLBACK TO SAVEPOINT
+ */
+static void
+DropObjectSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
+						  SubTransactionId parentSubid, void *arg)
+{
+	ListCell   *lc;
+
+	if (pending_object_drops == NIL)
+		return;
+
+	/*
+	 * On subtransaction abort, invalidate all entries belonging to the
+	 * aborted subtransaction and its children.
+	 */
+	if (event == SUBXACT_EVENT_ABORT_SUB)
+	{
+		foreach(lc, pending_object_drops)
+		{
+			DropObjectInfo *info = (DropObjectInfo *) lfirst(lc);
+
+			/*
+			 * Mark entries that belong to our subtransactions.
+			 * SubTransactionIds are assigned incrementally, so we can compare
+			 * them.
+			 */
+			if (info->subxid >= mySubid)
+				info->valid = false;
+		}
+	}
+}
+
+/*
+ * DropObjectXactCallback
+ * Transaction callback to log the commit LSN for dropped objects.
+ */
+static void
+DropObjectXactCallback(XactEvent event, void *arg, XLogRecPtr commit_lsn)
+{
+	ListCell   *lc;
+
+	if (pending_object_drops == NIL)
+		return;
+
+	if (event == XACT_EVENT_COMMIT)
+	{
+		/*
+		 * Any transaction that dropped a table or a database necessarily
+		 * modified the catalogs, so it must have been assigned an XID and
+		 * written a commit record.
+		 *
+		 * commit_lsn is the start LSN of that commit record, which is
+		 * precisely the value to hand to recovery_target_lsn (with
+		 * recovery_target_inclusive = off) to recover the dropped object.
+		 */
+		Assert(!XLogRecPtrIsInvalid(commit_lsn));
+
+		foreach(lc, pending_object_drops)
+		{
+			DropObjectInfo *info = (DropObjectInfo *) lfirst(lc);
+
+			if (!info->valid)
+				continue;
+
+			switch (info->kind)
+			{
+				case DROP_LOG_TABLE:
+					ereport(LOG,
+							(errmsg("DROP TABLE: relation \"%s.%s\" (OID %u), commit LSN: %X/%08X",
+									info->schemaname,
+									info->objname,
+									info->objoid,
+									LSN_FORMAT_ARGS(commit_lsn))));
+					break;
+				case DROP_LOG_DATABASE:
+					ereport(LOG,
+							(errmsg("DROP DATABASE: database \"%s\" (OID %u), commit LSN: %X/%08X",
+									info->objname,
+									info->objoid,
+									LSN_FORMAT_ARGS(commit_lsn))));
+					break;
+			}
+		}
+	}
+
+	/* Clean up after commit or abort */
+	if (event == XACT_EVENT_COMMIT ||
+		event == XACT_EVENT_ABORT ||
+		event == XACT_EVENT_PARALLEL_ABORT)
+	{
+		/* Free the DropObjectInfo structures */
+		foreach(lc, pending_object_drops)
+		{
+			DropObjectInfo *info = (DropObjectInfo *) lfirst(lc);
+
+			pfree(info);
+		}
+
+		list_free(pending_object_drops);
+		pending_object_drops = NIL;
+	}
+}
 
 /*
  * Go through the objects given running the final actions on them, and execute
@@ -1422,6 +1603,39 @@ doDeletion(const ObjectAddress *object, int flags)
 		case RelationRelationId:
 			{
 				char		relKind = get_rel_relkind(object->objectId);
+
+				/*
+				 * Log all table drops that go through this function.
+				 *
+				 * Temporary tables are deliberately excluded: their contents
+				 * are not recoverable by point-in-time recovery in the first
+				 * place, and they are routinely dropped at session end, which
+				 * would swamp the log with entries no DBA can act on.
+				 */
+				if ((relKind == RELKIND_RELATION ||
+					 relKind == RELKIND_PARTITIONED_TABLE) &&
+					log_object_drops &&
+					get_rel_persistence(object->objectId) != RELPERSISTENCE_TEMP)
+				{
+					char	   *relname = get_rel_name(object->objectId);
+
+					if (relname != NULL)
+					{
+						char	   *schemaname = NULL;
+						Oid			schemaoid = get_rel_namespace(object->objectId);
+
+						if (OidIsValid(schemaoid))
+							schemaname = get_namespace_name(schemaoid);
+
+						RegisterDropObject(DROP_LOG_TABLE, object->objectId,
+										   relname,
+										   schemaname ? schemaname : "unknown");
+
+						pfree(relname);
+						if (schemaname)
+							pfree(schemaname);
+					}
+				}
 
 				if (relKind == RELKIND_INDEX ||
 					relKind == RELKIND_PARTITIONED_INDEX)
