@@ -55,6 +55,7 @@
 #include "jit/jit.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/queryjumble.h"
 #include "optimizer/planner.h"
 #include "parser/analyze.h"
@@ -115,6 +116,8 @@ typedef enum pgssVersion
 	PGSS_V1_11,
 	PGSS_V1_12,
 	PGSS_V1_13,
+	PGSS_V1_14,
+	PGSS_V1_15,
 } pgssVersion;
 
 typedef enum pgssStoreKind
@@ -165,6 +168,8 @@ typedef struct Counters
 	double		sum_var_time[PGSS_NUMKIND]; /* sum of variances in
 											 * planning/execution time in msec */
 	int64		rows;			/* total # of retrieved or affected rows */
+	int64		rows_scanned;	/* total # of rows scanned by scan nodes */
+	int64		rows_filtered;	/* total # of rows filtered out by quals */
 	int64		shared_blks_hit;	/* # of shared buffer hits */
 	int64		shared_blks_read;	/* # of shared disk blocks read */
 	int64		shared_blks_dirtied;	/* # of shared disk blocks dirtied */
@@ -332,6 +337,8 @@ PG_FUNCTION_INFO_V1(pg_stat_statements_1_10);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_11);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_12);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_13);
+PG_FUNCTION_INFO_V1(pg_stat_statements_1_14);
+PG_FUNCTION_INFO_V1(pg_stat_statements_1_15);
 PG_FUNCTION_INFO_V1(pg_stat_statements);
 PG_FUNCTION_INFO_V1(pg_stat_statements_info);
 
@@ -358,6 +365,8 @@ static void pgss_store(const char *query, int64 queryId,
 					   int query_location, int query_len,
 					   pgssStoreKind kind,
 					   double total_time, uint64 rows,
+					   int64 rows_scanned,
+					   int64 rows_filtered,
 					   const BufferUsage *bufusage,
 					   const WalUsage *walusage,
 					   const struct JitInstrumentation *jitusage,
@@ -870,6 +879,8 @@ pgss_post_parse_analyze(ParseState *pstate, Query *query, const JumbleState *jst
 				   PGSS_INVALID,
 				   0,
 				   0,
+				   0,
+				   0,
 				   NULL,
 				   NULL,
 				   NULL,
@@ -952,6 +963,8 @@ pgss_planner(Query *parse,
 				   PGSS_PLAN,
 				   INSTR_TIME_GET_MILLISEC(duration),
 				   0,
+				   0,
+				   0,
 				   &bufusage,
 				   &walusage,
 				   NULL,
@@ -1002,6 +1015,11 @@ pgss_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	{
 		/* Request all summary instrumentation, i.e. timing, buffers and WAL */
 		queryDesc->query_instr_options |= INSTRUMENT_ALL;
+		/*
+		 * Also enable per-node instrumentation so we can walk the plan tree
+		 * in ExecutorEnd and sum rows_scanned / rows_filtered from each node.
+		 */
+		queryDesc->instrument_options |= INSTRUMENT_ROWS;
 	}
 
 	if (prev_ExecutorStart)
@@ -1053,6 +1071,100 @@ pgss_ExecutorFinish(QueryDesc *queryDesc)
 }
 
 /*
+ * Helper structure for collecting scan statistics
+ */
+typedef struct ScanStats
+{
+	int64		rows_scanned;	/* total rows scanned (before filtering) */
+	int64		rows_filtered;	/* total rows filtered by all nodes */
+} ScanStats;
+
+/*
+ * Determine if a node is a scan node that reads from storage.
+ * For scan nodes, we want to count tuples before filter conditions are applied.
+ */
+static inline bool
+IsScanNode(PlanState *planstate)
+{
+	switch (nodeTag(planstate))
+	{
+		case T_SeqScanState:
+		case T_SampleScanState:
+		case T_IndexScanState:
+		case T_IndexOnlyScanState:
+		case T_BitmapHeapScanState:
+		case T_TidScanState:
+		case T_TidRangeScanState:
+		case T_ForeignScanState:
+		case T_CustomScanState:
+			return true;
+		default:
+			return false;
+	}
+}
+
+/*
+ * Walker function to collect scan statistics from all nodes.
+ * For scan nodes, rows_scanned = tuples output + tuples filtered.
+ * For all nodes, rows_filtered = sum of nfiltered1 + nfiltered2.
+ */
+static bool
+pgss_collect_scan_stats_walker(PlanState *planstate, void *context)
+{
+	ScanStats  *stats = (ScanStats *) context;
+
+	if (planstate->instrument)
+	{
+		Instrumentation *instr = planstate->instrument;
+
+		/*
+		 * Get the total tuple count for this node.  The tuples are tracked in
+		 * two places: 'ntuples' holds the count from completed cycles, and
+		 * 'tuplecount' holds the count from the current (possibly incomplete)
+		 * cycle.  We need both to get an accurate total.
+		 *
+		 * Note: InstrEndLoop() would normally move tuplecount to ntuples, but
+		 * it returns early if 'running' is false (which happens after each
+		 * InstrStopNode call), so we can't rely on it here.
+		 */
+		double		node_tuples = instr->ntuples + instr->tuplecount;
+
+		/*
+		 * Collect rows_filtered from all nodes. nfiltered1 tracks tuples
+		 * removed by scanqual or joinqual, nfiltered2 tracks tuples removed
+		 * by "other" quals.
+		 */
+		stats->rows_filtered += (int64) (instr->nfiltered1 + instr->nfiltered2);
+
+		if (IsScanNode(planstate))
+		{
+			/*
+			 * For scan nodes, rows_scanned is the number of tuples produced
+			 * plus the number of tuples filtered out by the scan's filter
+			 * condition.  This represents the total number of tuples read
+			 * from storage.
+			 */
+			double		scanned = node_tuples + instr->nfiltered1;
+
+			stats->rows_scanned += (int64) scanned;
+		}
+	}
+
+	return planstate_tree_walker(planstate, pgss_collect_scan_stats_walker, context);
+}
+
+/*
+ * Collect scan statistics from the entire plan tree.
+ */
+static void
+pgss_collect_scan_stats(PlanState *planstate, ScanStats *stats)
+{
+	memset(stats, 0, sizeof(ScanStats));
+	if (planstate)
+		pgss_collect_scan_stats_walker(planstate, stats);
+}
+
+/*
  * ExecutorEnd hook: store results if needed
  */
 static void
@@ -1063,6 +1175,14 @@ pgss_ExecutorEnd(QueryDesc *queryDesc)
 	if (queryId != INT64CONST(0) && queryDesc->query_instr &&
 		pgss_enabled(nesting_level))
 	{
+		ScanStats	scan_stats;
+
+		/*
+		 * Collect scan statistics from the plan tree.  This must be done
+		 * before standard_ExecutorEnd which will destroy the planstate.
+		 */
+		pgss_collect_scan_stats(queryDesc->planstate, &scan_stats);
+
 		pgss_store(queryDesc->sourceText,
 				   queryId,
 				   queryDesc->plannedstmt->stmt_location,
@@ -1070,6 +1190,8 @@ pgss_ExecutorEnd(QueryDesc *queryDesc)
 				   PGSS_EXEC,
 				   INSTR_TIME_GET_MILLISEC(queryDesc->query_instr->total),
 				   queryDesc->estate->es_total_processed,
+				   scan_stats.rows_scanned,
+				   scan_stats.rows_filtered,
 				   &queryDesc->query_instr->bufusage,
 				   &queryDesc->query_instr->walusage,
 				   queryDesc->estate->es_jit ? &queryDesc->estate->es_jit->instr : NULL,
@@ -1206,6 +1328,8 @@ pgss_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 				   PGSS_EXEC,
 				   INSTR_TIME_GET_MILLISEC(duration),
 				   rows,
+				   0,	/* rows_scanned not available for utility statements */
+				   0,	/* rows_filtered not available for utility statements */
 				   &bufusage,
 				   &walusage,
 				   NULL,
@@ -1270,6 +1394,8 @@ pgss_store(const char *query, int64 queryId,
 		   int query_location, int query_len,
 		   pgssStoreKind kind,
 		   double total_time, uint64 rows,
+		   int64 rows_scanned,
+		   int64 rows_filtered,
 		   const BufferUsage *bufusage,
 		   const WalUsage *walusage,
 		   const struct JitInstrumentation *jitusage,
@@ -1437,6 +1563,8 @@ pgss_store(const char *query, int64 queryId,
 			}
 		}
 		entry->counters.rows += rows;
+		entry->counters.rows_scanned += rows_scanned;
+		entry->counters.rows_filtered += rows_filtered;
 		entry->counters.shared_blks_hit += bufusage->shared_blks_hit;
 		entry->counters.shared_blks_read += bufusage->shared_blks_read;
 		entry->counters.shared_blks_dirtied += bufusage->shared_blks_dirtied;
@@ -1558,7 +1686,9 @@ pg_stat_statements_reset(PG_FUNCTION_ARGS)
 #define PG_STAT_STATEMENTS_COLS_V1_11	49
 #define PG_STAT_STATEMENTS_COLS_V1_12	52
 #define PG_STAT_STATEMENTS_COLS_V1_13	54
-#define PG_STAT_STATEMENTS_COLS			54	/* maximum of above */
+#define PG_STAT_STATEMENTS_COLS_V1_14	55
+#define PG_STAT_STATEMENTS_COLS_V1_15	56
+#define PG_STAT_STATEMENTS_COLS			56	/* maximum of above */
 
 /*
  * Retrieve statement statistics.
@@ -1570,6 +1700,26 @@ pg_stat_statements_reset(PG_FUNCTION_ARGS)
  * expected API version is identified by embedding it in the C name of the
  * function.  Unfortunately we weren't bright enough to do that for 1.1.
  */
+Datum
+pg_stat_statements_1_15(PG_FUNCTION_ARGS)
+{
+	bool		showtext = PG_GETARG_BOOL(0);
+
+	pg_stat_statements_internal(fcinfo, PGSS_V1_15, showtext);
+
+	return (Datum) 0;
+}
+
+Datum
+pg_stat_statements_1_14(PG_FUNCTION_ARGS)
+{
+	bool		showtext = PG_GETARG_BOOL(0);
+
+	pg_stat_statements_internal(fcinfo, PGSS_V1_14, showtext);
+
+	return (Datum) 0;
+}
+
 Datum
 pg_stat_statements_1_13(PG_FUNCTION_ARGS)
 {
@@ -1740,6 +1890,14 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 			break;
 		case PG_STAT_STATEMENTS_COLS_V1_13:
 			if (api_version != PGSS_V1_13)
+				elog(ERROR, "incorrect number of output arguments");
+			break;
+		case PG_STAT_STATEMENTS_COLS_V1_14:
+			if (api_version != PGSS_V1_14)
+				elog(ERROR, "incorrect number of output arguments");
+			break;
+		case PG_STAT_STATEMENTS_COLS_V1_15:
+			if (api_version != PGSS_V1_15)
 				elog(ERROR, "incorrect number of output arguments");
 			break;
 		default:
@@ -1926,6 +2084,10 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 			}
 		}
 		values[i++] = Int64GetDatumFast(tmp.rows);
+		if (api_version >= PGSS_V1_14)
+			values[i++] = Int64GetDatumFast(tmp.rows_scanned);
+		if (api_version >= PGSS_V1_15)
+			values[i++] = Int64GetDatumFast(tmp.rows_filtered);
 		values[i++] = Int64GetDatumFast(tmp.shared_blks_hit);
 		values[i++] = Int64GetDatumFast(tmp.shared_blks_read);
 		if (api_version >= PGSS_V1_1)
@@ -2016,6 +2178,8 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 					 api_version == PGSS_V1_11 ? PG_STAT_STATEMENTS_COLS_V1_11 :
 					 api_version == PGSS_V1_12 ? PG_STAT_STATEMENTS_COLS_V1_12 :
 					 api_version == PGSS_V1_13 ? PG_STAT_STATEMENTS_COLS_V1_13 :
+					 api_version == PGSS_V1_14 ? PG_STAT_STATEMENTS_COLS_V1_14 :
+					 api_version == PGSS_V1_15 ? PG_STAT_STATEMENTS_COLS_V1_15 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
