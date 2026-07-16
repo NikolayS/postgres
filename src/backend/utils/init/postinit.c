@@ -1351,6 +1351,17 @@ process_startup_options(Port *port, bool am_superuser)
 
 		SetConfigOption(name, value, gucctx, PGC_S_CLIENT);
 	}
+
+	/*
+	 * Apply protocol-negotiated options.  These use PGC_INTERNAL context
+	 * with PGC_S_OVERRIDE source, so they bypass the normal GUC access
+	 * controls.  This ensures only the _pq_ protocol path can set them;
+	 * SET and options=-c are blocked by PGC_INTERNAL.
+	 */
+	if (port->pq_command_tag_format != NULL)
+		SetConfigOption("command_tag_format",
+						port->pq_command_tag_format,
+						PGC_INTERNAL, PGC_S_OVERRIDE);
 }
 
 /*

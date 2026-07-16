@@ -806,12 +806,24 @@ retry:
 			else if (strncmp(nameptr, "_pq_.", 5) == 0)
 			{
 				/*
-				 * Any option beginning with _pq_. is reserved for use as a
-				 * protocol-level option, but at present no such options are
-				 * defined.
+				 * Options beginning with _pq_. are protocol-level options.
+				 * Recognized options are mapped to their corresponding GUCs.
 				 */
-				unrecognized_protocol_options =
-					lappend(unrecognized_protocol_options, pstrdup(nameptr));
+				if (strcmp(nameptr, "_pq_.command_tag_format") == 0)
+				{
+					/*
+					 * Protocol-level option: store for deferred application
+					 * in process_startup_options() after GUC init.  This
+					 * is NOT added to guc_options so that old-style
+					 * options=-c cannot set it (GUC is PGC_INTERNAL).
+					 */
+					port->pq_command_tag_format = pstrdup(valptr);
+				}
+				else
+				{
+					unrecognized_protocol_options =
+						lappend(unrecognized_protocol_options, pstrdup(nameptr));
+				}
 			}
 			else
 			{

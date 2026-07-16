@@ -152,6 +152,9 @@ typedef struct Port
 	char	   *cmdline_options;
 	List	   *guc_options;
 
+	/* Protocol-negotiated command tag format (from _pq_.command_tag_format) */
+	char	   *pq_command_tag_format;
+
 	/*
 	 * The startup packet application name, only used here for the "connection
 	 * authorized" log message. We shouldn't use this post-startup, instead

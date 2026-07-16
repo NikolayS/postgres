@@ -19,6 +19,7 @@
  *--------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "tcop/cmdtag.h"
 
 #ifdef HAVE_COPYFILE_H
 #include <copyfile.h>
@@ -146,6 +147,13 @@ static const struct config_enum_entry client_message_level_options[] = {
 	{"notice", NOTICE, false},
 	{"warning", WARNING, false},
 	{"error", ERROR, false},
+	{NULL, 0, false}
+};
+
+static const struct config_enum_entry command_tag_format_options[] = {
+	{"legacy", 0, false},
+	{"verbose", 1, false},
+	{"fqn", 2, false},
 	{NULL, 0, false}
 };
 

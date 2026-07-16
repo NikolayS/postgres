@@ -481,6 +481,16 @@
   check_hook => 'check_cluster_name',
 },
 
+
+{ name => 'command_tag_format', type => 'enum', context => 'PGC_INTERNAL', group => 'CLIENT_CONN_STATEMENT',
+  short_desc => 'Controls the format of INSERT command completion tags.',
+  long_desc => 'legacy: INSERT 0 N (default, backward compatible). verbose: INSERT tablename N. fqn: INSERT schema.tablename N. Can be set via _pq_.command_tag_format startup parameter for protocol-level negotiation.',
+  flags => 'GUC_REPORT',
+  variable => 'command_tag_format',
+  boot_val => 'COMMAND_TAG_FORMAT_LEGACY',
+  options => 'command_tag_format_options',
+  includes => 'tcop/cmdtag.h',
+},
 # we have no microseconds designation, so can't supply units here
 { name => 'commit_delay', type => 'int', context => 'PGC_SUSET', group => 'WAL_SETTINGS',
   short_desc => 'Sets the delay in microseconds between transaction commit and flushing WAL to disk.',
