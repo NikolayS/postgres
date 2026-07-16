@@ -55,6 +55,7 @@
 #include "jit/jit.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/queryjumble.h"
 #include "optimizer/planner.h"
 #include "parser/analyze.h"
@@ -85,7 +86,7 @@ PG_MODULE_MAGIC_EXT(
 #define PGSS_TEXT_FILE	PG_STAT_TMP_DIR "/pgss_query_texts.stat"
 
 /* Magic number identifying the stats file format */
-static const uint32 PGSS_FILE_HEADER = 0x20250731;
+static const uint32 PGSS_FILE_HEADER = 0x20251227;
 
 /* PostgreSQL major version number, changes in which invalidate all entries */
 static const uint32 PGSS_PG_MAJOR_VERSION = PG_VERSION_NUM / 100;
@@ -115,6 +116,7 @@ typedef enum pgssVersion
 	PGSS_V1_11,
 	PGSS_V1_12,
 	PGSS_V1_13,
+	PGSS_V1_14,
 } pgssVersion;
 
 typedef enum pgssStoreKind
@@ -165,6 +167,7 @@ typedef struct Counters
 	double		sum_var_time[PGSS_NUMKIND]; /* sum of variances in
 											 * planning/execution time in msec */
 	int64		rows;			/* total # of retrieved or affected rows */
+	int64		rows_filtered;	/* # of rows removed by filter conditions */
 	int64		shared_blks_hit;	/* # of shared buffer hits */
 	int64		shared_blks_read;	/* # of shared disk blocks read */
 	int64		shared_blks_dirtied;	/* # of shared disk blocks dirtied */
@@ -305,6 +308,8 @@ static int	pgss_track = PGSS_TRACK_TOP;	/* tracking level */
 static bool pgss_track_utility = true;	/* whether to track utility commands */
 static bool pgss_track_planning = false;	/* whether to track planning
 											 * duration */
+static bool pgss_track_rows_filtered = false;	/* whether to track rows
+												 * removed by filter conditions */
 static bool pgss_save = true;	/* whether to save stats across shutdown */
 
 #define pgss_enabled(level) \
@@ -332,6 +337,7 @@ PG_FUNCTION_INFO_V1(pg_stat_statements_1_10);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_11);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_12);
 PG_FUNCTION_INFO_V1(pg_stat_statements_1_13);
+PG_FUNCTION_INFO_V1(pg_stat_statements_1_14);
 PG_FUNCTION_INFO_V1(pg_stat_statements);
 PG_FUNCTION_INFO_V1(pg_stat_statements_info);
 
@@ -358,6 +364,7 @@ static void pgss_store(const char *query, int64 queryId,
 					   int query_location, int query_len,
 					   pgssStoreKind kind,
 					   double total_time, uint64 rows,
+					   int64 rows_filtered,
 					   const BufferUsage *bufusage,
 					   const WalUsage *walusage,
 					   const struct JitInstrumentation *jitusage,
@@ -449,6 +456,17 @@ _PG_init(void)
 							 "Selects whether planning duration is tracked by pg_stat_statements.",
 							 NULL,
 							 &pgss_track_planning,
+							 false,
+							 PGC_SUSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("pg_stat_statements.track_rows_filtered",
+							 "Selects whether rows removed by filter conditions are tracked.",
+							 NULL,
+							 &pgss_track_rows_filtered,
 							 false,
 							 PGC_SUSET,
 							 0,
@@ -870,6 +888,7 @@ pgss_post_parse_analyze(ParseState *pstate, Query *query, const JumbleState *jst
 				   PGSS_INVALID,
 				   0,
 				   0,
+				   0,
 				   NULL,
 				   NULL,
 				   NULL,
@@ -952,6 +971,7 @@ pgss_planner(Query *parse,
 				   PGSS_PLAN,
 				   INSTR_TIME_GET_MILLISEC(duration),
 				   0,
+				   0,
 				   &bufusage,
 				   &walusage,
 				   NULL,
@@ -1002,6 +1022,15 @@ pgss_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	{
 		/* Request all summary instrumentation, i.e. timing, buffers and WAL */
 		queryDesc->query_instr_options |= INSTRUMENT_ALL;
+
+		/*
+		 * If rows_filtered tracking is enabled, ensure per-node instrumentation
+		 * is also set up so we can collect nfiltered1/nfiltered2 statistics.
+		 * Must be done before standard_ExecutorStart, which is when per-node
+		 * instrumentation is allocated.
+		 */
+		if (pgss_track_rows_filtered)
+			queryDesc->instrument_options |= INSTRUMENT_ROWS;
 	}
 
 	if (prev_ExecutorStart)
@@ -1053,6 +1082,44 @@ pgss_ExecutorFinish(QueryDesc *queryDesc)
 }
 
 /*
+ * Walker function to collect rows_filtered from all plan nodes.
+ */
+static bool
+pgss_collect_filtered_walker(PlanState *planstate, int64 *rows_filtered)
+{
+	if (planstate->instrument)
+	{
+		Instrumentation *instr = planstate->instrument;
+
+		/*
+		 * Collect rows_filtered from all nodes. nfiltered1 tracks tuples
+		 * removed by scanqual or joinqual, nfiltered2 tracks tuples removed
+		 * by "other" quals (e.g., recheck conditions in bitmap index scans).
+		 *
+		 * The nfiltered counters are doubles, but they represent integer row
+		 * counts so the truncation to int64 is safe.
+		 */
+		*rows_filtered += (int64) (instr->nfiltered1 + instr->nfiltered2);
+	}
+
+	return planstate_tree_walker(planstate, pgss_collect_filtered_walker, rows_filtered);
+}
+
+/*
+ * Collect rows_filtered from the entire plan tree.
+ */
+static int64
+pgss_collect_rows_filtered(PlanState *planstate)
+{
+	int64		rows_filtered = 0;
+
+	if (planstate)
+		pgss_collect_filtered_walker(planstate, &rows_filtered);
+
+	return rows_filtered;
+}
+
+/*
  * ExecutorEnd hook: store results if needed
  */
 static void
@@ -1063,6 +1130,14 @@ pgss_ExecutorEnd(QueryDesc *queryDesc)
 	if (queryId != INT64CONST(0) && queryDesc->query_instr &&
 		pgss_enabled(nesting_level))
 	{
+		int64		rows_filtered;
+
+		/*
+		 * Collect rows_filtered from the plan tree.  This must be done
+		 * before standard_ExecutorEnd which will destroy the planstate.
+		 */
+		rows_filtered = pgss_collect_rows_filtered(queryDesc->planstate);
+
 		pgss_store(queryDesc->sourceText,
 				   queryId,
 				   queryDesc->plannedstmt->stmt_location,
@@ -1070,6 +1145,7 @@ pgss_ExecutorEnd(QueryDesc *queryDesc)
 				   PGSS_EXEC,
 				   INSTR_TIME_GET_MILLISEC(queryDesc->query_instr->total),
 				   queryDesc->estate->es_total_processed,
+				   rows_filtered,
 				   &queryDesc->query_instr->bufusage,
 				   &queryDesc->query_instr->walusage,
 				   queryDesc->estate->es_jit ? &queryDesc->estate->es_jit->instr : NULL,
@@ -1206,6 +1282,7 @@ pgss_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 				   PGSS_EXEC,
 				   INSTR_TIME_GET_MILLISEC(duration),
 				   rows,
+				   0,	/* rows_filtered - not tracked for utility */
 				   &bufusage,
 				   &walusage,
 				   NULL,
@@ -1270,6 +1347,7 @@ pgss_store(const char *query, int64 queryId,
 		   int query_location, int query_len,
 		   pgssStoreKind kind,
 		   double total_time, uint64 rows,
+		   int64 rows_filtered,
 		   const BufferUsage *bufusage,
 		   const WalUsage *walusage,
 		   const struct JitInstrumentation *jitusage,
@@ -1437,6 +1515,7 @@ pgss_store(const char *query, int64 queryId,
 			}
 		}
 		entry->counters.rows += rows;
+		entry->counters.rows_filtered += rows_filtered;
 		entry->counters.shared_blks_hit += bufusage->shared_blks_hit;
 		entry->counters.shared_blks_read += bufusage->shared_blks_read;
 		entry->counters.shared_blks_dirtied += bufusage->shared_blks_dirtied;
@@ -1558,7 +1637,8 @@ pg_stat_statements_reset(PG_FUNCTION_ARGS)
 #define PG_STAT_STATEMENTS_COLS_V1_11	49
 #define PG_STAT_STATEMENTS_COLS_V1_12	52
 #define PG_STAT_STATEMENTS_COLS_V1_13	54
-#define PG_STAT_STATEMENTS_COLS			54	/* maximum of above */
+#define PG_STAT_STATEMENTS_COLS_V1_14	55
+#define PG_STAT_STATEMENTS_COLS			55	/* maximum of above */
 
 /*
  * Retrieve statement statistics.
@@ -1570,6 +1650,16 @@ pg_stat_statements_reset(PG_FUNCTION_ARGS)
  * expected API version is identified by embedding it in the C name of the
  * function.  Unfortunately we weren't bright enough to do that for 1.1.
  */
+Datum
+pg_stat_statements_1_14(PG_FUNCTION_ARGS)
+{
+	bool		showtext = PG_GETARG_BOOL(0);
+
+	pg_stat_statements_internal(fcinfo, PGSS_V1_14, showtext);
+
+	return (Datum) 0;
+}
+
 Datum
 pg_stat_statements_1_13(PG_FUNCTION_ARGS)
 {
@@ -1740,6 +1830,10 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 			break;
 		case PG_STAT_STATEMENTS_COLS_V1_13:
 			if (api_version != PGSS_V1_13)
+				elog(ERROR, "incorrect number of output arguments");
+			break;
+		case PG_STAT_STATEMENTS_COLS_V1_14:
+			if (api_version != PGSS_V1_14)
 				elog(ERROR, "incorrect number of output arguments");
 			break;
 		default:
@@ -1926,6 +2020,8 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 			}
 		}
 		values[i++] = Int64GetDatumFast(tmp.rows);
+		if (api_version >= PGSS_V1_14)
+			values[i++] = Int64GetDatumFast(tmp.rows_filtered);
 		values[i++] = Int64GetDatumFast(tmp.shared_blks_hit);
 		values[i++] = Int64GetDatumFast(tmp.shared_blks_read);
 		if (api_version >= PGSS_V1_1)
@@ -2016,6 +2112,7 @@ pg_stat_statements_internal(FunctionCallInfo fcinfo,
 					 api_version == PGSS_V1_11 ? PG_STAT_STATEMENTS_COLS_V1_11 :
 					 api_version == PGSS_V1_12 ? PG_STAT_STATEMENTS_COLS_V1_12 :
 					 api_version == PGSS_V1_13 ? PG_STAT_STATEMENTS_COLS_V1_13 :
+					 api_version == PGSS_V1_14 ? PG_STAT_STATEMENTS_COLS_V1_14 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
