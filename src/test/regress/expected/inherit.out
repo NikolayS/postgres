@@ -1371,7 +1371,8 @@ NOTICE:  merging constraint "inh_check_constraint6" with inherited definition
 alter table p1_c1 add constraint inh_check_constraint9 check (f1 < 10) not valid enforced;
 alter table p1 add constraint inh_check_constraint9 check (f1 < 10) not enforced;
 NOTICE:  merging constraint "inh_check_constraint9" with inherited definition
--- the not-valid state of the child constraint will be ignored here.
+-- the not-valid state of the child constraint is preserved here, so the
+-- merged constraint becomes enforced but remains NOT VALID.
 alter table p1 add constraint inh_check_constraint10 check (f1 < 10) not enforced;
 alter table p1_c1 add constraint inh_check_constraint10 check (f1 < 10) not valid enforced;
 NOTICE:  merging constraint "inh_check_constraint10" with inherited definition
@@ -1411,7 +1412,7 @@ order by 1, 2;
  p1      | inh_check_constraint8  | t          |           0 | t           | t
  p1      | inh_check_constraint9  | t          |           0 | f           | f
  p1_c1   | inh_check_constraint1  | t          |           1 | t           | t
- p1_c1   | inh_check_constraint10 | t          |           1 | t           | t
+ p1_c1   | inh_check_constraint10 | t          |           1 | t           | f
  p1_c1   | inh_check_constraint2  | t          |           1 | t           | t
  p1_c1   | inh_check_constraint3  | t          |           1 | f           | f
  p1_c1   | inh_check_constraint4  | t          |           1 | f           | f
@@ -1479,6 +1480,53 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table p1_c1
 drop cascades to table p1_c2
 drop cascades to table p1_c3
+-- Existing rows must be verified when merging a local ENFORCED constraint
+-- into an inherited NOT ENFORCED one
+create table p1(f1 int);
+create table p1_c1() inherits(p1);
+alter table p1 add constraint inh_check_constraint check (f1 > 0) not enforced;
+insert into p1_c1 values(-1);
+alter table p1_c1 add constraint inh_check_constraint check (f1 > 0); --error
+NOTICE:  merging constraint "inh_check_constraint" with inherited definition
+ERROR:  check constraint "inh_check_constraint" of relation "p1_c1" is violated by some row
+-- adding it as NOT VALID skips the verification, and the merged constraint
+-- must not be marked validated
+alter table p1_c1 add constraint inh_check_constraint check (f1 > 0) not valid; --ok
+NOTICE:  merging constraint "inh_check_constraint" with inherited definition
+select conrelid::regclass, conenforced, convalidated
+from pg_constraint where conname = 'inh_check_constraint'
+order by conrelid::regclass::text collate "C";
+ conrelid | conenforced | convalidated 
+----------+-------------+--------------
+ p1       | f           | f
+ p1_c1    | t           | f
+(2 rows)
+
+alter table p1_c1 validate constraint inh_check_constraint; --error
+ERROR:  check constraint "inh_check_constraint" of relation "p1_c1" is violated by some row
+delete from p1_c1 where f1 = -1;
+alter table p1_c1 validate constraint inh_check_constraint; --ok
+drop table p1 cascade;
+NOTICE:  drop cascades to table p1_c1
+-- with no violating rows the merge succeeds, and the verification allows the
+-- merged constraint to be marked validated
+create table p1(f1 int);
+create table p1_c1() inherits(p1);
+alter table p1 add constraint inh_check_constraint check (f1 > 0) not enforced;
+insert into p1_c1 values(1);
+alter table p1_c1 add constraint inh_check_constraint check (f1 > 0); --ok
+NOTICE:  merging constraint "inh_check_constraint" with inherited definition
+select conrelid::regclass, conenforced, convalidated
+from pg_constraint where conname = 'inh_check_constraint'
+order by conrelid::regclass::text collate "C";
+ conrelid | conenforced | convalidated 
+----------+-------------+--------------
+ p1       | f           | f
+ p1_c1    | t           | t
+(2 rows)
+
+drop table p1 cascade;
+NOTICE:  drop cascades to table p1_c1
 -- an inherited CHECK constraint cannot be NOT ENFORCED under an ENFORCED parent
 create table p1(f1 int constraint p1_a_check check (f1 > 0) enforced);
 create table p1_c1() inherits(p1);
