@@ -11,6 +11,11 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+use FindBin;
+use lib $FindBin::RealBin;
+
+use CombineBackupTest;
+
 my $tempdir = PostgreSQL::Test::Utils::tempdir_short();
 my $mode = $ENV{PG_TEST_PG_COMBINEBACKUP_MODE} || '--copy';
 
@@ -277,61 +282,12 @@ foreach my $test (@tests)
 	validate_restored_vm($restored, $test);
 }
 
-# Cross-check the visibility map against the heap for every user relation
-# (including vm_ios_test and any toast tables), asserting that no stale
-# all-visible or all-frozen bits survived the restore.
-my $vm_errors = $restored->safe_psql('postgres', q{
-	SELECT relation, bad_visible, bad_frozen
-	FROM (SELECT c.oid::regclass AS relation,
-		  (SELECT count(*) FROM pg_check_visible(c.oid)) AS bad_visible,
-		  (SELECT count(*) FROM pg_check_frozen(c.oid)) AS bad_frozen
-	      FROM pg_class c
-	      WHERE c.relkind IN ('r', 'm', 't')
-		AND c.oid >= 16384) s
-	WHERE bad_visible > 0 OR bad_frozen > 0
-});
-is($vm_errors, '',
-	'no stale VM bits in any user relation on restored cluster');
-
-# Check heap and index consistency in every database of the restored
-# cluster. --heapallindexed also verifies every heap tuple is found in the
-# expected indexes.
-$restored->command_ok(
-	[ 'pg_amcheck', '--all', '--install-missing', '--heapallindexed' ],
-	'pg_amcheck reports no corruption on restored cluster');
-
-# Run the same aggregate with a forced index-only scan (which trusts the
-# visibility map) and a forced sequential scan (which does not), and require
-# identical answers. This is the user-visible symptom of stale all-visible
-# bits.
-my $ios_query = 'SELECT count(*), sum(id), min(id), max(id) FROM vm_ios_test';
-my $ios_plan = $restored->safe_psql(
-	'postgres', qq{
-	SET enable_seqscan = off;
-	SET enable_bitmapscan = off;
-	SET enable_indexonlyscan = on;
-	EXPLAIN (COSTS OFF) $ios_query;
-});
-like(
-	$ios_plan,
-	qr/Index Only Scan/,
-	'aggregate query uses an index-only scan when forced');
-my $ios_result = $restored->safe_psql(
-	'postgres', qq{
-	SET enable_seqscan = off;
-	SET enable_bitmapscan = off;
-	SET enable_indexonlyscan = on;
-	$ios_query;
-});
-my $seq_result = $restored->safe_psql(
-	'postgres', qq{
-	SET enable_indexscan = off;
-	SET enable_indexonlyscan = off;
-	SET enable_bitmapscan = off;
-	$ios_query;
-});
-is($ios_result, $seq_result,
-	'index-only scan and seqscan agree on restored cluster');
+# Run the full set of physical consistency checks against the restored
+# cluster: pg_amcheck across all databases, a pg_visibility sweep over every
+# user relation in every connectable database, and a forced index-only-scan
+# vs seqscan comparison on vm_ios_test. See CombineBackupTest.pm.
+check_physical_consistency($restored, 'restored cluster', 'vm_ios_test',
+	'id');
 
 $restored->stop;
 $primary->stop;

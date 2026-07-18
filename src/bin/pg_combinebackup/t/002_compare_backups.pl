@@ -7,6 +7,11 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+use FindBin;
+use lib $FindBin::RealBin;
+
+use CombineBackupTest;
+
 my $tempdir = PostgreSQL::Test::Utils::tempdir_short();
 
 # Can be changed to test the other modes.
@@ -216,71 +221,11 @@ compare_files(
 # stale visibility map bits, index corruption, or other damage to data that
 # a sequential scan does not consult. Run additional physical consistency
 # checks against each restored cluster, so that if only one of them fails,
-# the divergence is attributable.
-sub check_physical_consistency
-{
-	my ($node, $label) = @_;
-
-	# Check heap and index consistency in every database. --heapallindexed
-	# also verifies that every heap tuple is found in the expected indexes.
-	$node->command_ok(
-		[ 'pg_amcheck', '--all', '--install-missing', '--heapallindexed' ],
-		"$label: pg_amcheck reports no corruption");
-
-	# Ask pg_visibility to cross-check the visibility map against the heap
-	# for every user relation. Stale all-visible or all-frozen bits are
-	# invisible to a logical dump but corrupt index-only scan results and
-	# can cause future heap corruption once vacuum trusts them.
-	$node->safe_psql('postgres',
-		'CREATE EXTENSION IF NOT EXISTS pg_visibility');
-	my $vm_errors = $node->safe_psql('postgres', q{
-		SELECT relation, bad_visible, bad_frozen
-		FROM (SELECT c.oid::regclass AS relation,
-			  (SELECT count(*) FROM pg_check_visible(c.oid)) AS bad_visible,
-			  (SELECT count(*) FROM pg_check_frozen(c.oid)) AS bad_frozen
-		      FROM pg_class c
-		      WHERE c.relkind IN ('r', 'm', 't')
-			AND c.oid >= 16384) s
-		WHERE bad_visible > 0 OR bad_frozen > 0
-	});
-	is($vm_errors, '',
-		"$label: pg_check_visible/pg_check_frozen report no problems");
-
-	# Run the same aggregate with a forced index-only scan (which trusts the
-	# visibility map) and a forced sequential scan (which does not), and
-	# require identical answers. This is the user-visible symptom of stale
-	# all-visible bits.
-	my $ios_query = 'SELECT count(*), sum(a), min(a), max(a) FROM indexed_table';
-	my $ios_plan = $node->safe_psql(
-		'postgres', qq{
-		SET enable_seqscan = off;
-		SET enable_bitmapscan = off;
-		SET enable_indexonlyscan = on;
-		EXPLAIN (COSTS OFF) $ios_query;
-	});
-	like(
-		$ios_plan,
-		qr/Index Only Scan/,
-		"$label: aggregate query uses an index-only scan when forced");
-	my $ios_result = $node->safe_psql(
-		'postgres', qq{
-		SET enable_seqscan = off;
-		SET enable_bitmapscan = off;
-		SET enable_indexonlyscan = on;
-		$ios_query;
-	});
-	my $seq_result = $node->safe_psql(
-		'postgres', qq{
-		SET enable_indexscan = off;
-		SET enable_indexonlyscan = off;
-		SET enable_bitmapscan = off;
-		$ios_query;
-	});
-	is($ios_result, $seq_result,
-		"$label: index-only scan and seqscan agree");
-}
-
-check_physical_consistency($pitr1, 'full backup PITR');
-check_physical_consistency($pitr2, 'incremental backup PITR');
+# the divergence is attributable. See CombineBackupTest.pm for the details;
+# t/013_stale_vm_detection.pl is the negative control demonstrating that
+# these checks really do fire on a corrupted cluster.
+check_physical_consistency($pitr1, 'full backup PITR', 'indexed_table', 'a');
+check_physical_consistency($pitr2, 'incremental backup PITR',
+	'indexed_table', 'a');
 
 done_testing();
