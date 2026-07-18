@@ -166,6 +166,11 @@ sub validate_restored_vm
 		"SELECT count(*) FROM pg_check_visible('$test->{table}')");
 	is($corrupt_tids, '0',
 		"$test->{label} test: no VM corruption detected by pg_check_visible");
+
+	my $corrupt_frozen_tids = $restored->safe_psql('postgres',
+		"SELECT count(*) FROM pg_check_frozen('$test->{table}')");
+	is($corrupt_frozen_tids, '0',
+		"$test->{label} test: no VM corruption detected by pg_check_frozen");
 }
 
 # Create and populate the tables, then vacuum freeze them to set the VM bits
@@ -176,6 +181,15 @@ foreach my $test (@tests)
 	($test->{pre_visible}, $test->{pre_frozen}) =
 	  check_vacuumed_vm($primary, $test);
 }
+
+# Also create a multi-page table with an index, so that on the restored
+# cluster we can compare a forced index-only scan (which trusts the
+# visibility map) against a forced sequential scan (which does not).
+$primary->safe_psql('postgres', q{
+	CREATE TABLE vm_ios_test (id int PRIMARY KEY, val text);
+	INSERT INTO vm_ios_test SELECT g, 'row ' || g FROM generate_series(1, 1000) g;
+	VACUUM (FREEZE) vm_ios_test;
+});
 
 # Take a full backup
 my $full_name = 'full';
@@ -221,6 +235,17 @@ foreach my $test (@tests)
 	}
 }
 
+# Modify the index-only-scan test table so that its heap, index and
+# visibility map all change within the incremental backup window, then
+# re-vacuum so the VM bits are set again and an index-only scan on the
+# restored cluster will actually consult them.
+$primary->safe_psql('postgres', q{
+	UPDATE vm_ios_test SET val = 'updated row ' || id WHERE id % 100 = 0;
+	DELETE FROM vm_ios_test WHERE id % 137 = 0;
+	INSERT INTO vm_ios_test SELECT g, 'new row ' || g FROM generate_series(2001, 2100) g;
+	VACUUM (FREEZE) vm_ios_test;
+});
+
 # Take an incremental backup. This will have the changes made in the
 # modification step.
 my $incr_name = 'incr';
@@ -251,6 +276,62 @@ foreach my $test (@tests)
 {
 	validate_restored_vm($restored, $test);
 }
+
+# Cross-check the visibility map against the heap for every user relation
+# (including vm_ios_test and any toast tables), asserting that no stale
+# all-visible or all-frozen bits survived the restore.
+my $vm_errors = $restored->safe_psql('postgres', q{
+	SELECT relation, bad_visible, bad_frozen
+	FROM (SELECT c.oid::regclass AS relation,
+		  (SELECT count(*) FROM pg_check_visible(c.oid)) AS bad_visible,
+		  (SELECT count(*) FROM pg_check_frozen(c.oid)) AS bad_frozen
+	      FROM pg_class c
+	      WHERE c.relkind IN ('r', 'm', 't')
+		AND c.oid >= 16384) s
+	WHERE bad_visible > 0 OR bad_frozen > 0
+});
+is($vm_errors, '',
+	'no stale VM bits in any user relation on restored cluster');
+
+# Check heap and index consistency in every database of the restored
+# cluster. --heapallindexed also verifies every heap tuple is found in the
+# expected indexes.
+$restored->command_ok(
+	[ 'pg_amcheck', '--all', '--install-missing', '--heapallindexed' ],
+	'pg_amcheck reports no corruption on restored cluster');
+
+# Run the same aggregate with a forced index-only scan (which trusts the
+# visibility map) and a forced sequential scan (which does not), and require
+# identical answers. This is the user-visible symptom of stale all-visible
+# bits.
+my $ios_query = 'SELECT count(*), sum(id), min(id), max(id) FROM vm_ios_test';
+my $ios_plan = $restored->safe_psql(
+	'postgres', qq{
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET enable_indexonlyscan = on;
+	EXPLAIN (COSTS OFF) $ios_query;
+});
+like(
+	$ios_plan,
+	qr/Index Only Scan/,
+	'aggregate query uses an index-only scan when forced');
+my $ios_result = $restored->safe_psql(
+	'postgres', qq{
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET enable_indexonlyscan = on;
+	$ios_query;
+});
+my $seq_result = $restored->safe_psql(
+	'postgres', qq{
+	SET enable_indexscan = off;
+	SET enable_indexonlyscan = off;
+	SET enable_bitmapscan = off;
+	$ios_query;
+});
+is($ios_result, $seq_result,
+	'index-only scan and seqscan agree on restored cluster');
 
 $restored->stop;
 $primary->stop;
