@@ -257,14 +257,49 @@ report_sequence_errors(List *mismatched_seqs_idx,
 }
 
 /*
+ * slot_getattr_notnull
+ *
+ * Like slot_getattr(), but report an error if the publisher unexpectedly
+ * returned a NULL value for the given column.
+ *
+ * The data returned by the publisher cannot be trusted blindly: an
+ * incompatible, broken, or malicious publisher could return NULL values that
+ * the sync query normally never produces.
+ */
+static Datum
+slot_getattr_notnull(TupleTableSlot *slot, int col, const char *colname,
+					 LogicalRepSequenceInfo *seqinfo)
+{
+	bool		isnull;
+	Datum		datum;
+
+	datum = slot_getattr(slot, col, &isnull);
+	if (isnull)
+		ereport(ERROR,
+				errcode(ERRCODE_PROTOCOL_VIOLATION),
+				errmsg("invalid response from publisher"),
+				errdetail("Value of column \"%s\" for sequence \"%s.%s\" is null.",
+						  colname, seqinfo->nspname, seqinfo->seqname));
+
+	return datum;
+}
+
+/*
  * get_and_validate_seq_info
  *
  * Extracts remote sequence information from the tuple slot received from the
  * publisher, and validates it against the corresponding local sequence
  * definition.
+ *
+ * The sequence index echoed back by the publisher is validated before use:
+ * it must identify a unique member of the current batch, which starts at
+ * index 'batch_base' and contains 'batch_size' entries of the seqinfos list.
+ * 'batch_seen' is a caller-provided array of 'batch_size' entries, false on
+ * first call for a batch, used to detect duplicates.
  */
 static CopySeqResult
-get_and_validate_seq_info(TupleTableSlot *slot, Relation *sequence_rel,
+get_and_validate_seq_info(TupleTableSlot *slot, int batch_base, int batch_size,
+						  bool *batch_seen, Relation *sequence_rel,
 						  LogicalRepSequenceInfo **seqinfo, int *seqidx)
 {
 	bool		isnull;
@@ -282,8 +317,38 @@ get_and_validate_seq_info(TupleTableSlot *slot, Relation *sequence_rel,
 	Form_pg_sequence local_seq;
 	LogicalRepSequenceInfo *seqinfo_local;
 
-	*seqidx = DatumGetInt32(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	datum = slot_getattr(slot, ++col, &isnull);
+	if (isnull)
+		ereport(ERROR,
+				errcode(ERRCODE_PROTOCOL_VIOLATION),
+				errmsg("invalid response from publisher"),
+				errdetail("Sequence index is null."));
+
+	*seqidx = DatumGetInt32(datum);
+
+	/*
+	 * The index is sent to the publisher and echoed back in the result set.
+	 * Before using it, make sure that it identifies a unique member of the
+	 * current batch: an out-of-range index would perform an out-of-bounds
+	 * access on the seqinfos list, and an out-of-batch or duplicate index
+	 * would associate the returned state with the wrong local sequence and
+	 * corrupt the accounting used to detect rows missing from the response.
+	 */
+	if (*seqidx < batch_base || *seqidx >= batch_base + batch_size)
+		ereport(ERROR,
+				errcode(ERRCODE_PROTOCOL_VIOLATION),
+				errmsg("invalid response from publisher"),
+				errdetail("Sequence index %d is outside the valid range %d..%d.",
+						  *seqidx, batch_base, batch_base + batch_size - 1));
+
+	if (batch_seen[*seqidx - batch_base])
+		ereport(ERROR,
+				errcode(ERRCODE_PROTOCOL_VIOLATION),
+				errmsg("invalid response from publisher"),
+				errdetail("Sequence index %d appears more than once.",
+						  *seqidx));
+
+	batch_seen[*seqidx - batch_base] = true;
 
 	/* Identify the corresponding local sequence for the given index. */
 	*seqinfo = seqinfo_local =
@@ -313,29 +378,33 @@ get_and_validate_seq_info(TupleTableSlot *slot, Relation *sequence_rel,
 
 	seqinfo_local->last_value = DatumGetInt64(datum);
 
-	seqinfo_local->is_called = DatumGetBool(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	seqinfo_local->is_called =
+		DatumGetBool(slot_getattr_notnull(slot, ++col, "is_called",
+										  seqinfo_local));
 
-	seqinfo_local->page_lsn = DatumGetLSN(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	seqinfo_local->page_lsn =
+		DatumGetLSN(slot_getattr_notnull(slot, ++col, "page_lsn",
+										 seqinfo_local));
 
-	remote_typid = DatumGetObjectId(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_typid = DatumGetObjectId(slot_getattr_notnull(slot, ++col,
+														 "seqtypid",
+														 seqinfo_local));
 
-	remote_start = DatumGetInt64(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_start = DatumGetInt64(slot_getattr_notnull(slot, ++col, "seqstart",
+													  seqinfo_local));
 
-	remote_increment = DatumGetInt64(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_increment = DatumGetInt64(slot_getattr_notnull(slot, ++col,
+														  "seqincrement",
+														  seqinfo_local));
 
-	remote_min = DatumGetInt64(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_min = DatumGetInt64(slot_getattr_notnull(slot, ++col, "seqmin",
+													seqinfo_local));
 
-	remote_max = DatumGetInt64(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_max = DatumGetInt64(slot_getattr_notnull(slot, ++col, "seqmax",
+													seqinfo_local));
 
-	remote_cycle = DatumGetBool(slot_getattr(slot, ++col, &isnull));
-	Assert(!isnull);
+	remote_cycle = DatumGetBool(slot_getattr_notnull(slot, ++col, "seqcycle",
+													 seqinfo_local));
 
 	/* Sanity check */
 	Assert(col == REMOTE_SEQ_COL_COUNT);
@@ -455,7 +524,7 @@ copy_sequences(WalReceiverConn *conn)
 
 	while (cur_batch_base_index < n_seqinfos)
 	{
-		Oid			seqRow[REMOTE_SEQ_COL_COUNT] = {INT8OID, BOOLOID, INT8OID,
+		Oid			seqRow[REMOTE_SEQ_COL_COUNT] = {INT4OID, BOOLOID, INT8OID,
 		BOOLOID, LSNOID, OIDOID, INT8OID, INT8OID, INT8OID, INT8OID, BOOLOID};
 		int			batch_size = 0;
 		int			batch_succeeded_count = 0;
@@ -464,6 +533,7 @@ copy_sequences(WalReceiverConn *conn)
 		int			batch_sub_insuffperm_count = 0;
 		int			batch_pub_insuffperm_count = 0;
 		int			batch_missing_count;
+		bool	   *batch_seen;
 
 		WalRcvExecResult *res;
 		TupleTableSlot *slot;
@@ -535,6 +605,9 @@ copy_sequences(WalReceiverConn *conn)
 						 "JOIN LATERAL pg_get_sequence_data(seq.seqrelid) AS ps ON true\n",
 						 seqstr.data);
 
+		/* Track which batch members have been seen in the response so far. */
+		batch_seen = palloc0_array(bool, batch_size);
+
 		res = walrcv_exec(conn, cmd.data, lengthof(seqRow), seqRow);
 		if (res->status != WALRCV_OK_TUPLES)
 			ereport(ERROR,
@@ -558,7 +631,10 @@ copy_sequences(WalReceiverConn *conn)
 				ProcessConfigFile(PGC_SIGHUP);
 			}
 
-			sync_status = get_and_validate_seq_info(slot, &sequence_rel,
+			sync_status = get_and_validate_seq_info(slot,
+													cur_batch_base_index,
+													batch_size, batch_seen,
+													&sequence_rel,
 													&seqinfo, &seqidx);
 			if (sync_status == COPYSEQ_SUCCESS)
 				sync_status = copy_sequence(seqinfo,
@@ -636,6 +712,7 @@ copy_sequences(WalReceiverConn *conn)
 
 		ExecDropSingleTupleTableSlot(slot);
 		walrcv_clear_result(res);
+		pfree(batch_seen);
 		resetStringInfo(&seqstr);
 		resetStringInfo(&cmd);
 
