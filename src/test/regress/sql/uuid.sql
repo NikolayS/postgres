@@ -156,6 +156,27 @@ SELECT uuidv7('9000 years'::interval);
 -- uuidv7: a large but in-range forward shift is accepted
 SELECT uuid_extract_timestamp(uuidv7('1000 years'::interval)) > now() + '999 years'::interval;
 
+-- uuidv7: strictly increasing interval shifts produce strictly increasing
+-- (sortable) UUID values, matching the RFC 9562 sortability guarantee.  We
+-- compare the uuid values themselves (not just the extracted timestamps).
+DO $$
+DECLARE
+  prev uuid := NULL;
+  cur uuid;
+  s int;
+BEGIN
+  FOR s IN 0..30 LOOP
+    cur := uuidv7((s * 100 || ' years')::interval);
+    IF prev IS NOT NULL AND NOT (cur > prev) THEN
+      RAISE EXCEPTION 'uuidv7 not monotone at shift % years: % <= %',
+        s * 100, cur, prev;
+    END IF;
+    prev := cur;
+  END LOOP;
+  RAISE NOTICE 'uuidv7 monotone ordering OK';
+END;
+$$;
+
 -- extract functions
 
 -- version

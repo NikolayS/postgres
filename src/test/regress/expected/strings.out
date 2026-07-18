@@ -2915,6 +2915,96 @@ SELECT decode('abc-_w==', 'base64url');  -- should decode to \x69b73eff
 (1 row)
 
 --
+-- base64/base64url property-style regression tests
+--
+-- These guard the truncation rules: base64 requires '=' padding while
+-- base64url accepts unpadded input (see commits e1d917182 and the
+-- follow-up "Fix truncation rules for base64 encoding").
+--
+-- Round-trip identity encode(decode(encode(x))) = x for both variants
+-- across input lengths 0..8, covering every padding phase (len % 3 in
+-- {0,1,2}).  Uses a deterministic byte pattern so output is stable.
+DO $$
+DECLARE
+  variant text;
+  n int;
+  input bytea;
+  rt bytea;
+BEGIN
+  FOREACH variant IN ARRAY ARRAY['base64', 'base64url'] LOOP
+    FOR n IN 0..8 LOOP
+      input := decode(COALESCE(
+                 (SELECT string_agg(lpad(to_hex((i * 37 + 11) % 256), 2, '0'), '' ORDER BY i)
+                    FROM generate_series(0, n - 1) AS i), ''), 'hex');
+      rt := decode(encode(input, variant), variant);
+      IF rt IS DISTINCT FROM input THEN
+        RAISE EXCEPTION '% round-trip failed at length %: in=% out=%',
+          variant, n, input, rt;
+      END IF;
+    END LOOP;
+  END LOOP;
+  RAISE NOTICE 'base64/base64url round-trip identity OK';
+END;
+$$;
+NOTICE:  base64/base64url round-trip identity OK
+-- Padding/truncation rejection matrix: each unpadded trailing-group
+-- length (1, 2, 3 chars) x variant.  For base64 every unpadded partial
+-- group is rejected; for base64url only a 1-char remainder is invalid,
+-- while 2- and 3-char remainders decode without padding.
+SELECT decode('A', 'base64');        -- ERROR: 1-char remainder
+ERROR:  invalid base64 end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+SELECT decode('AQ', 'base64');       -- ERROR: 2-char remainder needs '=='
+ERROR:  invalid base64 end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+SELECT decode('AQI', 'base64');      -- ERROR: 3-char remainder needs '='
+ERROR:  invalid base64 end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+SELECT decode('A', 'base64url');     -- ERROR: 1-char remainder
+ERROR:  invalid base64url end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+SELECT decode('AQ', 'base64url');    -- ok: \x01
+ decode 
+--------
+ \x01
+(1 row)
+
+SELECT decode('AQI', 'base64url');   -- ok: \x0102
+ decode 
+--------
+ \x0102
+(1 row)
+
+-- Correctly padded base64 is accepted for the same remainders.
+SELECT decode('AQ==', 'base64');     -- ok: \x01
+ decode 
+--------
+ \x01
+(1 row)
+
+SELECT decode('AQI=', 'base64');     -- ok: \x0102
+ decode 
+--------
+ \x0102
+(1 row)
+
+-- Truncated second group (stray 1-char remainder) is rejected in both.
+SELECT decode('AQIDA', 'base64');    -- ERROR
+ERROR:  invalid base64 end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+SELECT decode('AQIDA', 'base64url'); -- ERROR
+ERROR:  invalid base64url end sequence
+HINT:  Input data is missing padding, is truncated, or is otherwise corrupted.
+-- Misplaced '=' padding is rejected in both variants.
+SELECT decode('=AAA', 'base64');     -- ERROR: '=' at group start
+ERROR:  unexpected "=" while decoding base64 sequence
+SELECT decode('A=AA', 'base64');     -- ERROR: '=' after 1 char
+ERROR:  unexpected "=" while decoding base64 sequence
+SELECT decode('=AAA', 'base64url');  -- ERROR
+ERROR:  unexpected "=" while decoding base64url sequence
+SELECT decode('A=AA', 'base64url');  -- ERROR
+ERROR:  unexpected "=" while decoding base64url sequence
+--
 -- get_bit/set_bit etc
 --
 SELECT get_bit('\x1234567890abcdef00'::bytea, 43);
