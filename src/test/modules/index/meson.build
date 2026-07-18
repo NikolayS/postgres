@@ -9,4 +9,9 @@ tests += {
       'killtuples',
     ],
   },
+  'tap': {
+    'tests': [
+      't/001_unlogged_lsn_stress.pl',
+    ],
+  },
 }
