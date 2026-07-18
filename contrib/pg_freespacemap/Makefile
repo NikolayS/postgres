@@ -12,8 +12,11 @@ DATA = pg_freespacemap--1.1.sql \
 	pg_freespacemap--1.0--1.1.sql
 PGFILEDESC = "pg_freespacemap - monitoring of free space map"
 
+EXTRA_INSTALL = contrib/pageinspect
+
 REGRESS_OPTS = --temp-config $(top_srcdir)/contrib/pg_freespacemap/pg_freespacemap.conf
 REGRESS = pg_freespacemap
+TAP_TESTS = 1
 
 # Disabled because these tests require "autovacuum=off", which
 # typical installcheck users do not have (e.g. buildfarm clients).
