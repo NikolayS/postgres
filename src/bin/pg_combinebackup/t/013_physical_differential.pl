@@ -10,34 +10,45 @@
 # class (e.g. visibility map buffers not registered by heap operations) were
 # only caught operation-by-operation.  This test is a generic oracle: it
 # runs a mixed workload with churn concurrent to a chain of incremental
-# backups, then quiesces the cluster and takes -- back to back, with no
-# intervening relation writes -- a final incremental backup and a reference
-# full backup.  The combined result of the backup chain must then be
-# physically identical, relation block by relation block, to the reference
-# full backup.
+# backups, then quiesces the cluster and takes a final incremental backup
+# and a reference full backup, back to back.  The combined result of the
+# backup chain must then be physically identical, relation block by
+# relation block, to the reference full backup.
 #
-# Comparison scope and masking:
-# - main, _vm and _init relation forks under base/ and global/ are compared
-#   byte-for-byte per 8 KB block.
-# - _fsm forks are skipped: the free space map is not fully WAL-logged by
-#   design, so it is legitimately allowed to diverge.
-# - Within a block, only pd_lsn and pd_checksum (the first 10 bytes of the
-#   page header) are masked.  Everything else, including hint bits in tuple
-#   infomasks, must match: data checksums are enabled by default, so hint
-#   bit changes that reach disk are WAL-logged as full-page hints and hence
-#   visible to the WAL summarizer.  Blocks that differ only in the masked
-#   bytes are counted and reported as a note, not a failure.
+# Why the comparison is valid (equivalence argument): the two final backups
+# are taken separately and do NOT share a stop LSN -- each emits its own
+# checkpoint, backup-end and WAL-switch records.  What makes them
+# comparable is that no *relation block* changes on disk between them.
+# This is not assumed, it is audited: pg_waldump scans the WAL window
+# spanning both backups (from just before I3's start checkpoint to just
+# after R completes) and the pair is rejected if any record in the window
+# carries a block reference.  That audit is conservative-sufficient
+# because, with data checksums enabled (the default, asserted below), a
+# relation page can only reach disk in modified form if some WAL record
+# referencing it was inserted first: normal modifications are WAL-logged in
+# the same critical section that dirties the buffer, and hint-bit-only
+# modifications emit a full-page hint record the first time a page is
+# touched after a checkpoint -- and since I3's own start checkpoint is
+# inside the audited window, a hint-bit change during the window cannot
+# hide behind an earlier FPI without that FPI also being in the window.
+# The known exceptions -- FSM forks (not fully WAL-logged) and unlogged
+# relation main forks (never backed up) -- are excluded from the
+# comparison below.  Deliberately, NO WAL replay happens between backup
+# and comparison: replaying to a common recovery target would let full-page
+# images repair exactly the stale blocks this oracle exists to catch.
+#
+# Comparison scope and normalization: see $normalizers below.
 #
 # Quiescence discipline: after the workload stops, a settle sequence
 # (VACUUM, catalog/table scans to set any remaining hint bits, CHECKPOINT)
-# runs before the final backup pair.  The WAL range spanning both final
-# backups is then checked with pg_waldump: if any WAL record in that range
-# references a relation block, the reference backup might not describe the
-# same cluster state as the combined backup, so the pair is retaken (with a
-# bounded number of attempts) rather than risking a false verdict.
+# runs before the final backup pair, so that in the common case the audited
+# window is genuinely empty of block references and the pair is accepted on
+# the first attempt; otherwise it is retaken (bounded attempts) rather than
+# risking a false verdict.
 
 use strict;
 use warnings FATAL => 'all';
+use File::Copy qw(copy);
 use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
@@ -370,7 +381,7 @@ for my $attempt (1 .. $max_attempts)
 	else
 	{
 		$accepted = 1;
-		ok(1, "final backup pair captured identical cluster state "
+		ok(1, "final backup pair captured the same relation-block state "
 			  . "(attempt $attempt)");
 		last;
 	}
@@ -380,16 +391,21 @@ ok($accepted,
 	"quiescent final backup pair obtained within $max_attempts attempts")
   or die 'cannot obtain a quiescent reference point, aborting';
 
-# Map relfilenode paths to relation names for better diagnostics.
-my %relname_by_path;
+# Map relfilenode paths to relation name, relkind and access method, both
+# for diagnostics and so the comparator can select AM-aware normalization.
+# Relations of other databases (template0/template1) stay unmapped and use
+# the default normalizer.
+my %relinfo_by_path;
 {
 	my $rows = $primary->safe_psql('postgres',
-		q{SELECT pg_relation_filepath(oid), relname
-		  FROM pg_class WHERE pg_relation_filepath(oid) IS NOT NULL});
+		q{SELECT pg_relation_filepath(c.oid), c.relname, c.relkind,
+		         coalesce(a.amname, '-')
+		  FROM pg_class c LEFT JOIN pg_am a ON a.oid = c.relam
+		  WHERE pg_relation_filepath(c.oid) IS NOT NULL});
 	foreach my $row (split /\n/, $rows)
 	{
-		my ($path, $name) = split /\|/, $row;
-		$relname_by_path{$path} = $name;
+		my ($path, $name, $kind, $am) = split /\|/, $row;
+		$relinfo_by_path{$path} = { name => $name, kind => $kind, am => $am };
 	}
 }
 
@@ -435,17 +451,68 @@ sub collect_relation_files
 	return \%files;
 }
 
+# Per-fork / per-AM block normalization: each entry maps a block image to
+# its comparable form by masking bytes that may legitimately differ between
+# two representations of the same logical page state.  Keys are tried as
+# "fork:am", then "fork:*", then "*:*".
+#
+# What could legitimately differ in general, and why only the page header
+# needs masking under THIS test's conditions (quiesced cluster, data
+# checksums on, heap + btree + sequence + toast relations only):
+#
+# - all forks: pd_lsn may differ when the same tuple-level state was
+#   reached via different WAL histories, and pd_checksum follows any bit
+#   difference.  Under the audited-empty-window discipline the on-disk
+#   image is literally the same bytes, so even these normally match; they
+#   are masked as insurance and counted when the mask was needed.
+# - heap main fork: infomask hint bits (HEAP_XMIN/XMAX_COMMITTED etc.) and
+#   pd_prune_xid can differ on a live standby-vs-primary style comparison;
+#   here checksums=on forces hint-bit changes through WAL (full-page
+#   hints), so the summarizer sees them and no infomask masking is needed.
+#   A comparison mode that relaxes those preconditions must add an
+#   infomask/prune-xid normalizer here (a page-parsing masker, cf. heap's
+#   rm_mask), not widen the global mask.
+# - btree main fork: LP_DEAD line-pointer hints and the btpo_cycleid; same
+#   reasoning as heap applies under checksums=on.
+# - _vm fork: pure bitmap payload behind the page header; no unlogged
+#   content when the referencing heap operations are WAL-correct (that
+#   correctness is precisely what this oracle checks).
+# - _init forks: written once at creation, no legitimate divergence.
+# - _fsm forks: intentionally not WAL-logged; they are excluded from the
+#   comparison entirely (see collect_relation_files) rather than masked.
+sub mask_page_header
+{
+	my ($buf) = @_;
+	substr($buf, 0, MASKED_HEADER_BYTES) = "\0" x MASKED_HEADER_BYTES;
+	return $buf;
+}
+
+my %normalizers = (
+	# Everything currently uses the page-header mask only; AM-specific
+	# entries (e.g. 'main:heap', 'main:btree', 'vm:*') slot in here if a
+	# future variant of this test relaxes the preconditions above.
+	'*:*' => \&mask_page_header,);
+
+sub normalize_block
+{
+	my ($fork, $relinfo, $buf) = @_;
+	my $am = defined $relinfo ? $relinfo->{am} : '-';
+	my $fn = $normalizers{"$fork:$am"}
+	  // $normalizers{"$fork:*"} // $normalizers{'*:*'};
+	return $fn->($buf);
+}
+
 # Describe the divergence within one block: the differing byte ranges
-# (computed on the masked images, so pd_lsn/pd_checksum noise is excluded)
+# (computed on the normalized images, so masked-byte noise is excluded)
 # with hex dumps of the raw bytes.
 sub describe_block_diff
 {
-	my ($rel, $relname, $blkno, $cbuf, $rbuf, $cmask, $rmask) = @_;
+	my ($rel, $desc, $blkno, $cbuf, $rbuf, $cmask, $rmask) = @_;
 
 	my $absblk = $blkno;
 	$absblk += $1 * RELSEG_SIZE if $rel =~ /\.(\d+)$/;
 
-	my $msg = "DIVERGENCE: $rel ($relname) block $absblk:";
+	my $msg = "DIVERGENCE: $rel ($desc) block $absblk:";
 	my $xor = $cmask ^ $rmask;
 	my $nranges = 0;
 	while ($xor =~ /[^\0]+/g)
@@ -465,9 +532,24 @@ sub describe_block_diff
 	return $msg;
 }
 
+# Parse a relation file's relative path into (base path, fork).
+sub parse_rel_path
+{
+	my ($rel) = @_;
+	my $fork = 'main';
+	(my $base = $rel) =~ s/_(vm|init)// and $fork = $1;
+	$base =~ s/\.\d+$//;
+	return ($base, $fork);
+}
+
 sub compare_relation_file
 {
-	my ($c_file, $r_file, $rel, $relname, $reports, $stats) = @_;
+	my ($c_file, $r_file, $rel, $relinfo, $reports, $stats) = @_;
+
+	my (undef, $fork) = parse_rel_path($rel);
+	my $desc = defined $relinfo
+	  ? "$relinfo->{name} kind=$relinfo->{kind} am=$relinfo->{am} fork=$fork"
+	  : "? fork=$fork";
 
 	open my $cf, '<:raw', $c_file or die "open $c_file: $!";
 	open my $rf, '<:raw', $r_file or die "open $r_file: $!";
@@ -479,7 +561,7 @@ sub compare_relation_file
 	{
 		$ndiv++;
 		push @$reports,
-		  "DIVERGENCE: $rel ($relname): size mismatch: "
+		  "DIVERGENCE: $rel ($desc): size mismatch: "
 		  . "combined $c_size vs reference $r_size bytes";
 	}
 
@@ -493,9 +575,8 @@ sub compare_relation_file
 		$stats->{blocks}++;
 		next if $cbuf eq $rbuf;
 
-		my ($cmask, $rmask) = ($cbuf, $rbuf);
-		substr($cmask, 0, MASKED_HEADER_BYTES) = "\0" x MASKED_HEADER_BYTES;
-		substr($rmask, 0, MASKED_HEADER_BYTES) = "\0" x MASKED_HEADER_BYTES;
+		my $cmask = normalize_block($fork, $relinfo, $cbuf);
+		my $rmask = normalize_block($fork, $relinfo, $rbuf);
 		if ($cmask eq $rmask)
 		{
 			$stats->{lsn_only}++;
@@ -504,7 +585,7 @@ sub compare_relation_file
 
 		$ndiv++;
 		push @$reports,
-		  describe_block_diff($rel, $relname, $blk, $cbuf, $rbuf,
+		  describe_block_diff($rel, $desc, $blk, $cbuf, $rbuf,
 			$cmask, $rmask)
 		  if @$reports < 50;
 	}
@@ -529,11 +610,9 @@ my $ndivergent = 0;
 
 foreach my $rel (@common)
 {
-	(my $base = $rel) =~ s/_(?:vm|init)//;
-	$base =~ s/\.\d+$//;
-	my $relname = $relname_by_path{$base} // '?';
+	my ($base, undef) = parse_rel_path($rel);
 	$ndivergent += compare_relation_file("$c_path/$rel", "$r_path/$rel",
-		$rel, $relname, \@reports, \%stats);
+		$rel, $relinfo_by_path{$base}, \@reports, \%stats);
 }
 
 # Guard against the oracle trivially passing because it looked at nothing.
@@ -546,7 +625,70 @@ is($ndivergent, 0,
 	'combined backup is block-identical to reference full backup '
 	  . "($stats{blocks} blocks in " . scalar(@common) . ' files)')
   or diag join("\n", @reports);
-note "$stats{lsn_only} block(s) differed only in masked pd_lsn/pd_checksum"
+note "$stats{lsn_only} block(s) differed only in normalizer-masked bytes"
   if $stats{lsn_only};
+
+#
+# Oracle self-check ("kill test"): prove the comparator actually bites.
+# Flip one byte -- outside the masked page-header bytes -- in copies of one
+# heap main-fork block and one visibility-map block taken from the combined
+# output, and require the comparator to report exactly that divergence with
+# correct file and block attribution.  This guards against the main
+# comparison rotting into a trivial pass (e.g. a future masking or
+# file-collection bug that silently compares nothing).
+#
+my %path_by_name =
+  map { $relinfo_by_path{$_}{name} => $_ } keys %relinfo_by_path;
+
+my $killdir = $backup_dir . '/killtest';
+mkdir $killdir or die "mkdir $killdir: $!";
+
+my @kills = (
+	{
+		rel => $path_by_name{t_heap},
+		blk => 3,
+		off => 4000,
+		what => 'heap main fork',
+	},
+	{
+		rel => $path_by_name{t_vm} . '_vm',
+		blk => 0,
+		off => 100,
+		what => 'visibility map fork',
+	});
+
+foreach my $kill (@kills)
+{
+	my $rel = $kill->{rel};
+	ok($c_files->{$rel} && $r_files->{$rel},
+		"kill test: $kill->{what} target $rel present in both backups");
+
+	# Corrupt a copy; the combined output itself must stay pristine.
+	(my $flat = $rel) =~ s{/}{_}g;
+	my $copy = "$killdir/$flat";
+	copy("$c_path/$rel", $copy) or die "copy $c_path/$rel: $!";
+
+	my $pos = $kill->{blk} * BLCKSZ + $kill->{off};
+	open my $fh, '+<:raw', $copy or die "open $copy: $!";
+	seek($fh, $pos, 0) or die "seek $copy: $!";
+	read($fh, my $byte, 1) == 1 or die "read $copy: $!";
+	seek($fh, $pos, 0) or die "seek $copy: $!";
+	print $fh ($byte ^ chr(0xFF));
+	close $fh or die "close $copy: $!";
+
+	my ($base, undef) = parse_rel_path($rel);
+	my @kreports;
+	my %kstats = (blocks => 0, lsn_only => 0);
+	my $kdiv = compare_relation_file($copy, "$r_path/$rel",
+		$rel, $relinfo_by_path{$base}, \@kreports, \%kstats);
+
+	is($kdiv, 1,
+		"kill test: $kill->{what}: exactly one divergent block detected");
+	like(
+		join("\n", @kreports),
+		qr/DIVERGENCE: \Q$rel\E .*block $kill->{blk}:.*bytes $kill->{off}\.\.$kill->{off} differ/s,
+		"kill test: $kill->{what}: divergence attributed to block "
+		  . "$kill->{blk} offset $kill->{off}");
+}
 
 done_testing();
