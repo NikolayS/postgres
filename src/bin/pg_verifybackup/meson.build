@@ -38,6 +38,7 @@ tests += {
       't/008_untar.pl',
       't/009_extract.pl',
       't/010_client_untar.pl',
+      't/011_manifest_mutation.pl',
     ],
   },
 }
