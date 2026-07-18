@@ -10053,6 +10053,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ListCell   *lcon;
 	List	   *children;
 	ListCell   *child;
+	Oid			enforcing_conoid = InvalidOid;
 	ObjectAddress address = InvalidObjectAddress;
 
 	/* Guard against stack overflow due to overly deep inheritance tree. */
@@ -10064,14 +10065,50 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 							ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE);
 
 	/*
+	 * If the command names a check constraint and an identically-named NOT
+	 * ENFORCED check constraint already exists on this relation, then (if
+	 * things go well) AddRelationNewConstraints will merge the new
+	 * constraint into the existing one, additionally marking it enforced.
+	 * Existing rows have never been checked against a NOT ENFORCED
+	 * constraint, so unlike ordinary merges this one requires the existing
+	 * rows to be verified when the new constraint is to be valid.  Take note
+	 * of the pre-merge state, so that we can queue that work below.
+	 */
+	if (constr->contype == CONSTR_CHECK &&
+		constr->conname != NULL &&
+		constr->is_enforced &&
+		constr->initially_valid)
+	{
+		Oid			conoid;
+
+		conoid = get_relation_constraint_oid(RelationGetRelid(rel),
+											 constr->conname, true);
+		if (OidIsValid(conoid))
+		{
+			HeapTuple	contup;
+			Form_pg_constraint conform;
+
+			contup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(conoid));
+			if (!HeapTupleIsValid(contup))
+				elog(ERROR, "cache lookup failed for constraint %u", conoid);
+			conform = (Form_pg_constraint) GETSTRUCT(contup);
+			if (conform->contype == CONSTRAINT_CHECK && !conform->conenforced)
+				enforcing_conoid = conoid;
+			ReleaseSysCache(contup);
+		}
+	}
+
+	/*
 	 * Call AddRelationNewConstraints to do the work, making sure it works on
 	 * a copy of the Constraint so transformExpr can't modify the original. It
 	 * returns a list of cooked constraints.
 	 *
 	 * If the constraint ends up getting merged with a pre-existing one, it's
-	 * omitted from the returned list, which is what we want: we do not need
-	 * to do any validation work.  That can only happen at child tables,
-	 * though, since we disallow merging at the top level.
+	 * omitted from the returned list.  Normally there is then no validation
+	 * work to do, but if the merge marked a previously NOT ENFORCED
+	 * constraint as enforced, existing rows must be verified; that case is
+	 * handled below.  Merging can only happen at child tables, though, since
+	 * we disallow merging at the top level.
 	 */
 	newcons = AddRelationNewConstraints(rel, NIL,
 										list_make1(copyObject(constr)),
@@ -10124,6 +10161,40 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
+
+	/*
+	 * If the new constraint was merged into a pre-existing NOT ENFORCED
+	 * constraint, the merge marked that constraint enforced and valid, but
+	 * its existing rows have never been checked; tell Phase 3 to verify
+	 * them, just as ALTER TABLE ... ALTER CONSTRAINT ... ENFORCED would do.
+	 * (If the constraint was instead created afresh, the loop above has
+	 * already taken care of this.)
+	 */
+	if (newcons == NIL && OidIsValid(enforcing_conoid) &&
+		rel->rd_rel->relkind == RELKIND_RELATION)
+	{
+		NewConstraint *newcon;
+		HeapTuple	contup;
+		Datum		val;
+		char	   *conbin;
+
+		contup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(enforcing_conoid));
+		if (!HeapTupleIsValid(contup))
+			elog(ERROR, "cache lookup failed for constraint %u",
+				 enforcing_conoid);
+
+		newcon = palloc0_object(NewConstraint);
+		newcon->name = pstrdup(constr->conname);
+		newcon->contype = CONSTR_CHECK;
+		val = SysCacheGetAttrNotNull(CONSTROID, contup,
+									 Anum_pg_constraint_conbin);
+		conbin = TextDatumGetCString(val);
+		newcon->qual = expand_generated_columns_in_expr(stringToNode(conbin),
+														rel, 1);
+		ReleaseSysCache(contup);
+
+		tab->constraints = lappend(tab->constraints, newcon);
+	}
 
 	/*
 	 * If the constraint got merged with an existing constraint, we're done.

@@ -2880,12 +2880,20 @@ MergeWithExistingConstraint(Relation rel, const char *ccname, Node *expr,
 		 * constraint is not, this should be allowed by marking the child
 		 * constraint as enforced. In the reverse case, an error would have
 		 * already been thrown before reaching this point.
+		 *
+		 * Since the constraint was not enforced before, its existing rows
+		 * have never been checked against it, so it must not become
+		 * validated as a side effect of the merge.  Mark it validated only
+		 * if the new constraint says to be initially valid, in which case
+		 * it is the caller's responsibility to verify the existing rows
+		 * (ATAddCheckNNConstraint queues that work); otherwise it remains
+		 * NOT VALID until ALTER TABLE ... VALIDATE CONSTRAINT is run.
 		 */
 		if (is_enforced && !con->conenforced)
 		{
 			Assert(is_local);
 			con->conenforced = true;
-			con->convalidated = true;
+			con->convalidated = is_initially_valid;
 		}
 
 		CatalogTupleUpdate(conDesc, &tup->t_self, tup);
