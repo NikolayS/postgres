@@ -112,6 +112,6 @@ extern void gist_desc(StringInfo buf, XLogReaderState *record);
 extern const char *gist_identify(uint8 info);
 extern void gist_xlog_startup(void);
 extern void gist_xlog_cleanup(void);
-extern void gist_mask(char *pagedata, BlockNumber blkno);
+extern void gist_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum);
 
 #endif

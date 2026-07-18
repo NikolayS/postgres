@@ -1091,7 +1091,7 @@ hash_redo(XLogReaderState *record)
  * Mask a hash page before performing consistency checks on it.
  */
 void
-hash_mask(char *pagedata, BlockNumber blkno)
+hash_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum)
 {
 	Page		page = (Page) pagedata;
 	HashPageOpaque opaque;

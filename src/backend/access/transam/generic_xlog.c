@@ -536,7 +536,7 @@ generic_redo(XLogReaderState *record)
  * Mask a generic page before performing consistency checks on it.
  */
 void
-generic_mask(char *page, BlockNumber blkno)
+generic_mask(char *page, BlockNumber blkno, ForkNumber forknum)
 {
 	mask_page_lsn_and_checksum(page);
 

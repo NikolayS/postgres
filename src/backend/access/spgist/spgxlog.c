@@ -983,7 +983,7 @@ spg_xlog_cleanup(void)
  * Mask a SpGist page before performing consistency checks on it.
  */
 void
-spg_mask(char *pagedata, BlockNumber blkno)
+spg_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum)
 {
 	Page		page = (Page) pagedata;
 	PageHeader	pagehdr = (PageHeader) page;

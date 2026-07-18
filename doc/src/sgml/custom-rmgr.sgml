@@ -35,7 +35,10 @@
  * record, if available (e.g. the last block).
  *
  * rm_mask takes as input a page modified by the resource manager and masks
- * out bits that shouldn't be flagged by wal_consistency_checking.
+ * out bits that shouldn't be flagged by wal_consistency_checking.  The fork
+ * number of the block is passed as well, since resource managers may
+ * register blocks of different forks (e.g. heap records can reference
+ * visibility map pages) which require different masking rules.
  *
  * RmgrTable[] is indexed by RmgrId values (see rmgrlist.h). If rm_name is
  * NULL, the corresponding RmgrTable entry is considered invalid.
@@ -48,7 +51,8 @@ typedef struct RmgrData
     const char *(*rm_identify) (uint8 info);
     void        (*rm_startup) (void);
     void        (*rm_cleanup) (void);
-    void        (*rm_mask) (char *pagedata, BlockNumber blkno);
+    void        (*rm_mask) (char *pagedata, BlockNumber blkno,
+                            ForkNumber forknum);
     void        (*rm_decode) (struct LogicalDecodingContext *ctx,
                               struct XLogRecordBuffer *buf);
 } RmgrData;

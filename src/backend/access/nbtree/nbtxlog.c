@@ -1078,7 +1078,7 @@ btree_xlog_cleanup(void)
  * Mask a btree page before performing consistency checks on it.
  */
 void
-btree_mask(char *pagedata, BlockNumber blkno)
+btree_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum)
 {
 	Page		page = (Page) pagedata;
 	BTPageOpaque maskopaq;
