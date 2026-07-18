@@ -4,6 +4,8 @@ EXTRA_INSTALL = contrib/btree_gin contrib/btree_gist
 
 ISOLATION = killtuples
 
+TAP_TESTS = 1
+
 ifdef USE_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
