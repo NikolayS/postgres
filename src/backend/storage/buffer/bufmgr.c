@@ -5454,9 +5454,21 @@ RelationCopyStorageUsingBuffer(RelFileLocator srclocator,
 		memcpy(dstPage, srcPage, BLCKSZ);
 		MarkBufferDirty(dstBuf);
 
-		/* WAL-log the copied page. */
+		/*
+		 * WAL-log the copied page.
+		 *
+		 * We must not claim the standard page layout for visibility map or
+		 * FSM pages: they keep their whole payload between pd_lower and
+		 * pd_upper, so treating them as standard would make the full-page
+		 * image omit that region as a "hole", and replay would zero it,
+		 * silently emptying the fork's contents on a standby or after crash
+		 * recovery.  Main and init fork pages use the standard layout, so
+		 * hole compression is safe for them.
+		 */
 		if (use_wal)
-			log_newpage_buffer(dstBuf, true);
+			log_newpage_buffer(dstBuf,
+							   forkNum != VISIBILITYMAP_FORKNUM &&
+							   forkNum != FSM_FORKNUM);
 
 		END_CRIT_SECTION();
 
