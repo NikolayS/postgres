@@ -11,6 +11,11 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+use FindBin;
+use lib $FindBin::RealBin;
+
+use CombineBackupTest;
+
 my $tempdir = PostgreSQL::Test::Utils::tempdir_short();
 my $mode = $ENV{PG_TEST_PG_COMBINEBACKUP_MODE} || '--copy';
 
@@ -166,6 +171,11 @@ sub validate_restored_vm
 		"SELECT count(*) FROM pg_check_visible('$test->{table}')");
 	is($corrupt_tids, '0',
 		"$test->{label} test: no VM corruption detected by pg_check_visible");
+
+	my $corrupt_frozen_tids = $restored->safe_psql('postgres',
+		"SELECT count(*) FROM pg_check_frozen('$test->{table}')");
+	is($corrupt_frozen_tids, '0',
+		"$test->{label} test: no VM corruption detected by pg_check_frozen");
 }
 
 # Create and populate the tables, then vacuum freeze them to set the VM bits
@@ -176,6 +186,15 @@ foreach my $test (@tests)
 	($test->{pre_visible}, $test->{pre_frozen}) =
 	  check_vacuumed_vm($primary, $test);
 }
+
+# Also create a multi-page table with an index, so that on the restored
+# cluster we can compare a forced index-only scan (which trusts the
+# visibility map) against a forced sequential scan (which does not).
+$primary->safe_psql('postgres', q{
+	CREATE TABLE vm_ios_test (id int PRIMARY KEY, val text);
+	INSERT INTO vm_ios_test SELECT g, 'row ' || g FROM generate_series(1, 1000) g;
+	VACUUM (FREEZE) vm_ios_test;
+});
 
 # Take a full backup
 my $full_name = 'full';
@@ -221,6 +240,17 @@ foreach my $test (@tests)
 	}
 }
 
+# Modify the index-only-scan test table so that its heap, index and
+# visibility map all change within the incremental backup window, then
+# re-vacuum so the VM bits are set again and an index-only scan on the
+# restored cluster will actually consult them.
+$primary->safe_psql('postgres', q{
+	UPDATE vm_ios_test SET val = 'updated row ' || id WHERE id % 100 = 0;
+	DELETE FROM vm_ios_test WHERE id % 137 = 0;
+	INSERT INTO vm_ios_test SELECT g, 'new row ' || g FROM generate_series(2001, 2100) g;
+	VACUUM (FREEZE) vm_ios_test;
+});
+
 # Take an incremental backup. This will have the changes made in the
 # modification step.
 my $incr_name = 'incr';
@@ -251,6 +281,13 @@ foreach my $test (@tests)
 {
 	validate_restored_vm($restored, $test);
 }
+
+# Run the full set of physical consistency checks against the restored
+# cluster: pg_amcheck across all databases, a pg_visibility sweep over every
+# user relation in every connectable database, and a forced index-only-scan
+# vs seqscan comparison on vm_ios_test. See CombineBackupTest.pm.
+check_physical_consistency($restored, 'restored cluster', 'vm_ios_test',
+	'id');
 
 $restored->stop;
 $primary->stop;
