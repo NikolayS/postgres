@@ -134,6 +134,372 @@ static int	max_rdatas;			/* allocated size */
 
 static bool begininsert_called = false;
 
+#ifdef USE_ASSERT_CHECKING
+
+/*
+ * WAL registration cross-check
+ * ----------------------------
+ *
+ * The WAL protocol (see access/transam/README) requires that every shared
+ * buffer that a WAL-logged operation modifies is registered in the WAL
+ * record describing that operation (XLogRegisterBuffer/XLogRegisterBlock).
+ * If a modified page is not registered, replay may still happen to work
+ * (the redo routine can find the page by other means), but the WAL
+ * summarizer only sees registered block references, so incremental backups
+ * silently omit the page — the class of corruption fixed for visibility-map
+ * bits in commit ed62d26 ("Fix VM clear WAL logging by registering VM
+ * blocks").  Unregistered modified pages also never get full-page images,
+ * so they are vulnerable to torn writes.
+ *
+ * Nothing enforces this invariant mechanically, so in assertion-enabled
+ * builds we cross-check it: every shared buffer passed to MarkBufferDirty()
+ * inside a critical section is recorded here (XLogRegCheckBufferDirtied,
+ * called from bufmgr.c).  Whenever XLogInsert() completes a record inside a
+ * critical section, tracked buffers that were registered with that record
+ * are considered accounted for and removed.  When the outermost critical
+ * section ends (see END_CRIT_SECTION in miscadmin.h), any tracked buffer
+ * that is still pending — dirtied, but never registered with any of the WAL
+ * records emitted in that critical section — is reported.
+ *
+ * The check is deliberately deferred to the end of the critical section
+ * rather than raised at XLogInsert() time, because some legitimate code
+ * paths emit more than one WAL record per critical section and register a
+ * dirtied buffer only with a later record (e.g. heap operations emit an
+ * XLOG_HEAP2_NEW_CID record, which carries no block references, before the
+ * record that registers the heap buffer).  Likewise, critical sections that
+ * emit no WAL at all (temp/unlogged relations, wal_level=minimal relfilenodes
+ * created in the current transaction, index builds that WAL-log the result
+ * only afterwards via log_newpage_range) are not checked: the report is
+ * only produced if at least one WAL record was inserted in the critical
+ * section, since only then was there a record the buffer should have been
+ * registered with.
+ *
+ * Every dirtied buffer and every inserted record is passed through an
+ * explicit classification (XLogRegCheckClassifyBuffer /
+ * XLogRegCheckClassifyRecord).  There is no ad-hoc exemption list and no
+ * per-call opt-out: a page change either is subject to the invariant
+ * (XLOG_REG_CHECK_CHECKED) or belongs to a named class whose definition
+ * states the invariant that makes skipping it safe, and what would make it
+ * unsafe.  Extending the exemptions therefore requires adding a new class
+ * here together with its written safety argument.
+ *
+ * The report level is WARNING rather than an Assert/PANIC so that a full
+ * test run can collect all violations in one pass; define
+ * XLOG_REG_CHECK_PANIC to turn violations into PANICs (useful to get a
+ * backtrace at the exact site).
+ */
+#ifdef XLOG_REG_CHECK_PANIC
+#define XLOG_REG_CHECK_ELEVEL	PANIC
+#else
+#define XLOG_REG_CHECK_ELEVEL	WARNING
+#endif
+
+/*
+ * Classification of a page modification (or of an inserted WAL record) with
+ * respect to the registration invariant.  Every value other than
+ * XLOG_REG_CHECK_CHECKED carries the safety argument for skipping the
+ * check, and the condition under which that argument would break.
+ */
+typedef enum XLogRegCheckClass
+{
+	/*
+	 * Subject to the invariant: a permanent shared buffer of a WAL-logged
+	 * fork, dirtied inside a critical section.  If any WAL record is
+	 * inserted in that critical section, one of those records must register
+	 * this block.
+	 */
+	XLOG_REG_CHECK_CHECKED,
+
+	/*
+	 * NOT_WAL_LOGGED_RELATION: local buffers (temporary relations) and
+	 * non-permanent shared buffers (unlogged relations).
+	 *
+	 * Safe because: these relations generate no WAL for their data changes
+	 * at all, are excluded from base/incremental backups' consistency
+	 * guarantees (unlogged relations are reset at recovery from their
+	 * WAL-logged INIT_FORK), and the WAL summarizer never needs to see
+	 * them.
+	 *
+	 * Would become unsafe if: buffer persistence stopped tracking relation
+	 * persistence (BufferIsPermanent is the authority; note INIT_FORK
+	 * buffers of unlogged relations are permanent and thus remain CHECKED).
+	 */
+	XLOG_REG_CHECK_NOT_WAL_LOGGED_RELATION,
+
+	/*
+	 * SELF_REPAIRING_FORK: free space map pages (FSM_FORKNUM).
+	 *
+	 * Safe because: the FSM is deliberately not WAL-logged (see
+	 * src/backend/storage/freespace/README); it is best-effort information
+	 * that is tolerated stale/torn and repaired during normal operation
+	 * (and by VACUUM).  Because FSM changes have no WAL block references
+	 * anywhere, incremental backup treats the FSM fork as unsummarized data
+	 * and copies it whole, so the summarizer does not need FSM block
+	 * references.
+	 *
+	 * Would become unsafe if: the FSM (or a part of it, e.g. the root page)
+	 * started being WAL-logged and incrementally backed up, or if another
+	 * fork were added to this class without the same self-repair and
+	 * copied-whole properties.  The visibility map does NOT qualify: VM
+	 * bits carry correctness-critical information (index-only scans,
+	 * relfrozenxid advancement) — that is exactly the ed62d26 bug class.
+	 */
+	XLOG_REG_CHECK_SELF_REPAIRING_FORK,
+
+	/*
+	 * HINT_ONLY: pages dirtied via MarkBufferDirtyHint().
+	 *
+	 * This class is documentation: it can never be returned here because
+	 * MarkBufferDirtyHint() intentionally does not feed the tracker (only
+	 * MarkBufferDirty() does).  Hint-bit-only changes are legitimately not
+	 * registered with the current WAL record: they are not required for
+	 * correctness of replay, and when they do matter for durability (page
+	 * checksums enabled), MarkBufferDirtyHint() itself WAL-logs a full-page
+	 * image (XLOG_FPI_FOR_HINT) with the block properly registered, which
+	 * the WAL summarizer sees.
+	 *
+	 * Would become unsafe if: hint-style modifications stopped going
+	 * through MarkBufferDirtyHint()/XLogSaveBufferForHint(), or a caller
+	 * used MarkBufferDirtyHint() for a change replay actually depends on.
+	 */
+	XLOG_REG_CHECK_HINT_ONLY,
+
+	/*
+	 * LSN_ONLY_RECORD: WAL records whose entire meaning is the LSN they
+	 * occupy — they describe no page modification by definition, so page
+	 * modifications in the same critical section cannot be "theirs" and the
+	 * record is ignored by the cross-check (as if no record was inserted).
+	 *
+	 * The defining properties of this class are: (i) the record is emitted
+	 * solely to advance/mark the WAL insert position, (ii) it never carries
+	 * block references, and (iii) the modifications surrounding it are
+	 * covered by some other mechanism, stated per record type below.
+	 *
+	 * The only in-tree member is XLOG_ASSIGN_LSN, emitted by
+	 * XLogGetFakeLSN() from inside index-AM critical sections (hash,
+	 * nbtree, gist) that operate on a permanent relation whose relfilenode
+	 * is not WAL-logged (wal_level=minimal and the relfilenode was created
+	 * in the current transaction; XLogGetFakeLSN() asserts
+	 * !RelationNeedsWAL).  The surrounding page modifications are covered
+	 * because the whole relation is durably synced at commit, and
+	 * wal_level=minimal is incompatible with WAL summarization
+	 * (summarize_wal requires wal_level >= replica), so incremental backups
+	 * cannot be affected.  Superficially similar records (XLOG_NOOP,
+	 * XLOG_SWITCH, ...) are deliberately NOT in this class: they are never
+	 * legitimately emitted from page-modifying critical sections, so if
+	 * they ever appear there the check should complain.
+	 *
+	 * Would become unsafe if: a caller emitted an LSN-only record from a
+	 * critical section that modifies pages of a WAL-logged relation and
+	 * relied on it as the only record of the section — but that situation
+	 * is precisely what this check would then be needed for, so any new
+	 * emitter of XLOG_ASSIGN_LSN must re-justify membership here.
+	 */
+	XLOG_REG_CHECK_LSN_ONLY_RECORD,
+} XLogRegCheckClass;
+
+/*
+ * Fixed-size array: we cannot allocate memory inside a critical section.
+ * If it overflows, checking is skipped for the rest of the critical section.
+ */
+#define REGCHECK_MAX_DIRTIED	256
+
+typedef struct RegCheckDirtiedBuffer
+{
+	RelFileLocator rlocator;
+	ForkNumber	forkno;
+	BlockNumber block;
+	int			nrec_pending;	/* records inserted while entry pending */
+	RmgrId		last_rmid;		/* context of the last such record ... */
+	uint8		last_info;		/* ... for the violation report */
+} RegCheckDirtiedBuffer;
+
+static RegCheckDirtiedBuffer regcheck_dirtied[REGCHECK_MAX_DIRTIED];
+static int	regcheck_ndirtied = 0;
+static bool regcheck_overflowed = false;
+static int	regcheck_ninserts = 0;	/* records inserted in current top-level
+									 * critical section */
+
+/*
+ * Classify a dirtied buffer with respect to the registration invariant.
+ * Also returns the buffer tag for tracked buffers, since the caller needs
+ * it and computing it requires the same calls.
+ *
+ * HINT_ONLY is never returned here: hint-bit dirtying does not reach the
+ * tracker at all (see the class definition above).
+ */
+static XLogRegCheckClass
+XLogRegCheckClassifyBuffer(Buffer buffer, RelFileLocator *rlocator,
+						   ForkNumber *forkno, BlockNumber *block)
+{
+	if (BufferIsLocal(buffer) || !BufferIsPermanent(buffer))
+		return XLOG_REG_CHECK_NOT_WAL_LOGGED_RELATION;
+
+	BufferGetTag(buffer, rlocator, forkno, block);
+
+	if (*forkno == FSM_FORKNUM)
+		return XLOG_REG_CHECK_SELF_REPAIRING_FORK;
+
+	return XLOG_REG_CHECK_CHECKED;
+}
+
+/*
+ * Classify an inserted WAL record: either it is a record that page
+ * modifications must be registered with (CHECKED), or it belongs to a class
+ * that by definition describes no page modification.
+ */
+static XLogRegCheckClass
+XLogRegCheckClassifyRecord(RmgrId rmid, uint8 info)
+{
+	if (rmid == RM_XLOG_ID && info == XLOG_ASSIGN_LSN)
+		return XLOG_REG_CHECK_LSN_ONLY_RECORD;
+
+	return XLOG_REG_CHECK_CHECKED;
+}
+
+/*
+ * Reset the WAL registration cross-check state.
+ *
+ * Called when a top-level critical section starts (also cleans up any state
+ * left over by error-path CritSectionCount resets, e.g. in elog.c).
+ */
+void
+XLogRegCheckReset(void)
+{
+	regcheck_ndirtied = 0;
+	regcheck_overflowed = false;
+	regcheck_ninserts = 0;
+}
+
+/*
+ * Note that 'buffer' was dirtied.  Called by MarkBufferDirty().
+ *
+ * Only buffers classified as CHECKED are tracked, and only while inside a
+ * critical section.
+ */
+void
+XLogRegCheckBufferDirtied(Buffer buffer)
+{
+	RegCheckDirtiedBuffer *entry;
+	RelFileLocator rlocator;
+	ForkNumber	forkno;
+	BlockNumber block;
+
+	if (CritSectionCount == 0)
+		return;
+
+	if (XLogRegCheckClassifyBuffer(buffer, &rlocator, &forkno, &block) !=
+		XLOG_REG_CHECK_CHECKED)
+		return;
+
+	/* Already tracked? */
+	for (int i = 0; i < regcheck_ndirtied; i++)
+	{
+		entry = &regcheck_dirtied[i];
+		if (RelFileLocatorEquals(entry->rlocator, rlocator) &&
+			entry->forkno == forkno && entry->block == block)
+			return;
+	}
+
+	if (regcheck_ndirtied >= REGCHECK_MAX_DIRTIED)
+	{
+		regcheck_overflowed = true;
+		return;
+	}
+
+	entry = &regcheck_dirtied[regcheck_ndirtied++];
+	entry->rlocator = rlocator;
+	entry->forkno = forkno;
+	entry->block = block;
+	entry->nrec_pending = 0;
+	entry->last_rmid = 0;
+	entry->last_info = 0;
+}
+
+/*
+ * Called by XLogInsert() just before a record is assembled and inserted,
+ * while the registered_buffers[] array is still populated.  Tracked buffers
+ * registered with this record are accounted for; the rest stay pending.
+ */
+static void
+XLogRegCheckRecordInserted(RmgrId rmid, uint8 info)
+{
+	if (CritSectionCount == 0)
+		return;
+
+	/*
+	 * Records that by definition describe no page modification are ignored:
+	 * they neither account for pending buffers nor count as a record the
+	 * critical section's page changes should have been registered with.
+	 */
+	if (XLogRegCheckClassifyRecord(rmid, info) != XLOG_REG_CHECK_CHECKED)
+		return;
+
+	regcheck_ninserts++;
+
+	for (int i = 0; i < regcheck_ndirtied;)
+	{
+		RegCheckDirtiedBuffer *entry = &regcheck_dirtied[i];
+		bool		found = false;
+
+		for (int j = 0; j < max_registered_block_id; j++)
+		{
+			registered_buffer *regbuf = &registered_buffers[j];
+
+			if (!regbuf->in_use)
+				continue;
+			if (RelFileLocatorEquals(regbuf->rlocator, entry->rlocator) &&
+				regbuf->forkno == entry->forkno &&
+				regbuf->block == entry->block)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (found)
+		{
+			/* accounted for; remove by replacing with the last entry */
+			*entry = regcheck_dirtied[--regcheck_ndirtied];
+		}
+		else
+		{
+			entry->nrec_pending++;
+			entry->last_rmid = rmid;
+			entry->last_info = info;
+			i++;
+		}
+	}
+}
+
+/*
+ * Called when the outermost critical section ends (END_CRIT_SECTION in
+ * miscadmin.h).  Report any buffer that was dirtied inside the critical
+ * section but not registered with any of the WAL records inserted in it.
+ */
+void
+XLogRegCheckCritSectionEnd(void)
+{
+	if (regcheck_ninserts > 0 && !regcheck_overflowed)
+	{
+		for (int i = 0; i < regcheck_ndirtied; i++)
+		{
+			RegCheckDirtiedBuffer *entry = &regcheck_dirtied[i];
+
+			elog(XLOG_REG_CHECK_ELEVEL,
+				 "WAL registration check: buffer for relation %u/%u/%u fork %d block %u was dirtied in a critical section that inserted %d WAL record(s), but was not registered with any of them (%d record(s) inserted while pending, last one rmid %d info 0x%02X)",
+				 entry->rlocator.spcOid, entry->rlocator.dbOid,
+				 entry->rlocator.relNumber, (int) entry->forkno, entry->block,
+				 regcheck_ninserts, entry->nrec_pending,
+				 (int) entry->last_rmid, (unsigned int) entry->last_info);
+		}
+	}
+
+	XLogRegCheckReset();
+}
+
+#endif							/* USE_ASSERT_CHECKING */
+
 /* Memory context to hold the registered buffer and data references. */
 static MemoryContext xloginsert_cxt;
 
@@ -508,6 +874,11 @@ XLogInsert(RmgrId rmid, uint8 info)
 		EndPos = SizeOfXLogLongPHD; /* start of 1st chkpt record */
 		return EndPos;
 	}
+
+#ifdef USE_ASSERT_CHECKING
+	/* Account for tracked dirtied buffers registered with this record. */
+	XLogRegCheckRecordInserted(rmid, info);
+#endif
 
 	do
 	{

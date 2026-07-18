@@ -3216,6 +3216,15 @@ MarkBufferDirty(Buffer buffer)
 		if (VacuumCostActive)
 			VacuumCostBalance += VacuumCostPageDirty;
 	}
+
+#ifdef USE_ASSERT_CHECKING
+	/*
+	 * If we are inside a critical section, remember this buffer for the WAL
+	 * registration cross-check: it must be registered with one of the WAL
+	 * records inserted in this critical section.  See xloginsert.c.
+	 */
+	XLogRegCheckBufferDirtied(buffer);
+#endif
 }
 
 /*
