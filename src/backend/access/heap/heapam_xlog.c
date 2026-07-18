@@ -1346,10 +1346,29 @@ heap2_redo(XLogReaderState *record)
  * Mask a heap page before performing consistency checks on it.
  */
 void
-heap_mask(char *pagedata, BlockNumber blkno)
+heap_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum)
 {
 	Page		page = (Page) pagedata;
 	OffsetNumber off;
+
+	/*
+	 * Heap records can reference visibility map pages in addition to heap
+	 * pages.  A visibility map page stores the all-visible/all-frozen bitmap
+	 * in the space between pd_lower and pd_upper, so the heap masking rules
+	 * below must not be applied to it: in particular, mask_unused_space()
+	 * would wipe out the entire bitmap, making the consistency check on VM
+	 * pages vacuous.  VM bits are only ever set or cleared while holding
+	 * exclusive content lock on the VM page with the changes WAL-logged, so
+	 * only the LSN and checksum can legitimately differ between the primary
+	 * and standby versions of a VM page.
+	 */
+	if (forknum == VISIBILITYMAP_FORKNUM)
+	{
+		mask_page_lsn_and_checksum(page);
+		return;
+	}
+
+	Assert(forknum == MAIN_FORKNUM);
 
 	mask_page_lsn_and_checksum(page);
 

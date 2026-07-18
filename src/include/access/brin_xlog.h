@@ -146,6 +146,6 @@ typedef struct xl_brin_desummarize
 extern void brin_redo(XLogReaderState *record);
 extern void brin_desc(StringInfo buf, XLogReaderState *record);
 extern const char *brin_identify(uint8 info);
-extern void brin_mask(char *pagedata, BlockNumber blkno);
+extern void brin_mask(char *pagedata, BlockNumber blkno, ForkNumber forknum);
 
 #endif							/* BRIN_XLOG_H */

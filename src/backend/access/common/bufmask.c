@@ -55,8 +55,18 @@ mask_page_hint_bits(Page page)
 	PageClearHasFreeLinePointers(page);
 
 	/*
-	 * PD_ALL_VISIBLE is masked during WAL consistency checking. XXX: It is
-	 * worth investigating if we could stop doing this.
+	 * PD_ALL_VISIBLE is masked during WAL consistency checking.
+	 *
+	 * All changes to PD_ALL_VISIBLE are WAL-logged nowadays, so in principle
+	 * primary and standby should agree on it.  However, when the only change
+	 * to a heap page is setting PD_ALL_VISIBLE (and checksums/wal_log_hints
+	 * are disabled), log_heap_prune_and_freeze() intentionally skips the FPI
+	 * and does not stamp the heap page with the record's LSN.  The flag's
+	 * on-disk state is therefore not strictly LSN-ordered, and around
+	 * recovery restarts the primary's page image and the standby's replayed
+	 * page can transiently disagree on it without indicating corruption.  So
+	 * we conservatively continue to mask it.  XXX: It is worth investigating
+	 * if we could stop doing this.
 	 */
 	PageClearAllVisible(page);
 }

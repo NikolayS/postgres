@@ -73,7 +73,7 @@ seq_redo(XLogReaderState *record)
  * Mask a Sequence page before performing consistency checks on it.
  */
 void
-seq_mask(char *page, BlockNumber blkno)
+seq_mask(char *page, BlockNumber blkno, ForkNumber forknum)
 {
 	mask_page_lsn_and_checksum(page);
 

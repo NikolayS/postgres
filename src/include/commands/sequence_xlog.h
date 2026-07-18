@@ -40,6 +40,6 @@ typedef struct xl_seq_rec
 extern void seq_redo(XLogReaderState *record);
 extern void seq_desc(StringInfo buf, XLogReaderState *record);
 extern const char *seq_identify(uint8 info);
-extern void seq_mask(char *page, BlockNumber blkno);
+extern void seq_mask(char *page, BlockNumber blkno, ForkNumber forknum);
 
 #endif							/* SEQUENCE_XLOG_H */
