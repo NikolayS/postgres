@@ -1052,3 +1052,144 @@ SELECT * FROM JSON_TABLE(jsonb '{}', '$' AS p0
 \sv json_table_view_on_empty;
 
 DROP VIEW json_table_view_on_empty;
+
+-- ==========================================================================
+-- Persisted JSON_TABLE views for dump/restore round-trip coverage
+--
+-- The views above are all dropped, so their deparsed definitions are never
+-- carried through a dump/restore (or pg_upgrade) cycle.  The views below are
+-- deliberately left in place at the end of this file so that
+-- pg_upgrade's dump comparison round-trips them, pinning the backward
+-- parsing of the trickier JSON_TABLE PLAN constructs: nested parent/child
+-- (OUTER/INNER) joins that must stay parenthesized, sibling UNION/CROSS
+-- joins, PLAN DEFAULT, generated-vs-user path-name collisions, and per-column
+-- and table-level ON ERROR/ON EMPTY.  Each view is accompanied by its pinned
+-- pg_get_viewdef() output and a SELECT that checks the resulting rows, so a
+-- regression that silently drops a column or mangles a plan is caught here.
+-- ==========================================================================
+
+-- Nested parent/child plan two levels deep, with an explicit parenthesized
+-- child join: PLAN (p0 OUTER (p1 INNER p11)).  The parentheses around
+-- (p1 INNER p11) must survive deparsing, otherwise the plan reparses to a
+-- different tree (a dump/restore hazard).  The INNER join means array
+-- elements of "a" whose "b" is empty (x = 2) are dropped from the output,
+-- while the OUTER-joined parent still contributes its other rows.
+CREATE VIEW jsonb_table_view_pc_plan AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"a":[{"x":1,"b":[10,20]},{"x":2,"b":[]},{"x":3,"b":[30]}]}', '$' AS p0
+	COLUMNS (
+		NESTED PATH '$.a[*]' AS p1 COLUMNS (
+			x int PATH '$.x',
+			NESTED PATH '$.b[*]' AS p11 COLUMNS (b int PATH '$')
+		)
+	)
+	PLAN (p0 OUTER (p1 INNER p11))
+);
+SELECT pg_get_viewdef('jsonb_table_view_pc_plan'::regclass);
+SELECT * FROM jsonb_table_view_pc_plan ORDER BY x, b;
+
+-- Sibling paths joined with an explicit CROSS (not the default UNION), under
+-- a parent/child OUTER join.  CROSS produces the cartesian product of the two
+-- sibling arrays, so the deparsed PLAN must keep CROSS and the parentheses.
+CREATE VIEW jsonb_table_view_sibling_plan AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"a":[1,2],"b":["x","y"]}', '$' AS p0
+	COLUMNS (
+		NESTED PATH '$.a[*]' AS pa COLUMNS (a int PATH '$'),
+		NESTED PATH '$.b[*]' AS pb COLUMNS (b text PATH '$')
+	)
+	PLAN (p0 OUTER (pa CROSS pb))
+);
+SELECT pg_get_viewdef('jsonb_table_view_sibling_plan'::regclass);
+SELECT * FROM jsonb_table_view_sibling_plan ORDER BY a, b;
+
+-- The trickiest shape: a parent OUTER-joined to a CROSS of two sibling
+-- parent/child subplans, each of which is itself a parent/child join that
+-- must stay parenthesized: PLAN (p OUTER ((pb INNER pb1) CROSS (pc OUTER pc1))).
+-- Exercises both the "parenthesize a parent/child child" fix and the sibling
+-- operand parenthesization together.
+CREATE VIEW jsonb_table_view_mixed_plan AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"b":[{"b1":[1,2]}],"c":[{"c1":[3]},{"c1":[]}]}', '$' AS p
+	COLUMNS (
+		NESTED PATH '$.b[*]' AS pb COLUMNS (
+			NESTED PATH '$.b1[*]' AS pb1 COLUMNS (b1 int PATH '$')
+		),
+		NESTED PATH '$.c[*]' AS pc COLUMNS (
+			NESTED PATH '$.c1[*]' AS pc1 COLUMNS (c1 int PATH '$')
+		)
+	)
+	PLAN (p OUTER ((pb INNER pb1) CROSS (pc OUTER pc1)))
+);
+SELECT pg_get_viewdef('jsonb_table_view_mixed_plan'::regclass);
+SELECT * FROM jsonb_table_view_mixed_plan ORDER BY b1, c1;
+
+-- Deparse-reparse round-trip stability check: recreate the trickiest view
+-- from its own deparsed definition and confirm the deparse is a fixed point
+-- (the second view's definition is byte-for-byte identical).  This proves the
+-- PLAN clause parses back to the same tree without relying on an external
+-- dump/restore.
+SELECT format('CREATE VIEW jsonb_table_view_mixed_plan2 AS %s',
+			  pg_get_viewdef('jsonb_table_view_mixed_plan'::regclass))
+\gexec
+SELECT pg_get_viewdef('jsonb_table_view_mixed_plan'::regclass) =
+	   pg_get_viewdef('jsonb_table_view_mixed_plan2'::regclass) AS deparse_roundtrip_stable;
+
+-- PLAN DEFAULT with explicit non-default choices (INNER, UNION).  The default
+-- plan is normally implied by the NESTED structure and omitted, but INNER is
+-- not the default parent/child join, so this deparses back as an explicit
+-- PLAN with INNER joins over the (unnamed) generated path names.  The INNER
+-- join drops the "c"-less element (x = 2).
+CREATE VIEW jsonb_table_view_default_plan AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"a":[{"x":1,"c":[10]},{"x":2,"c":[]}]}', '$'
+	COLUMNS (
+		NESTED PATH '$.a[*]' COLUMNS (
+			x int PATH '$.x',
+			NESTED PATH '$.c[*]' COLUMNS (c int PATH '$')
+		)
+	)
+	PLAN DEFAULT (INNER, UNION)
+);
+SELECT pg_get_viewdef('jsonb_table_view_default_plan'::regclass);
+SELECT * FROM jsonb_table_view_default_plan ORDER BY x, c;
+
+-- User path/column names deliberately colliding with the generated
+-- "json_table_path_N" pattern, mixed with unnamed paths.  A generated name
+-- must skip any name already used, and the unnamed row-pattern (root) path is
+-- named only after the user-supplied names are collected, so none of the
+-- columns is silently dropped.  All of json_table_path_0 (a column),
+-- json_table_path_1 (a NESTED path) and the unnamed sibling path's rows must
+-- appear.
+CREATE VIEW jsonb_table_view_name_collision AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"json_table_path_1":[{"v":11},{"v":12}],"y":[{"w":21}]}', '$'
+	COLUMNS (
+		json_table_path_0 int PATH '$.nosuch' DEFAULT -1 ON EMPTY,
+		NESTED PATH '$.json_table_path_1[*]' AS json_table_path_1
+			COLUMNS (v int PATH '$.v'),
+		NESTED PATH '$.y[*]' COLUMNS (w int PATH '$.w')
+	)
+);
+SELECT pg_get_viewdef('jsonb_table_view_name_collision'::regclass);
+SELECT * FROM jsonb_table_view_name_collision ORDER BY v, w;
+
+-- Per-column and table-level ON ERROR / ON EMPTY under an explicit PLAN.  A
+-- non-default per-column ON EMPTY (and EXISTS ... ON ERROR) must be preserved
+-- verbatim through the deparse, independently of the table-level ERROR ON
+-- ERROR (which does not cascade to the columns).
+CREATE VIEW jsonb_table_view_on_behavior AS
+SELECT * FROM JSON_TABLE(
+	jsonb '{"a":[{"n":5}]}', '$' AS p0
+	COLUMNS (
+		a int PATH '$.nosuch' DEFAULT -7 ON EMPTY,
+		e bool EXISTS PATH '$.nosuch' FALSE ON ERROR,
+		NESTED PATH '$.a[*]' AS p1 COLUMNS (
+			n int PATH '$.n' ERROR ON EMPTY
+		)
+	)
+	PLAN (p0 OUTER p1)
+	ERROR ON ERROR
+);
+SELECT pg_get_viewdef('jsonb_table_view_on_behavior'::regclass);
+SELECT * FROM jsonb_table_view_on_behavior ORDER BY n;
