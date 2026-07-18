@@ -68,4 +68,16 @@ extern XLogRecPtr XLogGetFakeLSN(Relation rel);
 
 extern void InitXLogInsert(void);
 
+#ifdef USE_ASSERT_CHECKING
+/*
+ * WAL registration cross-check (see xloginsert.c).  Verifies that every
+ * shared buffer dirtied inside a WAL-emitting critical section is registered
+ * with one of the WAL records inserted in that critical section.
+ * XLogRegCheckReset and XLogRegCheckCritSectionEnd are declared in
+ * miscadmin.h, next to the critical section macros that call them.
+ */
+extern void XLogRegCheckBufferDirtied(Buffer buffer);
+extern void XLogRegCheckExemptBuffer(Buffer buffer);
+#endif
+
 #endif							/* XLOGINSERT_H */
