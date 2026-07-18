@@ -627,6 +627,8 @@ jobs:
   #   faster at running the tests.
   # - Uses io_method=io_uring
   # - Uses meson feature autodetection
+  # - Enables wal_consistency_checking (opt-in via PG_TEST_EXTRA) so that
+  #   027_stream_regress exercises WAL redo consistency across a standby
   linux-meson-64:
     name: Linux - Meson (64-bit)
     needs: [setup, sanity-check]
@@ -668,6 +670,13 @@ jobs:
 
       - name: Test world
         shell: *su_postgres_shell
+        # Extend the workflow-level PG_TEST_EXTRA with
+        # wal_consistency_checking. It's resource intensive so it's opt-in and
+        # not covered by any other task; enabling it here makes
+        # 027_stream_regress verify that WAL redo produces byte-identical pages
+        # on the standby.
+        env:
+          PG_TEST_EXTRA: ${{env.PG_TEST_EXTRA}} wal_consistency_checking
         run: *meson_test_world_cmd
 
       - *linux_collect_cores_step
