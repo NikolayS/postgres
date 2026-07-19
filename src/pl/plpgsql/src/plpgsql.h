@@ -1266,7 +1266,7 @@ extern HeapTuple plpgsql_exec_trigger(PLpgSQL_function *func,
 									  TriggerData *trigdata);
 extern void plpgsql_exec_event_trigger(PLpgSQL_function *func,
 									   EventTriggerData *trigdata);
-extern void plpgsql_xact_cb(XactEvent event, void *arg);
+extern void plpgsql_xact_cb(XactEvent event, void *arg, XLogRecPtr lsn);
 extern void plpgsql_subxact_cb(SubXactEvent event, SubTransactionId mySubid,
 							   SubTransactionId parentSubid, void *arg);
 extern PGDLLEXPORT Oid plpgsql_exec_get_datum_type(PLpgSQL_execstate *estate,
