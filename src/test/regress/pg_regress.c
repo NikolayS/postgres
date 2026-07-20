@@ -2138,6 +2138,45 @@ help(void)
 	printf(_("%s home page: <%s>\n"), PACKAGE_NAME, PACKAGE_URL);
 }
 
+/*
+ * Check whether the initdb template was created with the same
+ * PG_TEST_INITDB_EXTRA_OPTS that are in effect now.  The value used during
+ * template creation is recorded in an ".extra-opts" file next to the
+ * template directory; a missing file means the template was created without
+ * extra options.  Without this check we'd have to fall back to a full initdb
+ * whenever PG_TEST_INITDB_EXTRA_OPTS is set, which is a lot more expensive.
+ */
+static bool
+initdb_template_matches(const char *initdb_template_dir,
+						const char *initdb_extra_opts_env)
+{
+	char		path[MAXPGPATH];
+	char		recorded[4096];
+	FILE	   *f;
+
+	snprintf(path, sizeof(path), "%s.extra-opts", initdb_template_dir);
+
+	recorded[0] = '\0';
+	if ((f = fopen(path, "r")) != NULL)
+	{
+		/*
+		 * A value too long for the buffer can never compare equal, so treat
+		 * truncation as a mismatch instead of comparing just the prefix.
+		 */
+		size_t		nread = fread(recorded, 1, sizeof(recorded) - 1, f);
+		bool		truncated = (nread == sizeof(recorded) - 1 && !feof(f));
+
+		recorded[nread] = '\0';
+		fclose(f);
+
+		if (truncated)
+			return false;
+	}
+
+	return strcmp(recorded,
+				  initdb_extra_opts_env ? initdb_extra_opts_env : "") == 0;
+}
+
 int
 regression_main(int argc, char *argv[],
 				init_function ifunc,
@@ -2401,13 +2440,17 @@ regression_main(int argc, char *argv[],
 		 * Create data directory.
 		 *
 		 * If available, use a previously initdb'd cluster as a template by
-		 * copying it. For a lot of tests, that's substantially cheaper.
+		 * copying it. For a lot of tests, that's substantially cheaper. The
+		 * template is only usable if it was created with the same
+		 * PG_TEST_INITDB_EXTRA_OPTS that are in effect now, which
+		 * initdb_template_matches() checks.
 		 *
 		 * There's very similar code in Cluster.pm, but we can't easily de
 		 * duplicate it until we require perl at build time.
 		 */
 		initdb_template_dir = getenv("INITDB_TEMPLATE");
-		if (initdb_template_dir == NULL || nolocale || debug || initdb_extra_opts_env)
+		if (initdb_template_dir == NULL || nolocale || debug ||
+			!initdb_template_matches(initdb_template_dir, initdb_extra_opts_env))
 		{
 			note("initializing database system by running initdb");
 

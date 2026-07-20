@@ -639,38 +639,58 @@ sub init
 	$params{has_archiving} = 0 unless defined $params{has_archiving};
 
 	my $initdb_extra_opts_env = $ENV{PG_TEST_INITDB_EXTRA_OPTS};
+
+	my @initdb_opts = @{ $params{extra} // [] };
 	if (defined $initdb_extra_opts_env)
 	{
-		push @{ $params{extra} }, shellwords($initdb_extra_opts_env);
+		push @initdb_opts, shellwords($initdb_extra_opts_env);
 	}
 
 	# This should override user-supplied initdb options.
 	if ($params{no_data_checksums})
 	{
-		push @{ $params{extra} }, '--no-data-checksums';
+		push @initdb_opts, '--no-data-checksums';
 	}
 
 	mkdir $self->backup_dir;
 	mkdir $self->archive_dir;
 
-	# If available, if there aren't any parameters and if force_initdb is
-	# disabled, use a previously initdb'd cluster as a template by copying it.
-	# For a lot of tests, that's substantially cheaper. It does not seem
-	# worth figuring out whether extra parameters affect compatibility, so
-	# initdb is forced if any are defined.
+	# If available, if there aren't any parameters the template wasn't
+	# created with and if force_initdb is disabled, use a previously initdb'd
+	# cluster as a template by copying it. For a lot of tests, that's
+	# substantially cheaper.
+	#
+	# The value of PG_TEST_INITDB_EXTRA_OPTS used when creating the template
+	# is recorded in an ".extra-opts" file next to the template directory, so
+	# the template stays usable when that variable is set, as long as its
+	# value matches. It does not seem worth figuring out whether
+	# test-supplied extra parameters affect compatibility, so initdb is
+	# forced if any are defined.
 	#
 	# There's very similar code in pg_regress.c, but we can't easily
 	# deduplicate it until we require perl at build time.
-	if (   $params{force_initdb}
-		or defined $params{extra}
-		or !defined $ENV{INITDB_TEMPLATE})
+	my $template_usable = 0;
+	if (    !$params{force_initdb}
+		and !defined $params{extra}
+		and !$params{no_data_checksums}
+		and defined $ENV{INITDB_TEMPLATE})
+	{
+		my $extra_opts_file = $ENV{INITDB_TEMPLATE} . '.extra-opts';
+		my $template_opts =
+		  -e $extra_opts_file
+		  ? PostgreSQL::Test::Utils::slurp_file($extra_opts_file)
+		  : '';
+		$template_usable = $template_opts eq ($initdb_extra_opts_env // '');
+	}
+
+	if (!$template_usable)
 	{
 		note("initializing database system by running initdb");
 		PostgreSQL::Test::Utils::system_or_bail(
 			'initdb', '--no-sync',
 			'--pgdata' => $pgdata,
 			'--auth' => 'trust',
-			@{ $params{extra} });
+			@initdb_opts);
 	}
 	else
 	{

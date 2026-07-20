@@ -3908,18 +3908,37 @@ endif
 # Create (and remove old) initdb template directory. Tests use that, where
 # possible, to make it cheaper to run tests.
 #
+# The template is created with PG_TEST_INITDB_EXTRA_OPTS applied, and the
+# variable's value is recorded in an ".extra-opts" file next to the template
+# directory. That allows tests to use the template when the variable is set,
+# as long as its value still matches, instead of falling back to a full
+# initdb.
+#
 # Use python to remove the old cached initdb, as we cannot rely on a working
 # 'rm' binary on windows.
 test('initdb_cache',
      python,
      args: [
        '-c', '''
+import os
+import shlex
 import shutil
 import sys
 import subprocess
 
-shutil.rmtree(sys.argv[1], ignore_errors=True)
-sp = subprocess.run(sys.argv[2:] + [sys.argv[1]])
+template_dir = sys.argv[1]
+extra_opts = os.environ.get('PG_TEST_INITDB_EXTRA_OPTS', '')
+
+shutil.rmtree(template_dir, ignore_errors=True)
+try:
+    os.remove(template_dir + '.extra-opts')
+except FileNotFoundError:
+    pass
+
+sp = subprocess.run(sys.argv[2:] + shlex.split(extra_opts) + [template_dir])
+if sp.returncode == 0:
+    with open(template_dir + '.extra-opts', 'w') as f:
+        f.write(extra_opts)
 sys.exit(sp.returncode)
 ''',
        test_initdb_template,

@@ -443,7 +443,17 @@ ifeq ($(MAKELEVEL),0)
 	$(MAKE) -C '$(top_builddir)' DESTDIR='$(abs_top_builddir)'/tmp_install install >'$(abs_top_builddir)'/tmp_install/log/install.log 2>&1
 	$(MAKE) -j1 $(if $(CHECKPREP_TOP),-C $(CHECKPREP_TOP),) checkprep >>'$(abs_top_builddir)'/tmp_install/log/install.log 2>&1
 
-	$(with_temp_install) initdb --auth trust --no-sync --no-instructions --lc-messages=C --no-clean '$(abs_top_builddir)'/tmp_install/initdb-template >>'$(abs_top_builddir)'/tmp_install/log/initdb-template.log 2>&1
+# The initdb template is created with PG_TEST_INITDB_EXTRA_OPTS applied, and
+# the variable's value is recorded in an ".extra-opts" file next to the
+# template directory. That allows tests to use the template when the variable
+# is set, as long as its value still matches. Run initdb through an extra
+# shell so that any quoting in PG_TEST_INITDB_EXTRA_OPTS is interpreted the
+# same way as in pg_regress.c and Cluster.pm. The template path is passed as
+# a positional argument ($0) instead of being embedded in the command string,
+# so that only PG_TEST_INITDB_EXTRA_OPTS gets that second round of shell
+# interpretation.
+	$(with_temp_install) sh -c "initdb --auth trust --no-sync --no-instructions --lc-messages=C --no-clean $$PG_TEST_INITDB_EXTRA_OPTS \"\$$0\"" '$(abs_top_builddir)'/tmp_install/initdb-template >>'$(abs_top_builddir)'/tmp_install/log/initdb-template.log 2>&1
+	printf '%s' "$$PG_TEST_INITDB_EXTRA_OPTS" >'$(abs_top_builddir)'/tmp_install/initdb-template.extra-opts
 endif
 endif
 endif
