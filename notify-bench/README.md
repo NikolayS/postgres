@@ -60,6 +60,37 @@ Control queues ~21 backends per in-flight fsync — group commit working. NOTIFY
 **Group-commit batch factor ~21 versus exactly 1.** Throughput ratios on any particular
 disk are a consequence of that; this statement is the portable one.
 
+## Prototypes measured
+
+Two prototypes were built on top of the isolation result above. Both are in
+`instrumentation/`, both are measurement devices rather than patch proposals.
+
+`0002-PROTOTYPE-move-notify-insertion-past-commit.patch` moves the queue insertion out of
+`PreCommit_Notify()` into a new `PostCommitInsert_Notify()` called from
+`CommitTransaction()` after `ProcArrayEndTransaction()`, serialized by a dedicated
+`NotifyQueueInsertLock` LWLock. `synchronous_commit=on`, zero listeners, 3 reps,
+median [min-max]:
+
+| clients | control | stock | v1 (heavyweight lock, pre-ProcArray) | v2 (LWLock, post-ProcArray) | no-lock |
+|--:|--:|--:|--:|--:|--:|
+| 4  | 2,059 | 1,033 | 2,130 | 2,129 [2109-2244] | 2,177 |
+| 16 | 7,811 | 1,027 | 7,767 | 8,155 [7961-8176] | 7,893 |
+| 64 | 16,307 | 1,055 | 10,965 | 16,507 [16402-16695] | 12,369 |
+
+15.7x over stock at 64 clients; commit latency 60.7 ms -> 3.9 ms, matching the
+NOTIFY-free control. Both `Lock`/`object` and `LWLock`/`NotifyQueueInsert` sampled zero
+waiters, so the insert lock is not observably contended.
+
+The v1 column is worth keeping: an earlier iteration that kept the heavyweight lock and
+inserted *before* `ProcArrayEndTransaction()` reached only 10,965 at 64 clients. Moving
+past the ProcArray removal and switching to an LWLock is worth the remaining ~50%, and
+is also what makes the ordering invariant hold trivially instead of by lock tenure.
+
+Caveats specific to these runs: control cross-run variance is ~10% at 64 clients, so the
+"v2 matches control" claim is shape, not precision; and with zero listeners **nothing ever
+reads the queue**, so these runs cannot detect an ordering defect. See #85 for the
+prototype's known gaps.
+
 ## Scripts
 
 All run as an unprivileged user; PostgreSQL refuses to start as root.
@@ -68,6 +99,8 @@ All run as an unprivileged user; PostgreSQL refuses to start as root.
 scripts/writers.sh   <PGBIN> <PGDATA> <PORT> <LABEL> <OUTDIR> [initdb]
 scripts/listeners.sh <PGBIN> <PGDATA> <PORT> <LABEL> <OUTDIR>
 scripts/ab_lock.sh   <PGBIN> <PGDATA> <PORT> <OUTDIR>          # needs instrumented build
+scripts/ab_altb.sh   <PGBIN> <PGDATA> <PORT> <OUTDIR>          # v1 prototype
+scripts/ab_altb2.sh  <PGBIN> <PGDATA> <PORT> <OUTDIR>          # v2 prototype
 scripts/verify.sh                                              # arm-separation smoke test
 scripts/checkjam.sh                                            # demonstrates the defect in D1 below
 ```
