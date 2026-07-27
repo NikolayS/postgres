@@ -340,7 +340,7 @@ static void AtCommit_Memory(void);
 static void AtStart_Cache(void);
 static void AtStart_Memory(void);
 static void AtStart_ResourceOwner(void);
-static void CallXactCallbacks(XactEvent event);
+static void CallXactCallbacks(XactEvent event, XLogRecPtr lsn);
 static void CallSubXactCallbacks(SubXactEvent event,
 								 SubTransactionId mySubid,
 								 SubTransactionId parentSubid);
@@ -1342,9 +1342,10 @@ AtSubStart_ResourceOwner(void)
  * If you change this function, see RecordTransactionCommitPrepared also.
  */
 static TransactionId
-RecordTransactionCommit(void)
+RecordTransactionCommit(XLogRecPtr *commit_lsn_out)
 {
 	TransactionId xid = GetTopTransactionIdIfAny();
+	XLogRecPtr	commit_lsn = InvalidXLogRecPtr;
 	bool		markXidCommitted = TransactionIdIsValid(xid);
 	TransactionId latestXid = InvalidTransactionId;
 	int			nrels;
@@ -1481,13 +1482,24 @@ RecordTransactionCommit(void)
 		/*
 		 * Insert the commit XLOG record.
 		 */
-		XactLogCommitRecord(GetCurrentTransactionStopTimestamp(),
-							nchildren, children, nrels, rels,
-							ndroppedstats, droppedstats,
-							nmsgs, invalMessages,
-							RelcacheInitFileInval,
-							MyXactFlags,
-							InvalidTransactionId, NULL /* plain commit */ );
+		(void) XactLogCommitRecord(GetCurrentTransactionStopTimestamp(),
+								   nchildren, children, nrels, rels,
+								   ndroppedstats, droppedstats,
+								   nmsgs, invalMessages,
+								   RelcacheInitFileInval,
+								   MyXactFlags,
+								   InvalidTransactionId, NULL /* plain commit */ );
+
+		/*
+		 * Report the *start* of the commit record to XactCallbacks, not its
+		 * end.  Recovery compares recovery_target_lsn against the start LSN of
+		 * each record (see recoveryStopsBefore()), so the start LSN is the
+		 * value a DBA can feed back to recovery_target_lsn, together with
+		 * recovery_target_inclusive = off, to stop just before this
+		 * transaction commits.  The end LSN would be the start of the *next*
+		 * record and would therefore replay this commit.
+		 */
+		commit_lsn = ProcLastRecPtr;
 
 		if (replorigin)
 			/* Move LSNs forward for this replication origin */
@@ -1609,6 +1621,9 @@ cleanup:
 		pfree(rels);
 	if (ndroppedstats)
 		pfree(droppedstats);
+
+	if (commit_lsn_out)
+		*commit_lsn_out = commit_lsn;
 
 	return latestXid;
 }
@@ -2272,6 +2287,7 @@ CommitTransaction(void)
 	TransactionState s = CurrentTransactionState;
 	TransactionId latestXid;
 	bool		is_parallel_worker;
+	XLogRecPtr	commit_lsn = InvalidXLogRecPtr;
 
 	is_parallel_worker = (s->blockState == TBLOCK_PARALLEL_INPROGRESS);
 
@@ -2320,7 +2336,8 @@ CommitTransaction(void)
 	 */
 
 	CallXactCallbacks(is_parallel_worker ? XACT_EVENT_PARALLEL_PRE_COMMIT
-					  : XACT_EVENT_PRE_COMMIT);
+					  : XACT_EVENT_PRE_COMMIT,
+					  InvalidXLogRecPtr);
 
 	/*
 	 * If this xact has started any unfinished parallel operation, clean up
@@ -2404,7 +2421,7 @@ CommitTransaction(void)
 		 * We need to mark our XIDs as committed in pg_xact.  This is where we
 		 * durably commit.
 		 */
-		latestXid = RecordTransactionCommit();
+		latestXid = RecordTransactionCommit(&commit_lsn);
 	}
 	else
 	{
@@ -2447,7 +2464,8 @@ CommitTransaction(void)
 	 */
 
 	CallXactCallbacks(is_parallel_worker ? XACT_EVENT_PARALLEL_COMMIT
-					  : XACT_EVENT_COMMIT);
+					  : XACT_EVENT_COMMIT,
+					  commit_lsn);
 
 	CurrentResourceOwner = NULL;
 	ResourceOwnerRelease(TopTransactionResourceOwner,
@@ -2597,7 +2615,7 @@ PrepareTransaction(void)
 			break;
 	}
 
-	CallXactCallbacks(XACT_EVENT_PRE_PREPARE);
+	CallXactCallbacks(XACT_EVENT_PRE_PREPARE, InvalidXLogRecPtr);
 
 	/*
 	 * The remaining actions cannot call any user-defined code, so it's safe
@@ -2757,7 +2775,7 @@ PrepareTransaction(void)
 	 * that cure could be worse than the disease.
 	 */
 
-	CallXactCallbacks(XACT_EVENT_PREPARE);
+	CallXactCallbacks(XACT_EVENT_PREPARE, InvalidXLogRecPtr);
 
 	ResourceOwnerRelease(TopTransactionResourceOwner,
 						 RESOURCE_RELEASE_BEFORE_LOCKS,
@@ -3011,9 +3029,9 @@ AbortTransaction(void)
 	if (TopTransactionResourceOwner != NULL)
 	{
 		if (is_parallel_worker)
-			CallXactCallbacks(XACT_EVENT_PARALLEL_ABORT);
+			CallXactCallbacks(XACT_EVENT_PARALLEL_ABORT, InvalidXLogRecPtr);
 		else
-			CallXactCallbacks(XACT_EVENT_ABORT);
+			CallXactCallbacks(XACT_EVENT_ABORT, InvalidXLogRecPtr);
 
 		ResourceOwnerRelease(TopTransactionResourceOwner,
 							 RESOURCE_RELEASE_BEFORE_LOCKS,
@@ -3889,7 +3907,7 @@ UnregisterXactCallback(XactCallback callback, void *arg)
 }
 
 static void
-CallXactCallbacks(XactEvent event)
+CallXactCallbacks(XactEvent event, XLogRecPtr lsn)
 {
 	XactCallbackItem *item;
 	XactCallbackItem *next;
@@ -3898,7 +3916,7 @@ CallXactCallbacks(XactEvent event)
 	{
 		/* allow callbacks to unregister themselves when called */
 		next = item->next;
-		item->callback(event, item->arg);
+		item->callback(event, item->arg, lsn);
 	}
 }
 

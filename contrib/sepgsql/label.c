@@ -161,7 +161,7 @@ sepgsql_set_client_label(const char *new_label)
  * changes in the client_label_pending list.
  */
 static void
-sepgsql_xact_callback(XactEvent event, void *arg)
+sepgsql_xact_callback(XactEvent event, void *arg, XLogRecPtr lsn)
 {
 	if (event == XACT_EVENT_COMMIT)
 	{

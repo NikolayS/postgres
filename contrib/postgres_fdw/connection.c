@@ -154,7 +154,7 @@ static void do_sql_command_end(PGconn *conn, const char *sql,
 static void begin_remote_xact(ConnCacheEntry *entry);
 static void pgfdw_report_internal(int elevel, PGresult *res, PGconn *conn,
 								  const char *sql);
-static void pgfdw_xact_callback(XactEvent event, void *arg);
+static void pgfdw_xact_callback(XactEvent event, void *arg, XLogRecPtr lsn);
 static void pgfdw_subxact_callback(SubXactEvent event,
 								   SubTransactionId mySubid,
 								   SubTransactionId parentSubid,
@@ -1170,7 +1170,7 @@ pgfdw_report_internal(int elevel, PGresult *res, PGconn *conn,
  * COMMIT TRANSACTION may run deferred triggers.)
  */
 static void
-pgfdw_xact_callback(XactEvent event, void *arg)
+pgfdw_xact_callback(XactEvent event, void *arg, XLogRecPtr lsn)
 {
 	HASH_SEQ_STATUS scan;
 	ConnCacheEntry *entry;

@@ -1863,6 +1863,17 @@ dropdb(const char *dbname, bool missing_ok, bool force)
 	heap_freetuple(tup);
 
 	/*
+	 * Record the drop so that the commit LSN can be logged once this
+	 * transaction commits.  We must not log GetXLogInsertRecPtr() here: at
+	 * this point the commit record has not been written yet, and dropdb()
+	 * still has substantial work to do (including forcing a checkpoint), so
+	 * the current insert pointer can be far behind the commit LSN.  Only the
+	 * commit LSN is a valid point-in-time recovery target.
+	 */
+	if (log_object_drops)
+		RegisterDropDatabaseForLogging(db_id, dbname);
+
+	/*
 	 * Drop db-specific replication slots.
 	 */
 	ReplicationSlotsDropDBSlots(db_id);

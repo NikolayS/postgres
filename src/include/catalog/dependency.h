@@ -238,4 +238,6 @@ extern void shdepDropOwned(List *roleids, DropBehavior behavior);
 
 extern void shdepReassignOwned(List *roleids, Oid newrole);
 
+extern void RegisterDropDatabaseForLogging(Oid dboid, const char *dbname);
+
 #endif							/* DEPENDENCY_H */
