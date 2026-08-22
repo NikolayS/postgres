@@ -828,6 +828,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 	PGresult   *res;
 	PGnotify   *notify;
 	bool		canceled = false;
+	char	   *connection_error = NULL;
 
 	/*
 	 * If the step is annotated with (*), then on the first call, force it to
@@ -910,9 +911,19 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 					 */
 					if (!PQconsumeInput(conn))
 					{
-						fprintf(stderr, "PQconsumeInput failed: %s\n",
-								PQerrorMessage(conn));
-						exit(1);
+						if (PQstatus(conn) != CONNECTION_BAD)
+						{
+							fprintf(stderr, "PQconsumeInput failed: %s\n",
+									PQerrorMessage(conn));
+							exit(1);
+						}
+
+						/*
+						 * Save the error before PQgetResult() adds another complaint
+						 * about attempting to read from the dead socket.
+						 */
+						connection_error = pg_strdup(PQerrorMessage(conn));
+						break;
 					}
 					if (!PQisBusy(conn))
 						break;
@@ -979,9 +990,19 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 		}
 		else if (!PQconsumeInput(conn)) /* select(): data available */
 		{
-			fprintf(stderr, "PQconsumeInput failed: %s\n",
-					PQerrorMessage(conn));
-			exit(1);
+			if (PQstatus(conn) != CONNECTION_BAD)
+			{
+				fprintf(stderr, "PQconsumeInput failed: %s\n",
+						PQerrorMessage(conn));
+				exit(1);
+			}
+
+			/*
+			 * Save the error before PQgetResult() adds another complaint about
+			 * attempting to read from the dead socket.
+			 */
+			connection_error = pg_strdup(PQerrorMessage(conn));
+			break;
 		}
 	}
 
@@ -1028,7 +1049,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 
 					if (sev && msg)
 						printf("%s:  %s\n", sev, msg);
-					else
+					else if (!connection_error)
 						printf("%s\n", PQresultErrorMessage(res));
 				}
 				break;
@@ -1037,6 +1058,16 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 					   PQresStatus(PQresultStatus(res)));
 		}
 		PQclear(res);
+
+		/* The connection is dead, so don't ask libpq for another result. */
+		if (connection_error)
+			break;
+	}
+
+	if (connection_error)
+	{
+		printf("%s\n", connection_error);
+		pg_free(connection_error);
 	}
 
 	/* Report any available NOTIFY messages, too */
