@@ -26,6 +26,9 @@
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
 #include "utils/memutils.h"
+#include "catalog/namespace.h"
+#include "utils/rel.h"
+#include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
 
 
@@ -182,6 +185,27 @@ ProcessQuery(PlannedStmt *plan,
 			tag = CMDTAG_UNKNOWN;
 
 		SetQueryCompletion(qc, tag, queryDesc->estate->es_processed);
+
+		/* For verbose/FQN command tags, attach relation info for DML */
+		if (command_tag_format >= COMMAND_TAG_FORMAT_VERBOSE &&
+			(tag == CMDTAG_INSERT || tag == CMDTAG_UPDATE ||
+			 tag == CMDTAG_DELETE || tag == CMDTAG_MERGE) &&
+			queryDesc->plannedstmt != NULL &&
+			queryDesc->plannedstmt->resultRelations != NIL &&
+			queryDesc->estate->es_result_relations != NULL)
+		{
+			int ri_index = linitial_int(queryDesc->plannedstmt->resultRelations) - 1;
+			if (ri_index >= 0 &&
+				ri_index < (int) queryDesc->estate->es_range_table_size &&
+				queryDesc->estate->es_result_relations[ri_index] != NULL &&
+				queryDesc->estate->es_result_relations[ri_index]->ri_RelationDesc != NULL)
+			{
+				ResultRelInfo *rri = queryDesc->estate->es_result_relations[ri_index];
+				qc->relname = RelationGetRelationName(rri->ri_RelationDesc);
+				qc->nspname = get_namespace_name(
+					RelationGetNamespace(rri->ri_RelationDesc));
+			}
+		}
 	}
 
 	/*
