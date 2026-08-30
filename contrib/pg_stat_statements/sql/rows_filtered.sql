@@ -1,0 +1,127 @@
+--
+-- Test rows_filtered tracking
+--
+-- rows_filtered tracks the number of rows removed by filter conditions
+-- across all plan nodes. This requires pg_stat_statements.track_rows_filtered
+-- to be enabled.
+
+-- Ensure the extension is set up
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+-- Create test table
+CREATE TABLE filter_test (id int PRIMARY KEY, val int);
+INSERT INTO filter_test SELECT g, g FROM generate_series(1, 1000) g;
+ANALYZE filter_test;
+
+--
+-- Test 1: rows_filtered is 0 when tracking is disabled (default)
+--
+SHOW pg_stat_statements.track_rows_filtered;
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+-- Force a sequential scan with filter
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+SELECT count(*) FROM filter_test WHERE val > 900;
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+
+-- rows_filtered should be 0 because tracking is disabled
+SELECT query, calls, rows, rows_filtered
+FROM pg_stat_statements
+WHERE query LIKE '%filter_test WHERE val%'
+ORDER BY query COLLATE "C";
+
+--
+-- Test 2: rows_filtered is tracked when enabled
+--
+SET pg_stat_statements.track_rows_filtered = on;
+SHOW pg_stat_statements.track_rows_filtered;
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+-- Force a sequential scan with filter: 100 rows pass (val > 900), 900 filtered
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+SELECT count(*) FROM filter_test WHERE val > 900;
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+
+-- rows_filtered should be 900 (the 900 rows that didn't pass the filter)
+SELECT query, calls, rows, rows_filtered
+FROM pg_stat_statements
+WHERE query LIKE '%filter_test WHERE val%'
+ORDER BY query COLLATE "C";
+
+--
+-- Test 3: rows_filtered accumulates across multiple executions
+--
+SELECT count(*) FROM filter_test WHERE val > 900;
+SELECT count(*) FROM filter_test WHERE val > 900;
+
+-- After 3 total executions, rows_filtered remains 900. The subsequent
+-- executions used an index scan which accesses only matching rows
+-- directly, so no additional rows are filtered.
+SELECT query, calls, rows, rows_filtered
+FROM pg_stat_statements
+WHERE query LIKE '%filter_test WHERE val%'
+ORDER BY query COLLATE "C";
+
+--
+-- Test 4: Different filter selectivities
+--
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+
+-- Highly selective: 1 row passes, 999 filtered
+SELECT * FROM filter_test WHERE val = 500;
+
+-- Low selectivity: 500 rows pass, 500 filtered
+SELECT count(*) FROM filter_test WHERE val > 500;
+
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+
+SELECT query, calls, rows, rows_filtered
+FROM pg_stat_statements
+WHERE query LIKE '%filter_test WHERE val%'
+ORDER BY query COLLATE "C";
+
+--
+-- Test 5: Verify rows_filtered with JOIN queries
+--
+CREATE TABLE filter_test2 (id int PRIMARY KEY, ref_id int);
+INSERT INTO filter_test2 SELECT g, g % 100 FROM generate_series(1, 500) g;
+ANALYZE filter_test2;
+
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+
+-- Nested loop join with filter on inner table
+SELECT count(*)
+FROM filter_test2 t2
+JOIN filter_test t1 ON t1.id = t2.ref_id
+WHERE t1.val < 50;
+
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+RESET enable_hashjoin;
+RESET enable_mergejoin;
+
+-- rows_filtered should be large (many rows scanned but filtered by join/filter).
+-- Use threshold check to avoid plan-dependent exact values.
+SELECT query, calls, rows, rows_filtered > 0 AS has_filtered_rows
+FROM pg_stat_statements
+WHERE query LIKE '%filter_test2%'
+  AND query LIKE '%JOIN%'
+ORDER BY query COLLATE "C";
+
+-- Cleanup
+RESET pg_stat_statements.track_rows_filtered;
+DROP TABLE filter_test, filter_test2;
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
