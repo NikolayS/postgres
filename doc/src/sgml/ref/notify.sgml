@@ -176,6 +176,73 @@ NOTIFY <replaceable class="parameter">channel</replaceable> [ , <replaceable cla
   </para>
 
   <refsect2>
+   <title>Performance Considerations</title>
+
+   <para>
+    So that notifications are queued in commit order, a transaction that has
+    executed <command>NOTIFY</command> takes a heavyweight lock during commit
+    that serializes it against every other committing transaction that has
+    executed <command>NOTIFY</command>.  This lock is cluster-wide, not
+    per-database: notifying transactions running in different databases of the
+    same cluster contend with one another.  Transactions that have not executed
+    <command>NOTIFY</command> do not take this lock, and
+    <command>LISTEN</command> and <command>UNLISTEN</command> do not take it
+    either.
+   </para>
+
+   <para>
+    The lock is held until the notifying transaction's commit is complete,
+    which includes flushing the transaction's <acronym>WAL</acronym> records to
+    disk and, if synchronous replication is in use, waiting for the standby
+    server(s) to respond.  Notifying transactions therefore cannot be
+    group-committed with one another: each one pays for a commit round trip on
+    its own, and the aggregate rate of notifying transactions is limited to
+    roughly one such round trip at a time, no matter how many client sessions
+    are active.  The effect is correspondingly larger when commits are
+    expensive, that is with <xref linkend="guc-synchronous-commit"/> set to
+    <literal>on</literal>, with <xref linkend="guc-synchronous-standby-names"/>
+    configured, or on storage with high write latency.
+   </para>
+
+   <para>
+    The cost is incurred once per notifying transaction, not once per
+    notification, since a transaction that sends many notifications takes the
+    lock only once.  Applications that need a high notification rate should
+    therefore accumulate notifications and send them from as few transactions
+    as possible.  In particular, avoid executing <command>NOTIFY</command> in a
+    row-level trigger; collect the notifications in a statement-level trigger
+    instead, or send a single notification per transaction and let listeners
+    determine what changed.
+   </para>
+
+   <para>
+    To diagnose this contention, look for sessions with
+    <structfield>wait_event_type</structfield> <literal>Lock</literal> and
+    <structfield>wait_event</structfield> <literal>object</literal> in
+    <link linkend="monitoring-pg-stat-activity-view"><structname>pg_stat_activity</structname></link>.
+    Reporting in the server log via <xref linkend="guc-log-lock-waits"/> is also
+    possible, but note that it only reports waits exceeding
+    <xref linkend="guc-deadlock-timeout"/>, whose default of one second is
+    typically far longer than an individual wait for this lock, so that setting
+    must usually be reduced before any such wait is logged.  The wait is
+    reported as <literal>AccessExclusiveLock on object 0 of class 1262 of
+    database 0</literal>.  A characteristic symptom of this contention is that
+    transaction throughput falls while <acronym>CPU</acronym> and disk
+    utilization fall as well, because the waiting sessions are idle rather than
+    busy.
+   </para>
+
+   <para>
+    If the required notification rate cannot be reduced by batching, consider
+    another mechanism: a queue table that consumers poll using
+    <literal>SELECT ... FOR UPDATE SKIP LOCKED</literal> (see
+    <xref linkend="sql-select"/>) does not serialize commits, and
+    <xref linkend="logicaldecoding"/> is a better fit when the goal is to
+    stream data changes to an external consumer.
+   </para>
+  </refsect2>
+
+  <refsect2>
    <title>pg_notify</title>
 
    <indexterm>
