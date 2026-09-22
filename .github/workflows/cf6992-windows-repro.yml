@@ -1,0 +1,175 @@
+name: CF 6992 Windows reproduction
+
+on:
+  push:
+    branches:
+      - ci/cf6992-windows-repro
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-msvc:
+    name: MSVC ${{ matrix.variant }}
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: parent
+            revision: 9e17d25e79d4756be08b4a5521b4b58450217137
+            run_cf_test: false
+          - variant: cf6992-v3
+            revision: 3888ff074d909d98eea6db837803addc56ef3aec
+            run_cf_test: true
+    env:
+      PG_TEST_USE_UNIX_SOCKETS: 1
+      PG_REGRESS_SOCK_DIR: 'd:\pgsock'
+      TAR: 'c:/windows/system32/tar.exe'
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out exact source revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision }}
+          fetch-depth: 1
+
+      - name: Record source identity
+        run: |
+          git rev-parse HEAD
+          git show -s --format=fuller HEAD
+
+      - name: Grant workspace ACL to runner user
+        run: |
+          icacls "${{ github.workspace }}" /grant "${env:USERNAME}:(OI)(CI)F" /Q | Out-Null
+
+      - name: Remove Mercurial from PATH
+        run: |
+          $filtered = ($env:PATH -split ';' |
+            Where-Object { $_ -and ($_ -notmatch '\\Mercurial\\?$') }) -join ';'
+          Add-Content $env:GITHUB_ENV "PATH=$filtered"
+
+      - name: Install flex and bison
+        shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail "{0}"'
+        run: |
+          pacman -S --noconfirm --needed --asdeps bison flex
+          echo C:/msys64/usr/bin >> "$GITHUB_PATH"
+          echo C:/Strawberry/perl/bin >> "$GITHUB_PATH"
+
+      - name: Install Meson and Perl test dependency
+        run: |
+          python -m pip install --upgrade meson
+          if (!$?) { throw 'meson installation failed' }
+          "o conf recommends_policy 0`no conf commit`nnotest install NJM/IPC-Run-20250809.0.tar.gz" | cpan
+          if (!$?) { throw 'IPC::Run installation failed' }
+          perl -mIPC::Run -e 1
+          if (!$?) { throw 'IPC::Run verification failed' }
+
+      - name: Set up socket directory
+        shell: cmd
+        run: mkdir ${{ env.PG_REGRESS_SOCK_DIR }}
+
+      - name: Configure
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson setup ^
+            --backend ninja ^
+            -Dcassert=true ^
+            -Dinjection_points=true ^
+            -Dauto_features=disabled ^
+            -Dcpp_args=/std:c++20 ^
+            -Dldap=enabled ^
+            -Dplperl=enabled ^
+            -Dplpython=enabled ^
+            -Dssl=openssl ^
+            -Dtap_tests=enabled ^
+            --buildtype debug ^
+            -Db_pch=true ^
+            -DTAR=${{ env.TAR }} ^
+            build
+
+      - name: Build test dependencies
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          ninja -C build all testprep || exit 1
+          ninja -C build -t missingdeps
+
+      - name: Prepare temporary installation
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --print-errorlogs --no-rebuild -C build --suite setup
+
+      - name: Repeat test_decoding isolation suite
+        id: decoding
+        shell: pwsh
+        run: |
+          cmd /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
+            ForEach-Object {
+              if ($_ -match '^([^=]+)=(.*)$') {
+                Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+              }
+            }
+
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $failures = 0
+          1..30 | ForEach-Object {
+            $iteration = $_
+            Write-Host "=== test_decoding/isolation iteration $iteration ==="
+            meson test --print-errorlogs --no-rebuild -C build 'test_decoding/isolation' 2>&1 |
+              Tee-Object -FilePath "evidence\test-decoding-$iteration.txt"
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+            if (Test-Path 'build\meson-logs\testlog.txt') {
+              Copy-Item 'build\meson-logs\testlog.txt' "evidence\testlog-$iteration.txt"
+            }
+            if (Test-Path 'build\testrun\test_decoding\isolation') {
+              Copy-Item 'build\testrun\test_decoding\isolation' "evidence\testrun-$iteration" -Recurse
+            }
+          }
+          "failures=$failures" | Tee-Object -FilePath evidence\summary.txt
+          if ($failures -ne 0) { throw "$failures of 30 test_decoding runs failed" }
+
+      - name: Repeat CF 6992 TAP test
+        if: ${{ always() && matrix.run_cf_test }}
+        shell: pwsh
+        run: |
+          cmd /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
+            ForEach-Object {
+              if ($_ -match '^([^=]+)=(.*)$') {
+                Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+              }
+            }
+
+          $failures = 0
+          1..30 | ForEach-Object {
+            $iteration = $_
+            Write-Host "=== subscription/039_publisher_xact_rollback iteration $iteration ==="
+            meson test --print-errorlogs --no-rebuild -C build 'subscription/039_publisher_xact_rollback' 2>&1 |
+              Tee-Object -FilePath "evidence\cf6992-$iteration.txt"
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+            if (Test-Path 'build\testrun\subscription\039_publisher_xact_rollback') {
+              Copy-Item 'build\testrun\subscription\039_publisher_xact_rollback' `
+                "evidence\cf6992-testrun-$iteration" -Recurse
+            }
+          }
+          Add-Content evidence\summary.txt "cf6992_failures=$failures"
+          if ($failures -ne 0) { throw "$failures of 30 CF 6992 TAP runs failed" }
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf6992-windows-${{ matrix.variant }}-${{ github.run_id }}
+          path: |
+            evidence/
+            build/meson-logs/
+          if-no-files-found: warn
+          retention-days: 14
