@@ -26,9 +26,9 @@ session s2
 step wait2	{ SELECT injection_points_run('injection-points-wait'); }
 step noop2	{ }
 
-# Control session.  The blocker annotations on cancel3/terminate3,
-# together with noop3, make the tester wait until wait1 has fully
-# completed before starting wait2.  Otherwise, wait2 could register a
+# Control session.  The blocker on cancel3 and the notice from release3
+# make the tester wait until wait1 has fully completed before starting
+# wait2.  Otherwise, wait2 could register a
 # new waiter slot while s1 still owns the previous one.
 session s3
 step cancel3	{
@@ -41,10 +41,13 @@ step terminate3	{
 }
 step wakeup3	{ SELECT injection_points_wakeup('injection-points-wait'); }
 step detach3	{ SELECT injection_points_detach('injection-points-wait'); }
+step release3	{ DO $$BEGIN RAISE NOTICE 'release wait1'; END$$; }
 step noop3	{ }
 
 permutation wait1 cancel3(wait1) noop3 wait2 wakeup3 noop2 detach3
 
 # The terminate permutation has to stay last: s1's connection is dead
-# afterwards, and the tester never reconnects a session.
-permutation wait1 terminate3(wait1) noop3 wait2 wakeup3 noop2 detach3
+# afterwards, and the tester never reconnects a session.  Delay reporting
+# wait1 until release3 sends its notice, even if the connection is already
+# closed, to exercise retaining the connection error across step retries.
+permutation wait1(release3 notices 1) terminate3 noop3 release3 wait2 wakeup3 noop2 detach3
