@@ -141,10 +141,6 @@ jobs:
           }
 
           Run-Tests 'normal-core' @('regress/regress','isolation/isolation','test_decoding/regress','test_decoding/isolation','injection_points/isolation')
-          # Run TAP tests serially on Windows.  Concurrent Strawberry Perl
-          # IPC::Run users can trip over pipe cleanup independently of the
-          # server behavior under test.
-          Run-Tests 'normal-subscription' @('--num-processes','1','--suite','subscription')
 
           git apply "$env:RUNNER_TEMP/cf6992-suppress.patch"
           if ($LASTEXITCODE -ne 0) { throw 'test-only suppression patch failed' }
@@ -186,6 +182,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'final source does not match the pinned candidate' }
           Rebuild-And-Install
           Run-Tests 'restored-final' @('test_decoding/isolation','injection_points/isolation')
+
+          # Run TAP tests serially on Windows.  The preceding run observed an
+          # IPC::Run pipe-cleanup failure under concurrent TAP execution; its
+          # exact cause remains unconfirmed and is independent of server code.
+          Run-Tests 'normal-subscription' @('--num-processes','1','--suite','subscription')
           'Normal suites passed; synthetic baseline and v1 failures reproduced; final missing-error and restored-normal paths passed.' | Set-Content evidence/summary.txt
 
       - name: Upload validation evidence
