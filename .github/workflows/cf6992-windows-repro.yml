@@ -21,9 +21,15 @@ jobs:
           - variant: parent
             revision: 9e17d25e79d4756be08b4a5521b4b58450217137
             run_cf_test: false
+            run_candidate_suites: false
           - variant: cf6992-v3
             revision: 3888ff074d909d98eea6db837803addc56ef3aec
             run_cf_test: true
+            run_candidate_suites: false
+          - variant: connection-error-candidate
+            revision: ce461649028aba48133acd7a8270c4fb1145fdd0
+            run_cf_test: true
+            run_candidate_suites: true
     env:
       PG_TEST_USE_UNIX_SOCKETS: 1
       PG_REGRESS_SOCK_DIR: 'd:\pgsock'
@@ -112,7 +118,7 @@ jobs:
         id: decoding
         shell: pwsh
         run: |
-          cmd /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
+          & $env:COMSPEC /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
             ForEach-Object {
               if ($_ -match '^([^=]+)=(.*)$') {
                 Set-Item -Path "env:$($matches[1])" -Value $matches[2]
@@ -147,10 +153,10 @@ jobs:
           if ($failures -ne 0) { throw "$failures of 30 test_decoding runs failed" }
 
       - name: Repeat CF 6992 TAP test
-        if: ${{ always() && matrix.run_cf_test }}
+        if: ${{ always() && matrix.run_cf_test && steps.decoding.outcome != 'skipped' }}
         shell: pwsh
         run: |
-          cmd /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
+          & $env:COMSPEC /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
             ForEach-Object {
               if ($_ -match '^([^=]+)=(.*)$') {
                 Set-Item -Path "env:$($matches[1])" -Value $matches[2]
@@ -175,6 +181,16 @@ jobs:
           }
           Add-Content evidence\summary.txt "cf6992_failures=$failures"
           if ($failures -ne 0) { throw "$failures of 30 CF 6992 TAP runs failed" }
+
+      - name: Run candidate regression suites
+        if: ${{ always() && matrix.run_candidate_suites && steps.decoding.outcome != 'skipped' }}
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --print-errorlogs --no-rebuild -C build regress/isolation || exit 1
+          meson test --print-errorlogs --no-rebuild -C build test_decoding/isolation || exit 1
+          meson test --print-errorlogs --no-rebuild -C build injection_points/isolation || exit 1
+          meson test --print-errorlogs --no-rebuild -C build --suite subscription || exit 1
 
       - name: Upload evidence
         if: always()
