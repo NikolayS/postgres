@@ -40,4 +40,9 @@ tests += {
     # typical runningcheck users do not have (e.g. buildfarm clients).
     'runningcheck': false,
   },
+  'tap': {
+    'tests': [
+      't/001_bulk_extend_fsm.pl',
+    ],
+  },
 }
