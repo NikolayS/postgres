@@ -1,9 +1,6 @@
 name: CF 6992 Windows reproduction
 
 on:
-  push:
-    branches:
-      - ci/cf6992-windows-repro
   workflow_dispatch:
 
 permissions:

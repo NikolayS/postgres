@@ -1,0 +1,197 @@
+name: Windows connection-loss validation
+on:
+  push:
+    branches: [ci/cf6992-windows-repro]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: Windows MSVC final patches
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      PG_TEST_USE_UNIX_SOCKETS: 1
+      PG_REGRESS_SOCK_DIR: 'd:\pgsock'
+      TAR: 'c:/windows/system32/tar.exe'
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out exact source revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Record source identity
+        run: |
+          Copy-Item ci/cf6992/suppress-admin-fatal.patch "$env:RUNNER_TEMP/cf6992-suppress.patch"
+          git checkout --detach 6b992677624a3fa20dc0ad68654d70ef797e3e0b
+          if ($LASTEXITCODE -ne 0) { throw "source checkout failed" }
+          git rev-parse HEAD
+          git show -s --format=fuller HEAD
+
+      - name: Grant workspace ACL to runner user
+        run: |
+          icacls "${{ github.workspace }}" /grant "${env:USERNAME}:(OI)(CI)F" /Q | Out-Null
+
+      - name: Remove Mercurial from PATH
+        run: |
+          $filtered = ($env:PATH -split ';' |
+            Where-Object { $_ -and ($_ -notmatch '\\Mercurial\\?$') }) -join ';'
+          Add-Content $env:GITHUB_ENV "PATH=$filtered"
+
+      - name: Install flex and bison
+        shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail "{0}"'
+        run: |
+          pacman -S --noconfirm --needed --asdeps bison flex
+          echo C:/msys64/usr/bin >> "$GITHUB_PATH"
+          echo C:/Strawberry/perl/bin >> "$GITHUB_PATH"
+
+      - name: Install Meson and Perl test dependency
+        run: |
+          python -m pip install --upgrade meson
+          if (!$?) { throw 'meson installation failed' }
+          "o conf recommends_policy 0`no conf commit`nnotest install NJM/IPC-Run-20250809.0.tar.gz" | cpan
+          if (!$?) { throw 'IPC::Run installation failed' }
+          perl -mIPC::Run -e 1
+          if (!$?) { throw 'IPC::Run verification failed' }
+
+      - name: Set up socket directory
+        shell: cmd
+        run: mkdir ${{ env.PG_REGRESS_SOCK_DIR }}
+
+      - name: Configure
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson setup ^
+            --backend ninja ^
+            -Dcassert=true ^
+            -Dinjection_points=true ^
+            -Dauto_features=disabled ^
+            -Dcpp_args=/std:c++20 ^
+            -Dldap=enabled ^
+            -Dplperl=enabled ^
+            -Dplpython=enabled ^
+            -Dssl=openssl ^
+            -Dtap_tests=enabled ^
+            --buildtype debug ^
+            -Db_pch=true ^
+            -DTAR=${{ env.TAR }} ^
+            build
+
+      - name: Build test dependencies
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          ninja -C build all testprep || exit 1
+          ninja -C build -t missingdeps
+
+      - name: Prepare temporary installation
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          meson test --print-errorlogs --no-rebuild -C build --suite setup
+
+
+      - name: Validate normal and missing-error paths
+        shell: pwsh
+        run: |
+          & $env:COMSPEC /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 && set' |
+            ForEach-Object {
+              if ($_ -match '^([^=]+)=(.*)$') {
+                Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+              }
+            }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          git rev-parse HEAD | Set-Content evidence/source.txt
+          Copy-Item src/test/isolation/isolationtester.c "$env:RUNNER_TEMP/cf6992-final-driver.c"
+
+          function Save-Logs([string]$label) {
+            $dest = "evidence/$label"
+            New-Item -ItemType Directory -Force $dest | Out-Null
+            Copy-Item build/meson-logs "$dest/meson-logs" -Recurse -Force
+            foreach ($suite in @('regress','isolation','test_decoding','injection_points','subscription')) {
+              if (!(Test-Path "build/testrun/$suite")) { continue }
+              foreach ($test in Get-ChildItem "build/testrun/$suite" -Directory) {
+                $target = "$dest/$suite/$($test.Name)"
+                New-Item -ItemType Directory -Force $target | Out-Null
+                foreach ($part in @('log','results','regression.diffs','regression.out')) {
+                  $source = Join-Path $test.FullName $part
+                  if (Test-Path $source) { Copy-Item $source $target -Recurse -Force }
+                }
+              }
+            }
+          }
+          function Run-Tests([string]$label, [string[]]$selection) {
+            & meson test --print-errorlogs --no-rebuild -C build @selection
+            $rc = $LASTEXITCODE
+            Save-Logs $label
+            if ($rc -ne 0) { throw "$label failed: $rc" }
+          }
+          function Rebuild-And-Install {
+            & ninja -C build all testprep
+            if ($LASTEXITCODE -ne 0) { throw 'rebuild failed' }
+            & meson test --print-errorlogs --no-rebuild -C build --suite setup
+            if ($LASTEXITCODE -ne 0) { throw 'temporary installation failed' }
+          }
+
+          Run-Tests 'normal-core' @('regress/regress','isolation/isolation','test_decoding/regress','test_decoding/isolation','injection_points/isolation')
+          Run-Tests 'normal-subscription' @('--suite','subscription')
+
+          git apply "$env:RUNNER_TEMP/cf6992-suppress.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'test-only suppression patch failed' }
+          Rebuild-And-Install
+          Run-Tests 'suppressed-final' @('test_decoding/isolation','injection_points/isolation')
+          $actual = Get-Content build/testrun/test_decoding/isolation/results/slot_creation_error.out -Raw
+          if ($actual -match 'FATAL:  terminating connection') { throw 'suppression did not reach slot_creation_error' }
+          if ($actual -notmatch 'step s1_c: COMMIT' -or $actual -notmatch 'step s1_view_slot:') { throw 'slot cleanup checks missing' }
+          $actual = Get-Content build/testrun/injection_points/isolation/results/wait_cleanup.out -Raw
+          if ($actual -match 'FATAL:  terminating connection') { throw 'suppression did not reach wait_cleanup' }
+          if ($actual -notmatch 'step release3:' -or $actual -notmatch 'step detach3:') { throw 'blocker release or cleanup missing' }
+
+          git restore --source=3888ff074d909d98eea6db837803addc56ef3aec --worktree src/test/isolation/isolationtester.c
+          if ($LASTEXITCODE -ne 0) { throw 'baseline driver restore failed' }
+          Rebuild-And-Install
+          $env:TESTS = 'slot_creation_error'
+          & meson test --print-errorlogs --no-rebuild -C build test_decoding/isolation
+          $rc = $LASTEXITCODE
+          Remove-Item Env:TESTS
+          Save-Logs 'negative-baseline-driver'
+          $actual = Get-Content build/testrun/test_decoding/isolation/results/slot_creation_error.out -Raw
+          if ($rc -eq 0 -or $actual -notmatch 'PQconsumeInput failed:') { throw 'baseline did not reproduce the expected driver abort' }
+
+          git restore --source=8d42f18d18de38f9191971f0bbca6aa08b1eb87e --worktree src/test/isolation/isolationtester.c
+          if ($LASTEXITCODE -ne 0) { throw 'v1 driver restore failed' }
+          Rebuild-And-Install
+          $env:TESTS = 'wait_cleanup'
+          & meson test --print-errorlogs --no-rebuild -C build injection_points/isolation
+          $rc = $LASTEXITCODE
+          Remove-Item Env:TESTS
+          Save-Logs 'negative-v1-blocker'
+          $actual = Get-Content build/testrun/injection_points/isolation/results/wait_cleanup.out -Raw
+          if ($rc -eq 0 -or $actual -notmatch 'invalid socket:') { throw 'v1 did not reproduce the blocked-step abort' }
+
+          Copy-Item "$env:RUNNER_TEMP/cf6992-final-driver.c" src/test/isolation/isolationtester.c -Force
+          git apply -R "$env:RUNNER_TEMP/cf6992-suppress.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'suppression removal failed' }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'final source does not match the pinned candidate' }
+          Rebuild-And-Install
+          Run-Tests 'restored-final' @('test_decoding/isolation','injection_points/isolation')
+          'Normal suites passed; synthetic baseline and v1 failures reproduced; final missing-error and restored-normal paths passed.' | Set-Content evidence/summary.txt
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-connection-loss-${{ github.run_id }}
+          path: |
+            evidence/
+            build/meson-logs/
+          if-no-files-found: warn
+          retention-days: 14

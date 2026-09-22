@@ -1,0 +1,33 @@
+diff --git a/src/backend/utils/error/elog.c b/src/backend/utils/error/elog.c
+index e1bea7637d9..fc40866398f 100644
+--- a/src/backend/utils/error/elog.c
++++ b/src/backend/utils/error/elog.c
+@@ -85,5 +85,6 @@
+ #include "storage/proc.h"
+ #include "tcop/tcopprot.h"
++#include "utils/guc.h"
+ #include "utils/guc_hooks.h"
+ #include "utils/memutils.h"
+ #include "utils/pg_locale.h"
+@@ -1922,8 +1923,19 @@ EmitErrorReport(void)
+ 	if (edata->output_to_server)
+ 		send_message_to_server_log(edata);
+ 
+-	/* Send to client, if enabled */
+-	if (edata->output_to_client)
++	/*
++	 * TEST ONLY: deterministically exercise isolationtester's handling of a
++	 * connection that closes without delivering the final ErrorResponse.
++	 * Keep output_to_server untouched so the FATAL remains in the server log.
++	 */
++	if (edata->output_to_client &&
++		!(edata->elevel == FATAL &&
++		  edata->sqlerrcode == ERRCODE_ADMIN_SHUTDOWN &&
++		  application_name != NULL &&
++		  (strcmp(application_name, "isolation/slot_creation_error/s2") == 0 ||
++		   strcmp(application_name, "isolation/wait_cleanup/s1") == 0 ||
++		   strcmp(application_name,
++				  "isolation/wait_cleanup_own_blocker/s1") == 0)))
+ 		send_message_to_frontend(edata);
+ 
+ 	MemoryContextSwitchTo(oldcontext);
