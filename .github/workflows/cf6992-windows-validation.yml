@@ -107,7 +107,6 @@ jobs:
             }
           New-Item -ItemType Directory -Force evidence | Out-Null
           git rev-parse HEAD | Set-Content evidence/source.txt
-          Copy-Item src/test/isolation/isolationtester.c "$env:RUNNER_TEMP/cf6992-final-driver.c"
 
           function Save-Logs([string]$label) {
             $dest = "evidence/$label"
@@ -131,18 +130,40 @@ jobs:
             Save-Logs $label
             if ($rc -ne 0) { throw "$label failed: $rc" }
           }
-          function Rebuild-And-Install {
+          function Record-Binaries([string]$label) {
+            $record = "evidence/$label-binaries.txt"
+            git rev-parse HEAD | Set-Content $record
+            foreach ($path in @('src/test/isolation/isolationtester.c',
+                                'build/src/test/isolation/isolationtester.exe',
+                                'build/src/backend/postgres.exe',
+                                'build/tmp_install/usr/local/pgsql/bin/postgres.exe',
+                                'build/tmp_install/usr/local/pgsql/bin/psql.exe')) {
+              $hash = Get-FileHash -Algorithm SHA256 $path
+              "$($hash.Hash) $path" | Add-Content $record
+            }
+            & build/tmp_install/usr/local/pgsql/bin/postgres.exe --version | Add-Content $record
+            if ($LASTEXITCODE -ne 0) { throw 'postgres version check failed' }
+            & build/tmp_install/usr/local/pgsql/bin/psql.exe --version | Add-Content $record
+            if ($LASTEXITCODE -ne 0) { throw 'psql version check failed' }
+            & build/src/test/isolation/isolationtester.exe -V | Add-Content $record
+            if ($LASTEXITCODE -ne 0) { throw 'isolationtester version check failed' }
+          }
+          function Rebuild-And-Install([string]$label) {
+            # Ensure a restored source timestamp cannot leave an old driver.
+            Remove-Item build/src/test/isolation/isolationtester.exe.p/isolationtester.c.obj -Force
             & ninja -C build all testprep
             if ($LASTEXITCODE -ne 0) { throw 'rebuild failed' }
             & meson test --print-errorlogs --no-rebuild -C build --suite setup
             if ($LASTEXITCODE -ne 0) { throw 'temporary installation failed' }
+            Record-Binaries $label
           }
 
+          Record-Binaries 'normal-core'
           Run-Tests 'normal-core' @('regress/regress','isolation/isolation','test_decoding/regress','test_decoding/isolation','injection_points/isolation')
 
           git apply "$env:RUNNER_TEMP/cf6992-suppress.patch"
           if ($LASTEXITCODE -ne 0) { throw 'test-only suppression patch failed' }
-          Rebuild-And-Install
+          Rebuild-And-Install 'suppressed-final'
           Run-Tests 'suppressed-final' @('test_decoding/isolation','injection_points/isolation')
           $actual = Get-Content build/testrun/test_decoding/isolation/results/slot_creation_error.out -Raw
           if ($actual -match 'FATAL:  terminating connection') { throw 'suppression did not reach slot_creation_error' }
@@ -153,7 +174,7 @@ jobs:
 
           git restore --source=3888ff074d909d98eea6db837803addc56ef3aec --worktree src/test/isolation/isolationtester.c
           if ($LASTEXITCODE -ne 0) { throw 'baseline driver restore failed' }
-          Rebuild-And-Install
+          Rebuild-And-Install 'negative-baseline-driver'
           $env:TESTS = 'slot_creation_error'
           & meson test --print-errorlogs --no-rebuild -C build test_decoding/isolation
           $rc = $LASTEXITCODE
@@ -164,7 +185,7 @@ jobs:
 
           git restore --source=8d42f18d18de38f9191971f0bbca6aa08b1eb87e --worktree src/test/isolation/isolationtester.c
           if ($LASTEXITCODE -ne 0) { throw 'v1 driver restore failed' }
-          Rebuild-And-Install
+          Rebuild-And-Install 'negative-v1-blocker'
           $env:TESTS = 'wait_cleanup'
           & meson test --print-errorlogs --no-rebuild -C build injection_points/isolation
           $rc = $LASTEXITCODE
@@ -173,12 +194,13 @@ jobs:
           $actual = Get-Content build/testrun/injection_points/isolation/results/wait_cleanup.out -Raw
           if ($rc -eq 0 -or $actual -notmatch 'invalid socket:') { throw 'v1 did not reproduce the blocked-step abort' }
 
-          Copy-Item "$env:RUNNER_TEMP/cf6992-final-driver.c" src/test/isolation/isolationtester.c -Force
+          git restore --source=HEAD --worktree src/test/isolation/isolationtester.c
+          if ($LASTEXITCODE -ne 0) { throw 'final driver restoration failed' }
           git apply -R "$env:RUNNER_TEMP/cf6992-suppress.patch"
           if ($LASTEXITCODE -ne 0) { throw 'suppression removal failed' }
           git diff --exit-code
           if ($LASTEXITCODE -ne 0) { throw 'final source does not match the pinned candidate' }
-          Rebuild-And-Install
+          Rebuild-And-Install 'restored-final'
           Run-Tests 'restored-final' @('test_decoding/isolation','injection_points/isolation')
 
           # Run TAP tests serially on Windows.  The preceding run observed an
