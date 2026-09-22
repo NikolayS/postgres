@@ -33,6 +33,8 @@ typedef struct IsoConnInfo
 	const char *sessionname;
 	/* Active step on this connection, or NULL if idle. */
 	PermutationStep *active_step;
+	/* Connection error retained while an active step has blockers. */
+	char	   *connection_error;
 	/* Number of NOTICE messages received from connection. */
 	int			total_notices;
 } IsoConnInfo;
@@ -828,7 +830,6 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 	PGresult   *res;
 	PGnotify   *notify;
 	bool		canceled = false;
-	char	   *connection_error = NULL;
 
 	/*
 	 * If the step is annotated with (*), then on the first call, force it to
@@ -852,7 +853,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 		}
 	}
 
-	if (sock < 0)
+	if (sock < 0 && !iconn->connection_error)
 	{
 		fprintf(stderr, "invalid socket: %s", PQerrorMessage(conn));
 		exit(1);
@@ -861,7 +862,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 	gettimeofday(&start_time, NULL);
 	FD_ZERO(&read_set);
 
-	while (PQisBusy(conn))
+	while (!iconn->connection_error && PQisBusy(conn))
 	{
 		FD_SET(sock, &read_set);
 		timeout.tv_sec = 0;
@@ -922,7 +923,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 						 * Save the error before PQgetResult() adds another complaint
 						 * about attempting to read from the dead socket.
 						 */
-						connection_error = pg_strdup(PQerrorMessage(conn));
+						iconn->connection_error = pg_strdup(PQerrorMessage(conn));
 						break;
 					}
 					if (!PQisBusy(conn))
@@ -1001,7 +1002,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 			 * Save the error before PQgetResult() adds another complaint about
 			 * attempting to read from the dead socket.
 			 */
-			connection_error = pg_strdup(PQerrorMessage(conn));
+			iconn->connection_error = pg_strdup(PQerrorMessage(conn));
 			break;
 		}
 	}
@@ -1049,7 +1050,7 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 
 					if (sev && msg)
 						printf("%s:  %s\n", sev, msg);
-					else if (!connection_error)
+					else if (!iconn->connection_error)
 						printf("%s\n", PQresultErrorMessage(res));
 				}
 				break;
@@ -1058,16 +1059,13 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 					   PQresStatus(PQresultStatus(res)));
 		}
 		PQclear(res);
-
-		/* The connection is dead, so don't ask libpq for another result. */
-		if (connection_error)
-			break;
 	}
 
-	if (connection_error)
+	if (iconn->connection_error)
 	{
-		printf("%s\n", connection_error);
-		pg_free(connection_error);
+		printf("%s\n", iconn->connection_error);
+		pg_free(iconn->connection_error);
+		iconn->connection_error = NULL;
 	}
 
 	/* Report any available NOTIFY messages, too */
