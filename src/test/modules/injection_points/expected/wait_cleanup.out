@@ -41,7 +41,7 @@ injection_points_detach
 (1 row)
 
 
-starting permutation: wait1 terminate3 noop3 wait2 wakeup3 noop2 detach3
+starting permutation: wait1 terminate3 noop3 release3 wait2 wakeup3 noop2 detach3
 injection_points_attach
 -----------------------
                        
@@ -49,22 +49,23 @@ injection_points_attach
 
 step wait1: SELECT injection_points_run('injection-points-wait'); <waiting ...>
 step terminate3: 
-	SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+	SELECT pg_terminate_backend(pid, 180000) FROM pg_stat_activity
 	  WHERE wait_event = 'injection-points-wait';
- <waiting ...>
-step wait1: <... completed>
-FATAL:  terminating connection due to administrator command
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
 
-step terminate3: <... completed>
 pg_terminate_backend
 --------------------
 t                   
 (1 row)
 
 step noop3: 
+s3: NOTICE:  release wait1
+step release3: DO $$BEGIN RAISE NOTICE 'release wait1'; END$$;
+step wait1: <... completed>
+FATAL:  terminating connection due to administrator command
+server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+
 step wait2: SELECT injection_points_run('injection-points-wait'); <waiting ...>
 step wakeup3: SELECT injection_points_wakeup('injection-points-wait');
 injection_points_wakeup
