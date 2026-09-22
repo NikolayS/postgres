@@ -7,6 +7,11 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+use FindBin;
+use lib $FindBin::RealBin;
+
+use CombineBackupTest;
+
 my $tempdir = PostgreSQL::Test::Utils::tempdir_short();
 
 # Can be changed to test the other modes.
@@ -45,6 +50,9 @@ CREATE TABLE will_change_in_ts (a int, b text) TABLESPACE ts1;
 INSERT INTO will_change_in_ts VALUES (1, 'initial test row');
 CREATE TABLE will_get_dropped_in_ts (a int, b text);
 INSERT INTO will_get_dropped_in_ts VALUES (1, 'initial test row');
+CREATE TABLE indexed_table (a int PRIMARY KEY, b text);
+INSERT INTO indexed_table SELECT g, 'row ' || g FROM generate_series(1, 1000) g;
+VACUUM (FREEZE) indexed_table;
 EOM
 
 # Read list of tablespace OIDs. There should be just one.
@@ -83,6 +91,10 @@ INSERT INTO newly_created_in_ts VALUES (1, 'row for new table');
 VACUUM FULL will_get_rewritten;
 DROP DATABASE db_will_get_dropped;
 CREATE DATABASE db_newly_created;
+UPDATE indexed_table SET b = 'updated row ' || a WHERE a % 100 = 0;
+DELETE FROM indexed_table WHERE a % 137 = 0;
+INSERT INTO indexed_table SELECT g, 'new row ' || g FROM generate_series(2001, 2100) g;
+VACUUM (FREEZE) indexed_table;
 EOM
 
 # Take an incremental backup.
@@ -131,6 +143,7 @@ $pitr1->append_conf(
 recovery_target_lsn = '$lsn'
 recovery_target_action = 'promote'
 archive_mode = 'off'
+autovacuum = 'off'
 });
 $pitr1->start();
 
@@ -150,6 +163,7 @@ $pitr2->append_conf(
 recovery_target_lsn = '$lsn'
 recovery_target_action = 'promote'
 archive_mode = 'off'
+autovacuum = 'off'
 });
 $pitr2->start();
 
@@ -201,5 +215,17 @@ compare_files(
 		s{create tablespace .* location .*\btspitr\K[12]}{N}i for @_;
 		return $_[0] ne $_[1];
 	});
+
+# A logical dump can only see live row contents, so the comparison above is
+# blind to physical-level problems that pg_combinebackup could introduce:
+# stale visibility map bits, index corruption, or other damage to data that
+# a sequential scan does not consult. Run additional physical consistency
+# checks against each restored cluster, so that if only one of them fails,
+# the divergence is attributable. See CombineBackupTest.pm for the details;
+# t/013_stale_vm_detection.pl is the negative control demonstrating that
+# these checks really do fire on a corrupted cluster.
+check_physical_consistency($pitr1, 'full backup PITR', 'indexed_table', 'a');
+check_physical_consistency($pitr2, 'incremental backup PITR',
+	'indexed_table', 'a');
 
 done_testing();
