@@ -1,7 +1,7 @@
 name: Windows connection-loss validation
 on:
   push:
-    branches: [ci/cf6992-windows-repro]
+    branches: [ci/cf6992-windows-validation-20260922]
   workflow_dispatch:
 permissions:
   contents: read

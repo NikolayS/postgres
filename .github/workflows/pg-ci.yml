@@ -12,6 +12,7 @@ on:
   push:
     branches-ignore:
       - ci/cf6992-windows-repro
+      - ci/cf6992-windows-validation-20260922
   # TODO: It might make sense to also add PR based triggers, to make it easier
   # to use PRs on one's own repo, but it's a tad more complicated than just
   # adding the 'pull_request' event, as naively doing so would often lead to
