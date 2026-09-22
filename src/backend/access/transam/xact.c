@@ -2430,6 +2430,26 @@ CommitTransaction(void)
 	ProcArrayEndTransaction(MyProc, latestXid);
 
 	/*
+	 * PROTOTYPE ("Alt B"): insert this transaction's notifications into the
+	 * queue now.  This is deliberately *after* ProcArrayEndTransaction():
+	 *
+	 * - The serializing lock is acquired after XLogFlush()/SyncRepWaitForLSN(),
+	 *   so notifying transactions no longer serialize across their own commit
+	 *   round trip and can group-commit with one another.
+	 *
+	 * - We have already left the ProcArray, so a backend queued on the insert
+	 *   lock no longer pins its xid/xmin, and so does not hold back the global
+	 *   horizon or delay the visibility of an already-durable commit.
+	 *
+	 * - Every entry is therefore inserted by a transaction that is already
+	 *   ProcArray-complete.  A listener reads the queue head before taking its
+	 *   snapshot, so it can never observe an entry whose xid is still
+	 *   in-progress: insertion-order == visibility-order holds trivially
+	 *   rather than being derived from how long the lock is held.
+	 */
+	PostCommitInsert_Notify();
+
+	/*
 	 * This is all post-commit cleanup.  Note that if an error is raised here,
 	 * it's too late to abort the transaction.  This should be just
 	 * noncritical resource releasing.
