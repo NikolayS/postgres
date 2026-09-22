@@ -131,7 +131,16 @@ jobs:
               Copy-Item 'build\meson-logs\testlog.txt' "evidence\testlog-$iteration.txt"
             }
             if (Test-Path 'build\testrun\test_decoding\isolation') {
-              Copy-Item 'build\testrun\test_decoding\isolation' "evidence\testrun-$iteration" -Recurse
+              $source = 'build\testrun\test_decoding\isolation'
+              $destination = "evidence\testrun-$iteration"
+              New-Item -ItemType Directory -Force $destination | Out-Null
+              Get-ChildItem "$source\regression.*" -ErrorAction SilentlyContinue |
+                Copy-Item -Destination $destination
+              foreach ($subdir in @('log', 'results')) {
+                if (Test-Path "$source\$subdir") {
+                  Copy-Item "$source\$subdir" "$destination\$subdir" -Recurse
+                }
+              }
             }
           }
           "failures=$failures" | Tee-Object -FilePath evidence\summary.txt
@@ -156,8 +165,12 @@ jobs:
               Tee-Object -FilePath "evidence\cf6992-$iteration.txt"
             if ($LASTEXITCODE -ne 0) { $failures++ }
             if (Test-Path 'build\testrun\subscription\039_publisher_xact_rollback') {
-              Copy-Item 'build\testrun\subscription\039_publisher_xact_rollback' `
-                "evidence\cf6992-testrun-$iteration" -Recurse
+              $source = 'build\testrun\subscription\039_publisher_xact_rollback'
+              $destination = "evidence\cf6992-testrun-$iteration"
+              New-Item -ItemType Directory -Force $destination | Out-Null
+              if (Test-Path "$source\log") {
+                Copy-Item "$source\log" "$destination\log" -Recurse
+              }
             }
           }
           Add-Content evidence\summary.txt "cf6992_failures=$failures"
