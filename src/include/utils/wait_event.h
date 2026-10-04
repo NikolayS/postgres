@@ -12,6 +12,7 @@
 
 /* enums for wait events */
 #include "utils/wait_event_types.h"
+#include "utils/probes.h"
 
 extern const char *pgstat_get_wait_event(uint32 wait_event_info);
 extern const char *pgstat_get_wait_event_type(uint32 wait_event_info);
@@ -71,6 +72,8 @@ pgstat_report_wait_start(uint32 wait_event_info)
 	 * four-bytes, updates are atomic.
 	 */
 	*(volatile uint32 *) my_wait_event_info = wait_event_info;
+
+	TRACE_POSTGRESQL_WAIT_EVENT_START(wait_event_info);
 }
 
 /* ----------
@@ -84,6 +87,8 @@ pgstat_report_wait_end(void)
 {
 	/* see pgstat_report_wait_start() */
 	*(volatile uint32 *) my_wait_event_info = 0;
+
+	TRACE_POSTGRESQL_WAIT_EVENT_END();
 }
 
 
