@@ -1,0 +1,9 @@
+label,workload,listeners_requested,sessions_live,clients,tps
+pg18,notify_uninterested,0,1,8,26475.993718
+pg18,notify_uninterested,50,51,8,4278.651793
+pg18,notify_uninterested,200,201,8,1044.264183
+pg18,notify_uninterested,500,501,8,385.337067
+pg18,notify_interested,0,1,8,39025.640128
+pg18,notify_interested,50,51,8,4697.860987
+pg18,notify_interested,200,201,8,1251.098088
+pg18,notify_interested,500,501,8,491.201190
