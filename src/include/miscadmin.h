@@ -149,6 +149,35 @@ do { \
 	QueryCancelHoldoffCount--; \
 } while(0)
 
+#ifdef USE_ASSERT_CHECKING
+
+/*
+ * In assertion-enabled builds, the critical section entry/exit macros also
+ * drive the WAL registration cross-check (see xloginsert.c): buffers dirtied
+ * inside a critical section must be registered with one of the WAL records
+ * inserted in it.  The state is reset when a top-level critical section
+ * starts and checked when it ends.
+ */
+extern void XLogRegCheckReset(void);
+extern void XLogRegCheckCritSectionEnd(void);
+
+#define START_CRIT_SECTION() \
+do { \
+	if (CritSectionCount == 0) \
+		XLogRegCheckReset(); \
+	CritSectionCount++; \
+} while(0)
+
+#define END_CRIT_SECTION() \
+do { \
+	Assert(CritSectionCount > 0); \
+	CritSectionCount--; \
+	if (CritSectionCount == 0) \
+		XLogRegCheckCritSectionEnd(); \
+} while(0)
+
+#else							/* !USE_ASSERT_CHECKING */
+
 #define START_CRIT_SECTION()  (CritSectionCount++)
 
 #define END_CRIT_SECTION() \
@@ -156,6 +185,8 @@ do { \
 	Assert(CritSectionCount > 0); \
 	CritSectionCount--; \
 } while(0)
+
+#endif							/* USE_ASSERT_CHECKING */
 
 
 /*****************************************************************************
