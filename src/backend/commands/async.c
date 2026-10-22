@@ -1226,9 +1226,6 @@ PreCommit_Notify(void)
 	/* Queue any pending notifies (must happen after the above) */
 	if (pendingNotifies)
 	{
-		ListCell   *nextNotify;
-		bool		firstIteration = true;
-
 		/*
 		 * Build list of unique channel names being notified for use by
 		 * SignalBackends().
@@ -1291,75 +1288,93 @@ PreCommit_Notify(void)
 		(void) GetCurrentTransactionId();
 
 		/*
-		 * Serialize writers by acquiring a special lock that we hold till
-		 * after commit.  This ensures that queue entries appear in commit
-		 * order, and in particular that there are never uncommitted queue
-		 * entries ahead of committed ones, so an uncommitted transaction
-		 * can't block delivery of deliverable notifications.
-		 *
-		 * We use a heavyweight lock so that it'll automatically be released
-		 * after either commit or abort.  This also allows deadlocks to be
-		 * detected, though really a deadlock shouldn't be possible here.
-		 *
-		 * The lock is on "database 0", which is pretty ugly but it doesn't
-		 * seem worth inventing a special locktag category just for this.
-		 * (Historical note: before PG 9.0, a similar lock on "database 0" was
-		 * used by the flatfiles mechanism.)
+		 * PROTOTYPE ("Alt B"): the queue insertion, and the serializing lock
+		 * that used to be taken here, have moved to PostCommitInsert_Notify(),
+		 * which CommitTransaction() calls after RecordTransactionCommit().
+		 * Nothing further to do at pre-commit time.
 		 */
-		LockSharedObject(DatabaseRelationId, InvalidOid, 0,
-						 AccessExclusiveLock);
-
-		/*
-		 * For the direct advancement optimization in SignalBackends(), we
-		 * need to ensure that no other backend can insert queue entries
-		 * between queueHeadBeforeWrite and queueHeadAfterWrite.  The
-		 * heavyweight lock above provides this guarantee, since it serializes
-		 * all writers.
-		 *
-		 * Note: if the heavyweight lock were ever removed for scalability
-		 * reasons, we could achieve the same guarantee by holding
-		 * NotifyQueueLock in EXCLUSIVE mode across all our insertions, rather
-		 * than releasing and reacquiring it for each page as we do below.
-		 */
-
-		/* Initialize values to a safe default in case list is empty */
-		SET_QUEUE_POS(queueHeadBeforeWrite, 0, 0);
-		SET_QUEUE_POS(queueHeadAfterWrite, 0, 0);
-
-		/* Now push the notifications into the queue */
-		nextNotify = list_head(pendingNotifies->events);
-		while (nextNotify != NULL)
-		{
-			/*
-			 * Add the pending notifications to the queue.  We acquire and
-			 * release NotifyQueueLock once per page, which might be overkill
-			 * but it does allow readers to get in while we're doing this.
-			 *
-			 * A full queue is very uncommon and should really not happen,
-			 * given that we have so much space available in the SLRU pages.
-			 * Nevertheless we need to deal with this possibility. Note that
-			 * when we get here we are in the process of committing our
-			 * transaction, but we have not yet committed to clog, so at this
-			 * point in time we can still roll the transaction back.
-			 */
-			LWLockAcquire(NotifyQueueLock, LW_EXCLUSIVE);
-			if (firstIteration)
-			{
-				queueHeadBeforeWrite = QUEUE_HEAD;
-				firstIteration = false;
-			}
-			asyncQueueFillWarning();
-			if (asyncQueueIsFull())
-				ereport(ERROR,
-						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("too many notifications in the NOTIFY queue")));
-			nextNotify = asyncQueueAddEntries(nextNotify);
-			queueHeadAfterWrite = QUEUE_HEAD;
-			LWLockRelease(NotifyQueueLock);
-		}
-
-		/* Note that we don't clear pendingNotifies; AtCommit_Notify will. */
 	}
+}
+
+/*
+ * PostCommitInsert_Notify
+ *
+ *		PROTOTYPE -- NOT A PATCH PROPOSAL.  See notify-bench/README.md.
+ *
+ *		Insert this transaction's notifications into the queue, after its
+ *		commit record is durable but before it leaves the ProcArray.
+ *
+ *		The point of moving the insertion to here is that the serializing lock
+ *		is then acquired *after* XLogFlush() and SyncRepWaitForLSN(), so
+ *		notifying transactions no longer serialize across their own commit
+ *		round trip and can group-commit with one another again.
+ *
+ *		The lock is still held from here until end of transaction, so it still
+ *		spans ProcArrayEndTransaction().  That is deliberate and load-bearing:
+ *		the listener's gate is XidInMVCCSnapshot() (see
+ *		asyncQueueProcessPageEntries), so the invariant that must be preserved
+ *		is *queue insertion order == snapshot visibility order*, not commit-LSN
+ *		order.  Holding across the ProcArray removal preserves it exactly, and
+ *		also preserves the precondition that SignalBackends()'s direct-advance
+ *		optimization depends on.
+ *
+ *		KNOWN DEFECT: asyncQueueIsFull() can still ereport(ERROR) here, and we
+ *		are now past the commit point, so that error would be raised for an
+ *		already-committed transaction.  A real patch must reserve quota during
+ *		pre-commit (where failing is safe) and make this path infallible.  The
+ *		benchmark never fills the queue, so this does not affect the numbers.
+ */
+void
+PostCommitInsert_Notify(void)
+{
+	ListCell   *nextNotify;
+	bool		firstIteration = true;
+
+	if (!pendingNotifies)
+		return;
+
+	/*
+	 * Serialize insertions with a dedicated LWLock rather than the old
+	 * heavyweight lock.  At this point we are past the commit record, so any
+	 * ereport(ERROR) would reach RecordTransactionAbort()'s "cannot abort
+	 * transaction %u, it was already committed" PANIC.  LWLockAcquire()
+	 * allocates nothing, consults no lock table, runs no deadlock detector and
+	 * does not call AcceptInvalidationMessages(), so unlike LockSharedObject()
+	 * it cannot throw.  It is also released by LWLockReleaseAll() during error
+	 * recovery, and is not subject to the uninterruptible-wait problem that a
+	 * heavyweight lock wait has here (we are inside HOLD_INTERRUPTS()).
+	 *
+	 * Lock ordering: NotifyQueueInsertLock is taken before NotifyQueueLock,
+	 * which is taken before the SLRU bank locks.
+	 */
+	LWLockAcquire(NotifyQueueInsertLock, LW_EXCLUSIVE);
+
+	/* Initialize values to a safe default in case list is empty */
+	SET_QUEUE_POS(queueHeadBeforeWrite, 0, 0);
+	SET_QUEUE_POS(queueHeadAfterWrite, 0, 0);
+
+	nextNotify = list_head(pendingNotifies->events);
+	while (nextNotify != NULL)
+	{
+		LWLockAcquire(NotifyQueueLock, LW_EXCLUSIVE);
+		if (firstIteration)
+		{
+			queueHeadBeforeWrite = QUEUE_HEAD;
+			firstIteration = false;
+		}
+		asyncQueueFillWarning();
+		if (asyncQueueIsFull())
+			ereport(ERROR,
+					(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+					 errmsg("too many notifications in the NOTIFY queue")));
+		nextNotify = asyncQueueAddEntries(nextNotify);
+		queueHeadAfterWrite = QUEUE_HEAD;
+		LWLockRelease(NotifyQueueLock);
+	}
+
+	LWLockRelease(NotifyQueueInsertLock);
+
+	/* Note that we don't clear pendingNotifies; AtCommit_Notify will. */
 }
 
 /*
