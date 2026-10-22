@@ -1,0 +1,166 @@
+-- Fake LSN assignment on unlogged indexes (hash and GiST).
+--
+-- Index AMs that use page LSNs for concurrent-modification interlocks
+-- (e.g. the GiST parent-LSN/child-NSN split detection) must assign fake
+-- LSNs (XLogGetFakeLSN) to pages of relations that are not WAL-logged.
+-- The regression suites otherwise exercise almost exclusively logged
+-- relations, so a missed fake-LSN assignment -- such as the one fixed in
+-- hash's log_split_page() for unlogged relations -- produces no failure
+-- anywhere.  Verify via pageinspect that unlogged hash and GiST index
+-- pages carry nonzero, advancing LSNs after operations that must assign
+-- them.
+--
+-- Fake LSNs handed out by XLogGetFakeLSN() for unlogged relations start
+-- at FirstNormalUnloggedLSN (1000, i.e. 0/3E8) and increase strictly, so
+-- "lsn >= 0/3E8" means "a fake LSN was assigned at some point".  All
+-- output is reduced to booleans so that it is independent of the actual
+-- fake-LSN counter values, which are shared cluster-wide.
+
+-- ===================================================================
+-- Unlogged hash: bucket split must assign fake LSNs (log_split_page)
+-- ===================================================================
+
+CREATE UNLOGGED TABLE test_unlogged_hash (k int4);
+-- Low fillfactor makes bucket splits happen frequently.
+CREATE INDEX test_unlogged_hash_idx ON test_unlogged_hash
+    USING hash (k) WITH (fillfactor = 10);
+
+-- The interesting case is a bucket split that moves a multi-page chain of
+-- tuples into the new bucket: the pages of the new bucket's overflow chain
+-- are then written by _hash_splitbucket()/log_split_page(), and the last
+-- page of the chain retains log_split_page()'s LSN afterwards (earlier
+-- chain pages are overwritten again when the next overflow page is
+-- allocated, and the primary bucket page when the split is marked
+-- complete).
+--
+-- Drive this deterministically: pick a key value whose hash code has its
+-- low 8 bits all set, so the tuple chain migrates to the freshly created
+-- bucket every time its current bucket is split (for any bucket mask up
+-- to 255).  Insert that value one row at a time; each insertion is
+-- followed by a split attempt once the fill factor is exceeded, and the
+-- insert that triggers the split of the chain's bucket contributes its
+-- tuple before the split runs.  Stop as soon as the chain has moved while
+-- containing enough tuples to span at least two overflow pages: at that
+-- point the chain has just been rewritten by the split, with no later
+-- modifications.
+CREATE TABLE test_unlogged_hash_state (bucket int8, ndups int);
+
+DO $$
+DECLARE
+  v int;
+  h int8;
+  n int := 0;
+  prevb int8 := -1;
+  curb int8;
+  mx int8;
+  hi int8;
+  lo int8;
+BEGIN
+  SELECT i INTO STRICT v FROM generate_series(1, 100000) i
+    WHERE hashint4(i) & 255 = 255 LIMIT 1;
+  h := hashint4(v)::int8 & 4294967295;
+  LOOP
+    INSERT INTO test_unlogged_hash VALUES (v);
+    n := n + 1;
+    -- locate the bucket now holding the duplicates, from the metapage
+    SELECT maxbucket, highmask, lowmask INTO mx, hi, lo
+      FROM hash_metapage_info(get_raw_page('test_unlogged_hash_idx', 0));
+    curb := h & hi;
+    IF curb > mx THEN
+      curb := curb & lo;
+    END IF;
+    -- 1200 duplicates are enough for two overflow pages at any MAXALIGN
+    IF n >= 1200 AND prevb >= 0 AND curb <> prevb THEN
+      EXIT;
+    END IF;
+    prevb := curb;
+    IF n >= 20000 THEN
+      RAISE EXCEPTION 'duplicate chain did not migrate after % inserts', n;
+    END IF;
+  END LOOP;
+  INSERT INTO test_unlogged_hash_state VALUES (curb, n);
+END
+$$;
+
+-- Walk the new bucket's page chain in order and check its LSNs:
+-- * every page must carry a fake LSN (>= 0/3E8, in particular nonzero);
+-- * the overflow-page LSNs must strictly advance along the chain;
+--   without the log_split_page() fake LSN the last overflow page would
+--   still carry the LSN assigned when it was allocated, which equals the
+--   preceding page's LSN;
+-- * the primary bucket page must carry the newest LSN of the chain,
+--   assigned when the split was marked complete.
+WITH RECURSIVE chain AS (
+  SELECT s.blkno, 0 AS pos
+  FROM generate_series(1, pg_relation_size('test_unlogged_hash_idx') / current_setting('block_size')::int - 1) s (blkno)
+  WHERE hash_page_type(get_raw_page('test_unlogged_hash_idx', s.blkno)) = 'bucket'
+    AND (hash_page_stats(get_raw_page('test_unlogged_hash_idx', s.blkno))).hasho_bucket =
+        (SELECT bucket FROM test_unlogged_hash_state)
+  UNION ALL
+  SELECT (hash_page_stats(get_raw_page('test_unlogged_hash_idx', c.blkno))).hasho_nextblkno::int8,
+         c.pos + 1
+  FROM chain c
+  WHERE (hash_page_stats(get_raw_page('test_unlogged_hash_idx', c.blkno))).hasho_nextblkno::int8
+        <> 4294967295  -- InvalidBlockNumber
+),
+info AS (
+  SELECT c.pos,
+         (page_header(get_raw_page('test_unlogged_hash_idx', c.blkno))).lsn
+  FROM chain c
+)
+SELECT count(*) >= 3 AS chain_has_two_overflow_pages,
+       bool_and(lsn >= '0/3E8') AS all_chain_pages_have_fake_lsns,
+       (SELECT bool_and(lsn > prev_lsn)
+        FROM (SELECT lsn, lag(lsn) OVER (ORDER BY pos) AS prev_lsn
+              FROM info WHERE pos > 0) ov
+        WHERE prev_lsn IS NOT NULL) AS overflow_lsns_strictly_advance,
+       (max(lsn) FILTER (WHERE pos = 0)) = max(lsn) AS primary_page_has_newest_lsn
+FROM info;
+
+-- The unlogged index's metapage must carry a fake LSN as well, and it
+-- must advance with every atomic action, e.g. a plain insert.
+SELECT (page_header(get_raw_page('test_unlogged_hash_idx', 0))).lsn AS hash_metap_lsn
+\gset
+SELECT :'hash_metap_lsn'::pg_lsn >= '0/3E8' AS hash_metapage_has_fake_lsn;
+INSERT INTO test_unlogged_hash
+  SELECT i FROM generate_series(1, 1000) i WHERE hashint4(i) & 255 = 0 LIMIT 1;
+SELECT (page_header(get_raw_page('test_unlogged_hash_idx', 0))).lsn
+       > :'hash_metap_lsn'::pg_lsn AS hash_metapage_lsn_advanced;
+
+DROP TABLE test_unlogged_hash, test_unlogged_hash_state;
+
+-- ===================================================================
+-- Unlogged GiST: page splits must assign fake LSNs and NSNs
+-- ===================================================================
+
+CREATE UNLOGGED TABLE test_unlogged_gist (p point);
+CREATE INDEX test_unlogged_gist_idx ON test_unlogged_gist USING gist (p);
+
+-- Enough inserts to force plenty of page splits.
+INSERT INTO test_unlogged_gist
+  SELECT point(i % 100, i / 100) FROM generate_series(1, 2000) i;
+
+-- Every page of the index must carry a fake LSN (the index was built
+-- empty, so all pages have since been written through the insert/split
+-- paths), and pages created by splits must carry an NSN that is itself a
+-- fake LSN: a zero or stale NSN would break the parent-LSN/child-NSN
+-- split-detection interlock used by concurrent GiST scans.
+SELECT count(*) > 5 AS gist_has_multiple_pages,
+       bool_and(o.lsn >= '0/3E8') AS all_gist_pages_have_fake_lsns,
+       count(*) FILTER (WHERE o.nsn <> '0/0') > 0 AS some_gist_pages_have_nsns,
+       bool_and(o.nsn = '0/0' OR o.nsn >= '0/3E8') AS all_nsns_are_fake_lsns
+FROM generate_series(0, pg_relation_size('test_unlogged_gist_idx') / current_setting('block_size')::int - 1) s (blkno),
+     LATERAL gist_page_opaque_info(get_raw_page('test_unlogged_gist_idx', s.blkno)) o;
+
+-- More splits must advance the highest page LSN in the index.
+SELECT max(o.lsn) AS gist_max_lsn
+FROM generate_series(0, pg_relation_size('test_unlogged_gist_idx') / current_setting('block_size')::int - 1) s (blkno),
+     LATERAL gist_page_opaque_info(get_raw_page('test_unlogged_gist_idx', s.blkno)) o
+\gset
+INSERT INTO test_unlogged_gist
+  SELECT point(i % 100, i / 100) FROM generate_series(2001, 4000) i;
+SELECT max(o.lsn) > :'gist_max_lsn'::pg_lsn AS gist_max_lsn_advanced
+FROM generate_series(0, pg_relation_size('test_unlogged_gist_idx') / current_setting('block_size')::int - 1) s (blkno),
+     LATERAL gist_page_opaque_info(get_raw_page('test_unlogged_gist_idx', s.blkno)) o;
+
+DROP TABLE test_unlogged_gist;

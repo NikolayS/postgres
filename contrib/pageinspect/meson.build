@@ -54,6 +54,7 @@ tests += {
       'gin',
       'gist',
       'hash',
+      'unlogged_lsn',
       'checksum',
       'oldextversions',
     ],

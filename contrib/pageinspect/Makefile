@@ -32,6 +32,7 @@ REGRESS = \
 	gin \
 	gist \
 	hash \
+	unlogged_lsn \
 	oldextversions
 
 ifdef USE_PGXS
