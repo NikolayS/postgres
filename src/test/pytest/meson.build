@@ -7,6 +7,7 @@ tests += {
   'pytest': {
     'tests': [
       'pyt/test_future.py',
+      'pyt/test_portal_snapshot.py',
     ],
   },
 }
