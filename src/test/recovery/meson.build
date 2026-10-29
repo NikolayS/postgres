@@ -7,6 +7,7 @@ tests += {
   'pytest': {
     'test_kwargs': {'priority': 40}, # recovery tests are slow, start early
     'tests': [
+      'pyt/test_013_crash_restart.py',
       'pyt/test_029_stats_restart.py',
       'pyt/test_031_recovery_conflict.py',
       'pyt/test_049_wait_for_lsn.py',

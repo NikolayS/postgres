@@ -13,6 +13,7 @@ PGFILEDESC = "pg_visibility - page visibility information"
 EXTRA_INSTALL = contrib/pageinspect
 REGRESS = pg_visibility
 TAP_TESTS = 1
+PYTEST_TESTS = 1
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
