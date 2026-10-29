@@ -16,7 +16,7 @@ import ctypes
 import os
 import sys
 import warnings
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from typing import Any, NamedTuple, NoReturn
 
 from ._bindings import (
@@ -121,8 +121,8 @@ class _MustConsumeFuture(Future):
 
     A plain ``concurrent.futures.Future`` silently drops an exception that
     nobody retrieves, which would let a background query fail unnoticed. This
-    subclass records whether ``result()``/``exception()`` was called, so that
-    ``PGconn.close()`` can turn a forgotten ``.result()`` into a visible test
+    subclass records whether ``result()``/``exception()`` retrieved an outcome,
+    so that ``PGconn.close()`` can turn a forgotten ``.result()`` into a visible test
     failure instead of a silent pass.
 
     ``origin`` are exception notes saying what the query is and where the
@@ -147,9 +147,11 @@ class _MustConsumeFuture(Future):
 
     def result(self, timeout: float | None = None) -> Any:
         __tracebackhide__ = True  # Don't show in pytest stack traces
-        self.consumed = True
         try:
-            return super().result(timeout)
+            # exception() distinguishes a wait timeout from a TimeoutError
+            # raised by the query. Only retrieving an outcome consumes it.
+            self.exception(timeout)
+            return super().result(timeout=0)
         except BaseException as e:
             # Its traceback runs through concurrent.futures internals and the
             # worker thread's query code, none of which tells anything about
@@ -158,8 +160,14 @@ class _MustConsumeFuture(Future):
             raise e.with_traceback(None)
 
     def exception(self, timeout: float | None = None) -> BaseException | None:
+        try:
+            exc = super().exception(timeout)
+        except CancelledError:
+            if self.cancelled():
+                self.consumed = True
+            raise
         self.consumed = True
-        return super().exception(timeout)
+        return exc
 
 
 class PGconn(contextlib.AbstractContextManager):

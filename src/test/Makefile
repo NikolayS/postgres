@@ -18,6 +18,7 @@ SUBDIRS = \
 	modules \
 	perl \
 	postmaster \
+	pytest \
 	recovery \
 	regress \
 	subscription

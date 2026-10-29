@@ -26,3 +26,5 @@ if icu.found()
 endif
 
 subdir('perl')
+
+subdir('pytest')
