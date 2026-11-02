@@ -18,6 +18,7 @@ python3 $S/rank.py > $D/rankings.txt
 python3 $S/q.py   >> $D/rankings.txt
 python3 $S/gen.py > /dev/null
 python3 $S/extras.py > /dev/null
+python3 $S/fun.py > /dev/null
 # 4. HTML brief
 python3 $S/export_csv.py
 python3 $S/build.py

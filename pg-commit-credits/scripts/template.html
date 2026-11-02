@@ -131,6 +131,17 @@ a{color:var(--accent)}
 .vs th:nth-child(2),.vs td:nth-child(2){background:var(--hl-nik)}
 .vs th:nth-child(3),.vs td:nth-child(3){background:var(--hl-ab)}
 .vs td.lead{font-weight:700}
+.rec{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.rc{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.rc .k{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.rc .b{font-family:var(--f-display);font-size:26px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.rc .s{font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.rc.nik{border-top:3px solid var(--nik)}.rc.ab{border-top:3px solid var(--ab)}
+.hm{display:grid;grid-template-columns:2.6em repeat(24,minmax(0,1fr));gap:2px;font-family:var(--f-mono);font-size:10px;color:var(--ink-3)}
+.hm i{display:block;aspect-ratio:1;border-radius:2px;background:var(--accent)}
+.saga{display:grid;gap:0;border-left:2px solid var(--nik);margin-left:6px}
+.saga div{position:relative;padding:6px 0 10px 18px;font-size:13.5px}
+.saga div::before{content:"";position:absolute;left:-6px;top:11px;width:10px;height:10px;border-radius:50%;background:var(--nik);box-shadow:0 0 0 2px var(--panel)}
 .part{border-top:2px solid var(--ink);padding-top:22px}
 </style>
 <div class="wrap">
@@ -251,6 +262,129 @@ a{color:var(--accent)}
   <div class="tbl"><table id="rel"></table></div>
 </section>
 
+<section class="part" style="border-top-width:1px">
+  <div class="head">
+    <div class="eyebrow">Records and rhythms</div>
+    <h2>Bug archaeology, streaks, night owls and other stories hiding in the log</h2>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Bug archaeology</div>
+    <h2 id="bugH"></h2>
+    <p class="muted" id="bugSub"></p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>How old the bug was when it was fixed</h3>
+    <div class="cols" id="bugCols" style="height:190px"></div><div class="colx" id="bugX" style="font-size:10.5px"></div></div>
+  <div class="tbl"><table id="bugOld"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The credit-line era</div>
+    <h2 id="trH"></h2>
+    <p class="muted">Names listed in each kind of credit line per year. Some of the growth is a change in habit: credits that used to be written as free text are now written as structured lines.</p>
+  </div>
+  <div class="tbl"><table id="tr"></table></div>
+  <div class="rec" id="trRec"></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Backpatching</div>
+    <h2 id="bpH"></h2>
+    <p class="muted">Commits since 2019 with a <code>Backpatch-through:</code> line. Not every committer uses this line, so many backpatched fixes aren't counted.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:8px"><h3>Oldest branch each fix went back to</h3><div class="cols" id="bpCols" style="height:180px"></div><div class="colx" id="bpX" style="font-size:10.5px"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Who reports the bugs that get backpatched, 2022–2026</h3><div class="bars" id="bpRep"></div><p class="muted" style="font-size:12px">Hover for how many of those fixes went back to PG13 or older.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Streaks</div>
+    <h2 id="stH"></h2>
+    <p class="muted" id="stSub"></p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>Every day Tom Lane committed, 2001–2026</h3><div style="overflow-x:auto"><div id="tomCal" style="min-width:600px"></div></div><p class="muted" id="tomCap" style="font-size:12px"></p></div>
+  <div class="card" style="display:grid;gap:12px"><h3>Longest run of consecutive commit days</h3><div class="bars" id="stBars"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Commit clock</div>
+    <h2 id="ckH"></h2>
+    <p class="muted">Committers' local time when they committed, 2022–2026. Time zones come from each committer's machine, so travel adds some noise.</p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>All commits by weekday and hour</h3><div style="overflow-x:auto"><div class="hm" id="heat" style="min-width:520px"></div></div></div>
+  <div class="tbl"><table id="ck"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Career ladder</div>
+    <h2 id="ldH"></h2>
+    <p class="muted">People credited for the first time between mid-2019 and 2026 who aren't committers, grouped by the role of their first credit.</p>
+  </div>
+  <div class="tbl"><table id="ld"></table></div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>From first credit to committer</h3><div class="bars" id="ldBit"></div><p class="muted" style="font-size:12px">Days from first credit to first commit, for people who started committing in 2020 or later. * Already credited before 2019, when this data starts, so the real wait was longer.</p></div>
+    <div class="card" style="display:grid;gap:10px"><h3 id="clubH"></h3><p class="muted" style="font-size:12.5px">Credited as author, reviewer, reporter, tester and suggester, all since 2019.</p><p id="club" style="font-size:13.5px;line-height:1.7"></p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Big days</div>
+    <h2 id="bdH"></h2>
+    <p class="muted">Records for people who aren't committers, since 2019.</p>
+  </div>
+  <div class="rec" id="bd"></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Duos</div>
+    <h2 id="duoH"></h2>
+    <p class="muted">Pairs of people both credited as author on the same commit, since 2019.</p>
+  </div>
+  <div class="card"><div class="bars wide" id="duo"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Where discussions start</div>
+    <h2 id="thH"></h2>
+    <p class="muted">The host in each <code>Discussion:</code> link's message-id shows who sent the first email in the thread, for commits in 2026. Some message-ids carry a personal mail-client name such as <code>nathan</code>.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Thread-starter hosts, 2026</h3><div class="bars" id="thDom"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Commits with no Discussion link, 2026</h3><div class="bars" id="thNo"></div><p class="muted" style="font-size:12px">Share of each committer's 2026 commits, for committers with 60 or more commits.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Wordiness</div>
+    <h2 id="wdH"></h2>
+    <p class="muted">Median words per commit message since 2019, not counting credit lines. Committers with 150 or more commits.</p>
+  </div>
+  <div class="card"><div class="bars" id="wd"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Trivia</div>
+    <h2>Commits with words in their hashes, and who commits on holidays</h2>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:10px"><h3>Hashes that spell something</h3><div class="tbl" style="border:0"><table id="van"></table></div></div>
+    <div class="card" style="display:grid;gap:10px"><h3>Christmas Day commits</h3><p class="muted" id="xmasP" style="font-size:13px"></p><div class="bars" id="xmas"></div></div>
+  </div>
+</section>
+
 <section class="part">
   <div class="head">
     <div class="eyebrow">A closer look</div>
@@ -258,6 +392,25 @@ a{color:var(--accent)}
     <p class="muted" id="vsLede"></p>
   </div>
   <div class="tbl"><table class="vs" id="vs"></table></div>
+</section>
+
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Records</div>
+    <h2>First credits, long silences and busiest months</h2>
+    <p class="muted">From each person's commit-message credits across all years.</p>
+  </div>
+  <div class="two"><div class="rec" id="recNik"></div><div class="rec" id="recAb"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The RI fast-path saga</div>
+    <h2 id="sagaH"></h2>
+    <p class="muted">Every commit by Amit Langote that credits Nikolay. Most fix the new RI fast-path for foreign-key checks in PG19.</p>
+  </div>
+  <div class="card"><div class="saga" id="saga"></div></div>
 </section>
 
 <section>
@@ -561,5 +714,158 @@ simpleBars('codeAb', X.codemap.ab.map(r=>({name:r.area,n:r.n,tip:`${r.area}: ${r
   const rk=x=>x?`#${x}`:'–';
   $('relUs').innerHTML='<thead><tr><th>Cycle</th><th>Nikolay</th><th>Andrey</th></tr></thead><tbody>'+
     R.map(r=>`<tr><td><b>PG${r.v}</b>${r.end?'':' <span class="muted" style="font-size:12px">(in progress)</span>'}</td><td>${r.nik} <span class="muted" style="font-size:12px">${rk(r.nikRank)}</span></td><td>${r.ab} <span class="muted" style="font-size:12px">${rk(r.abRank)}</span></td></tr>`).join('')+'</tbody>';
+})();
+
+// ---------- records and rhythms
+const F = D.F;
+const pc=(a,b)=>Math.round(a/b*100);
+function cols(id, xid, items, fmtv){
+  const mx=Math.max(...items.map(i=>i.n));
+  $(id).style.gridTemplateColumns=$(xid).style.gridTemplateColumns=`repeat(${items.length},minmax(0,1fr))`;
+  $(id).innerHTML=items.map(i=>`<div class="col" title="${esc(i.label)}: ${i.n}"><span class="cv">${fmtv?fmtv(i.n):i.n}</span><span class="cb" style="height:${Math.max(1,i.n/mx*100)}%"></span></div>`).join('');
+  $(xid).innerHTML=items.map(i=>`<span>${esc(i.label)}</span>`).join('');
+}
+const yrs=d=>(d/365.25).toFixed(1);
+function card(k,b,s,cls){return `<div class="rc ${cls||''}"><div class="k">${k}</div><div class="b">${b}</div><div class="s">${s}</div></div>`}
+
+// bugs
+(function(){
+  const B=F.bugs, o=B.oldest[0];
+  const old5=B.hist.slice(-2).reduce((s,x)=>s+x.n,0), wk=B.hist[0].n;
+  $('bugH').textContent=`When a fix names the commit that caused the bug, the bug is typically ${Math.round(B.median)} days old. ${B.hist[B.hist.length-1].n} were more than 10 years old.`;
+  $('bugSub').innerHTML=`${B.n} fixes since 2019 say which commit introduced the problem, in phrases like "oversight in commit …" or "thinko in commit …". ${wk} were caught within a week, and ${old5} had been hiding for 5 years or more. These are only the fixes that name a culprit, and some committers write that more often than others.`;
+  cols('bugCols','bugX',B.hist);
+  $('bugOld').innerHTML='<thead><tr><th class="n">Age</th><th>Fixed</th><th>Fix</th><th>Introduced by</th><th>Committer</th></tr></thead><tbody>'+
+    B.oldest.slice(0,10).map(b=>`<tr><td class="n"><b>${yrs(b.age)}</b> <span class="muted" style="font-size:12px">yrs</span></td><td class="mono num" style="white-space:nowrap">${b.d}</td><td>${esc(b.s)}<div class="mono muted" style="font-size:11px">${b.h}</div></td><td class="muted" style="font-size:12.5px">${esc(b.is_)}<div class="mono" style="font-size:11px">${b.ih} · ${b.introduced}</div></td><td style="white-space:nowrap">${esc(b.cn)}</td></tr>`).join('')+'</tbody>';
+})();
+
+// trailers
+(function(){
+  const T=F.trailers.years, ys=Object.keys(T['Reviewed-by']);
+  const r=T['Reviewed-by'], c=T['Co-authored-by'];
+  $('trH').textContent=`Reviewed-by names went from ${fmt(r['2019'])} in 2019 to ${fmt(r['2026'])} in 2026 so far. Co-authored-by barely existed before 2025.`;
+  $('tr').innerHTML='<thead><tr><th>Credit line</th>'+ys.map(y=>`<th class="n">${y}${y==='2026'?'*':''}</th>`).join('')+'<th>Trend</th></tr></thead><tbody>'+
+    ['Author','Reviewed-by','Reported-by','Co-authored-by','Suggested-by','Tested-by'].map(k=>{const v=ys.map(y=>T[k][y]);const W=110,H=26,x=i=>4+i/(v.length-1)*(W-8),yv=n=>H-3-n/Math.max(...v,1)*(H-6);
+      return `<tr><td><code>${k}</code></td>${v.map(n=>`<td class="n">${fmt(n)}</td>`).join('')}<td><svg width="${W}" height="${H}" aria-hidden="true"><polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${v.map((n,i)=>x(i)+','+yv(n)).join(' ')}"/></svg></td></tr>`}).join('')+
+    `<tr><td colspan="10" class="muted" style="font-size:12px">* 2026 runs to __ASOF_SHORT__.</td></tr></tbody>`;
+  const m=F.trailers.maxrev;
+  $('trRec').innerHTML=card('Most reviewers on one commit', m.n, `${esc(m.s)} · ${esc(m.cn)}, ${m.d} · <span class="mono">${m.h}</span>`)+
+    card('Co-authored-by, 2024 → 2025', `${c['2024']} → ${c['2025']}`, 'The jump is mostly a change in how committers write credits, and it stays high in 2026.')+
+    card('Suggested-by, 2019 → 2026', `${T['Suggested-by']['2019']} → ${T['Suggested-by']['2026']}`, 'Giving credit for the idea, not just the patch, is now routine.');
+})();
+
+// backpatch
+(function(){
+  const P=F.backpatch, top=P.targets.reduce((a,b)=>b.n>a.n?b:a);
+  $('bpH').textContent=`${fmt(P.n)} fixes since 2019 say how far back they were applied. The most common target is PG${top.v}, with ${top.n} fixes. Alexander Lakhin's reports led to the most backpatched fixes.`;
+  cols('bpCols','bpX',P.targets.map(t=>({label:t.v,n:t.n})));
+  simpleBars('bpRep',P.reporters.map(r=>({name:r.name,n:r.n,tip:`${r.name}: ${r.n} backpatched fixes, ${r.deep} reaching PG13 or older`})));
+})();
+
+// streaks + Tom Lane calendar
+(function(){
+  const S=F.streaks, T=S.tom, ts=T.streak;
+  $('stH').textContent=`Tom Lane has committed on ${fmt(T.days)} different days since October 2001, ${pc(T.days,T.span)}% of all days. His longest run is ${ts.streak} days in a row.`;
+  $('stSub').textContent=`That ${ts.streak}-day run lasted from ${ts.from_} to ${ts.to}. The next longest belongs to ${S.top[1].name}, at ${S.top[1].streak} days in ${S.top[1].from_.slice(0,4)}.`;
+  const set=new Set(T.dates), y0=2001, y1=+'__ASOF__'.slice(0,4), cw=2.4, rh=11, W=40+366*cw, H=(y1-y0+1)*rh+14;
+  let s='';
+  for(let y=y0;y<=y1;y++){const r=(y-y0)*rh;s+=`<text x="0" y="${r+9}" style="font-size:9.5px">${y}</text>`;
+    const d0=Date.UTC(y,0,1);
+    for(let i=0;i<366;i++){const dt=new Date(d0+i*864e5);if(dt.getUTCFullYear()!==y)break;const k=dt.toISOString().slice(0,10);
+      if(set.has(k)){const inS=k>=ts.from_&&k<=ts.to;s+=`<rect x="${40+i*cw}" y="${r+1}" width="${cw-0.4}" height="${rh-2}" fill="${inS?'var(--ab)':'var(--accent)'}"/>`;}}}
+  ['Jan','Apr','Jul','Oct'].forEach((m,i)=>s+=`<text x="${40+[0,90,181,273][i]*cw}" y="${H-2}" style="font-size:9.5px">${m}</text>`);
+  $('tomCal').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Days Tom Lane committed, 2001 to now">${s}</svg>`;
+  $('tomCap').textContent=`Each mark is a day with at least one commit. The ${ts.streak}-day streak is shown in orange.`;
+  simpleBars('stBars',S.top.slice(0,10).map(x=>({name:x.name,n:x.streak,tip:`${x.name}: ${x.streak} days, ${x.from_} → ${x.to}. Active on ${fmt(x.days)} days in total.`})));
+})();
+
+// clock
+(function(){
+  const C=F.clock, cs=C.committers;
+  const night=[...cs].sort((a,b)=>b.night-a.night)[0], wkd=[...cs].sort((a,b)=>b.weekend-a.weekend).slice(0,3);
+  $('ckH').textContent=`Most commits land in office hours, peaking at ${C.peakHour}:00. Only ${C.weekendShare}% land on weekends. ${night.name} is the night owl, with ${night.night}% of commits between midnight and 6 am. ${wkd.slice(0,-1).map(x=>x.name).join(', ')} and ${wkd[wkd.length-1].name} commit about a quarter of their work on weekends.`;
+  const mx=Math.max(...C.heat.flat()), dn=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let h='<span></span>'+[...Array(24).keys()].map(i=>`<span style="text-align:center">${i%3===0?i:''}</span>`).join('');
+  C.heat.forEach((r,d)=>{h+=`<span>${dn[d]}</span>`+r.map((v,i)=>`<i title="${dn[d]} ${i}:00 — ${v} commits" style="opacity:${(0.06+0.94*v/mx).toFixed(2)}"></i>`).join('')});
+  $('heat').innerHTML=h;
+  const spark=a=>{const W=120,H=22,m=Math.max(...a,1);return `<svg width="${W}" height="${H}" aria-hidden="true">${a.map((v,i)=>`<rect x="${i*5}" y="${H-v/m*(H-2)}" width="4" height="${v/m*(H-2)}" fill="var(--accent)"/>`).join('')}</svg>`};
+  $('ck').innerHTML='<thead><tr><th>Committer</th><th class="n">Commits</th><th class="n">Midnight–6 am</th><th class="n">Weekend</th><th class="n">Busiest hour</th><th>Hours 0–23</th></tr></thead><tbody>'+
+    cs.slice(0,22).map(x=>`<tr><td>${esc(x.name)}</td><td class="n">${fmt(x.n)}</td><td class="n" ${x.night>=10?'style="font-weight:700"':''}>${x.night}%</td><td class="n" ${x.weekend>=20?'style="font-weight:700"':''}>${x.weekend}%</td><td class="n">${x.peak}:00</td><td>${spark(x.hours)}</td></tr>`).join('')+'</tbody>';
+})();
+
+// ladder
+(function(){
+  const L=F.ladder, R=L.roles;
+  $('ldH').textContent=`${pc(L.once,L.people)}% of the ${fmt(L.people)} people credited since 2019 appear exactly once. Of those who start by reviewing, ${pc(R.review.author,R.review.n)}% later author a patch. Of those who start by reporting a bug, only ${pc(R.report.author,R.report.n)}% do.`;
+  const nm={report:'Reporter',review:'Reviewer',author:'Author'};
+  const cell=(a,n)=>`<td class="n">${pc(a||0,n)}% <span class="muted" style="font-size:11.5px">${a||0}</span></td>`;
+  $('ld').innerHTML='<thead><tr><th>First credited as</th><th class="n">People</th><th class="n">Never credited again</th><th class="n">Later authored</th><th class="n">Later reviewed</th><th class="n">Later reported</th></tr></thead><tbody>'+
+    ['report','review','author'].map(k=>{const r=R[k];return `<tr><td><b>${nm[k]}</b></td><td class="n">${r.n}</td>${cell(r.once,r.n)}${cell(r.author,r.n)}${cell(r.review,r.n)}${cell(r.report,r.n)}</tr>`}).join('')+'</tbody>';
+  simpleBars('ldBit',L.newCommitters.map(x=>({name:x.name+(x.firstCredit<'2019-07-01'?' *':''),n:x.days,tip:`${x.name}: first credit in this data ${x.firstCredit}, first commit ${x.firstCommit}`})));
+  $('clubH').textContent=`The all-five-roles club: ${L.club.length} people`;
+  $('club').innerHTML=L.club.map(esc).join(' · ');
+})();
+
+// big days
+(function(){
+  const B=F.busy, d=B.days, s=B.streaks[0];
+  const same=d.filter(x=>x.n===d[0].n);
+  $('bdH').textContent=`The busiest single day for a non-committer is ${d[0].n} credited commits. ${same.slice(0,-1).map(x=>x.name).join(', ')} and ${same[same.length-1].name} all hit it during the PG19 feature-freeze rush in April 2026.`;
+  $('bd').innerHTML=d.slice(0,6).map(x=>card(`${x.d}`,`${x.n} commits`,`${esc(x.name)} in one day`)).join('')+
+    card('Longest daily streak',`${s.n} days`,`${esc(s.name)}, ${s.from_} → ${s.to}`)+
+    card('Runner-up streak',`${B.streaks[1].n} days`,`${esc(B.streaks[1].name)}, ${B.streaks[1].from_} → ${B.streaks[1].to}`);
+})();
+
+// duos
+(function(){
+  const U=F.duos;
+  $('duoH').textContent=`${U[0].a} and ${U[0].b} are the most frequent co-authors, with ${U[0].n} commits together. Andres Freund appears in three of the top pairs.`;
+  simpleBars('duo',U.slice(0,12).map(x=>({name:`${x.a} + ${x.b}`,n:x.n,rk:''})));
+})();
+
+// threads
+(function(){
+  const T=F.threads, g=T.domains[0];
+  $('thH').textContent=`${pc(g.n,T.links)}% of 2026 discussion threads start from a Gmail address. ${pc(T.nolink,T.commits)}% of 2026 commits link no discussion at all, mostly from two committers.`;
+  simpleBars('thDom',T.domains.map(x=>({name:x.d,n:x.n})));
+  simpleBars('thNo',T.nolinkBy.slice(0,8).map(x=>({name:x.name,n:x.pct,tip:`${x.name}: ${x.none} of ${x.n} commits have no Discussion link`})));
+  $('thNo').querySelectorAll('.v').forEach(e=>e.textContent+='%');
+})();
+
+// words
+(function(){
+  const W=F.words, b=W.by, L=W.longest;
+  $('wdH').textContent=`The median commit message is ${Math.round(W.median)} words. ${b[0].name} writes the longest, at ${Math.round(b[0].med)}, and ${b[b.length-1].name} the shortest, at ${Math.round(b[b.length-1].med)}. The longest single message is ${fmt(L.n)} words: "${L.s}" by ${L.cn}.`;
+  simpleBars('wd',b.map(x=>({name:x.name,n:Math.round(x.med),tip:`${x.name}: median ${x.med} words over ${x.n} commits`})));
+})();
+
+// trivia
+(function(){
+  const C=F.cards;
+  $('van').innerHTML='<tbody>'+C.vanity.slice(0,10).map(v=>`<tr><td class="mono"><b>${v.H.slice(0,4)}</b>${v.H.slice(4,10)}</td><td>${esc(v.s)}<div class="muted" style="font-size:11.5px">${esc(v.cn)}, ${v.d}</div></td></tr>`).join('')+'</tbody>';
+  $('xmasP').textContent=`${C.xmasCommits} commits on December 25 and ${C.nyCommits} on January 1 since 2001. Bars show how many different Christmases each committer has worked.`;
+  simpleBars('xmas',C.xmas.map(x=>({name:x.name,n:x.years,tip:`${x.name}: commits on ${x.years} Christmas Days`})));
+})();
+
+// closer look: records + saga
+(function(){
+  const P=F.people;
+  function recs(p,cls){
+    const r=[card('First credit',p.first.d.slice(0,4),`${esc(p.first.s)} · committed by ${esc(p.first.cn)}`,cls),
+      card('Latest credit',p.last.d,`${esc(p.last.s)} · ${esc(p.last.cn)}`,cls),
+      card('Longest silence',`${fmt(p.gap.days)} days`,`${p.gap.from_} → ${p.gap.to}`,cls),
+      card('Busiest 30 days',`${p.window.n} credits`,`starting ${p.window.start}`,cls),
+      card('Deepest backpatch',p.bpDeep?`PG${p.bpDeep}`:'–',`${p.bpCount} credited fixes carry a Backpatch-through line`,cls),
+      card('Most often credited alongside',esc(p.co[0].name),`${p.co[0].n} shared commits. Next: `+p.co.slice(1,4).map(c=>`${esc(c.name)} ${c.n}`).join(' · '),cls)];
+    if(p.oldestBug) r.push(card('Oldest bug fixed',`${yrs(p.oldestBug.age)} years`,`${esc(p.oldestBug.s)} (introduced ${p.oldestBug.introduced})`,cls));
+    const br=cls==='nik'?F.backpatch.nikRank:F.backpatch.abRank, bn=cls==='nik'?F.backpatch.nik:F.backpatch.ab;
+    if(br) r.push(card('Reporter of backpatched fixes',`#${br}`,`of ${F.backpatch.nReporters} people, 2022–2026 (${bn} fixes)`,cls));
+    r.push(card('Committed on a Saturday',`${p.saturday} of ${p.n}`,`${pc(p.saturday,p.n)}%, vs ${P.satShare}% of all commits`,cls));
+    return r.join('');
+  }
+  $('recNik').innerHTML=recs(P.nik,'nik'); $('recAb').innerHTML=recs(P.ab,'ab');
+  const S=P.nik.saga;
+  $('sagaH').textContent=`${S.length} commits by Amit Langote between ${S[0].d} and ${S[S.length-1].d} credit Nikolay, ${S.filter(x=>x.bp==='19').length} of them backpatched to PG19.`;
+  $('saga').innerHTML=S.map(x=>`<div><span class="mono muted" style="font-size:12px">${x.d} · ${x.h}${x.bp?` · back to PG${x.bp}`:''}</span><br>${esc(x.s)}</div>`).join('');
 })();
 </script>

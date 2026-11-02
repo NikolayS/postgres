@@ -26,6 +26,9 @@ Data runs through **2026-10-29**, the latest commit on master at the time of the
 - **Companies:** only about 9% of credits can be tied to a company email domain. Among those, Fujitsu, Postgres Pro and EDB are steady, and Percona jumped in 2026.
 - **Newcomers:** only about 1 in 5 first-time contributors is credited again the following year. 2026 has 318 newcomers, the most since at least 2019.
 - **Release cycles:** PG19 credited 572 people, about twice as many as PG16 (282).
+- **Bug archaeology:** 411 fixes since 2019 name the commit that caused the bug. The typical bug was 141 days old, and 10 were more than 10 years old (the oldest, 13.5 years).
+- **Streaks:** Tom Lane has committed on 6,023 days since Oct 2001, 66% of all days, including a 58-day run in 2016.
+- **Career ladder:** 59% of the 1,762 people credited since 2019 appear only once. People who start by reviewing go on to author a patch far more often than people who start by reporting a bug (29% vs 9%).
 
 ## Layout
 
@@ -39,6 +42,9 @@ scripts/q.py            extra cuts: growth rate, reporter and reviewer rankings
 scripts/gen.py          builds data/brief.json for the page
 scripts/extras.py       AI mentions, companies, committer network, code areas,
                         newcomer retention, release cycles -> data/extras.json
+scripts/fun.py          records and rhythms: bug age, credit-line trends, backpatching, streaks,
+                        commit clock, career ladder, big days, co-author duos, thread hosts,
+                        message length, trivia, records for Nikolay and Andrey -> data/fun.json
 scripts/export_csv.py   data/contributors_by_year.csv
 scripts/build.py        puts brief.json and extras.json into template.html, writes docs/index.html
 scripts/template.html   the page (inline SVG and HTML charts, no dependencies)
@@ -68,6 +74,9 @@ If you're working from a shallow clone, deepen it first with `git fetch --shallo
 - **Data cutoff** is the date of the newest commit on `PG_REF` (override with `ASOF=YYYY-MM-DD`). The page's dates and the same-period comparison follow it automatically. The headline sentences in `scripts/template.html` are written by hand and need a review after each refresh.
 - **AI mentions** match tool names (Claude, GPT, Codex, OpenAI, Anthropic, LLM, Xint Code and others) anywhere in a commit message. Each commit goes into the first group that fits: tool credited by name, person credited working with AI, AI found the bug, AI helped draft the patch, or the message discusses AI reports.
 - **Companies** come from email domains. A person counts for a company in a year only when its domain is the address they used most that year. Only 6–10% of credits can be matched, and a domain doesn't prove employment.
+- **Bug age** counts only fixes whose message names the culprit commit with a bug word (oversight, thinko, bug, regression, broken) right before "in/by/since commit <hash>". The age is the time between the two commits.
+- **Streaks and the commit clock** use committer dates and each committer's own timezone. Committer names that differ only in accents are merged.
+- **Career ladder** counts people first credited after mid-2019 who aren't committers. "From first credit to committer" is a lower bound for anyone already credited before 2019.
 - **Newcomers** are people credited for the first time since 2019.
 - **Release cycles** run from one `Stamp HEAD as N devel` commit to the next.
 - **"Committer"** means anyone who committed to master in 2022–2026 (32 people). Committers get credit for their own commits, so the brief also ranks non-committers separately.

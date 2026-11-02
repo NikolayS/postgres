@@ -6,6 +6,8 @@ t = open(os.path.join(HERE, 'template.html')).read()
 import json
 b = json.load(open(os.path.join(DATA, 'brief.json')))
 b['X'] = json.load(open(os.path.join(DATA, 'extras.json')))
+b['F'] = json.load(open(os.path.join(DATA, 'fun.json')))
+b['F']['bugs'].pop('all', None)  # keep the page small; full list stays in data/fun.json
 d = json.dumps(b, ensure_ascii=False).replace('</', '<\\/')
 os.makedirs(os.path.join(ROOT, 'docs'), exist_ok=True)
 a = datetime.date.fromisoformat(ASOF)
