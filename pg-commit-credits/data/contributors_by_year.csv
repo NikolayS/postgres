@@ -1,0 +1,3161 @@
+person,id,year,credited_commits,author,review,report,test,suggest,commit
+Tom Lane,e:tgl@sss.pgh.pa.us,2019,597,495,82,25,0,2,491
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2019,302,273,25,4,0,1,300
+Michael Paquier,e:michael.paquier@gmail.com,2019,249,144,96,11,0,1,298
+Andres Freund,e:andres@andres@anarazel.de,2019,168,142,24,5,0,3,159
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2019,167,108,54,5,0,1,161
+Peter Geoghegan,e:pg@bowt.ie,2019,83,67,7,8,0,1,69
+Bruce Momjian,e:bruce@momjian.us,2019,76,74,1,1,0,0,79
+Thomas Munro,e:thomas.munro@enterprisedb.com,2019,67,53,9,4,0,3,68
+Robert Haas,e:robertmhaas@gmail.com,2019,65,49,13,4,0,1,44
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2019,61,49,10,3,0,0,64
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2019,60,28,29,8,0,1,0
+Noah Misch,e:noah@leadboat.com,2019,57,52,4,1,0,0,52
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2019,57,48,8,1,0,0,56
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2019,52,40,9,3,0,0,46
+Amit Kapila,e:akapila@postgresql.org,2019,50,15,35,4,1,0,48
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2019,42,30,11,3,0,0,29
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2019,41,22,17,4,0,0,0
+Justin Pryzby,e:justin@telsasoft.com,2019,40,19,2,18,1,1,0
+Fabien Coelho,e:coelho@cri.ensmp.fr,2019,40,22,17,1,0,0,0
+David Rowley,e:david.rowley@2ndquadrant.com,2019,35,25,6,5,0,1,17
+Etsuro Fujita,e:efujita@postgresql.org,2019,33,31,1,1,0,0,34
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2019,32,11,19,2,0,1,0
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2019,30,18,11,1,0,0,28
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2019,30,12,17,2,0,1,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2019,26,23,1,3,0,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2019,24,22,0,4,0,0,0
+Julien Rouhaud,e:julien.rouhaud@free.fr,2019,23,14,9,0,0,0,0
+Andrew Gierth,e:rhodiumtoad@postgresql.org,2019,22,20,1,2,0,0,20
+Haribabu Kommi,n:haribabu kommi,2019,19,14,4,2,0,0,0
+John Naylor,e:john.naylor@2ndquadrant.com,2019,19,13,6,0,0,0,0
+Vignesh C,e:vignesh21@gmail.com,2019,17,11,4,3,1,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2019,15,7,8,1,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2019,14,9,6,1,0,0,7
+Ashwin Agrawal,e:aagrawal@pivotal.io,2019,13,10,2,3,0,0,0
+Antonin Houska,e:ah@cybertec.at,2019,12,8,4,0,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2019,12,4,8,0,0,0,15
+Michael Meskes,e:meskes@postgresql.org,2019,12,11,1,0,0,0,17
+Nathan Bossart,e:bossartn@amazon.com,2019,11,9,2,0,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2019,11,1,6,5,0,0,0
+Andrey Borodin,e:amborodin86@gmail.com,2019,10,6,3,2,0,1,0
+Liudmila Mantrova,e:l.mantrova@postgrespro.ru,2019,10,10,0,0,0,0,0
+Joe Conway,e:mail@joeconway.com,2019,9,5,4,1,0,0,9
+Jeff Janes,e:jeff.janes@gmail.com,2019,9,2,3,4,0,0,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2019,9,2,8,0,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2019,9,6,1,2,0,0,0
+Michael Banck,e:mbanck@debian.org,2019,9,6,3,0,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2019,8,1,7,0,0,0,0
+Kirk Jamison,e:k.jamison@fujitsu.com,2019,8,4,4,0,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2019,8,5,1,2,0,0,5
+Ian Barwick,e:ian@2ndquadrant.com,2019,8,7,0,2,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2019,7,2,5,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2019,7,3,2,2,0,0,0
+Alexey Kondratov,e:a.kondratov@postgrespro.ru,2019,7,5,2,0,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2019,7,5,1,1,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2019,7,4,3,0,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2019,6,3,3,0,0,0,0
+Jeff Davis,e:pgsql@j-davis.com,2019,6,5,1,0,0,0,6
+Euler Taveira,e:euler@timbira.com.br,2019,6,3,2,1,0,1,0
+Stephen Frost,e:sfrost@snowman.net,2019,6,3,3,0,0,0,5
+Dmitry Dolgov,e:9erthalion6@gmail.com,2019,6,4,2,0,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2019,5,3,0,3,0,0,0
+Juan José Santamaría Flecha,e:juanjo.santamaria@gmail.com,2019,5,3,1,0,0,1,0
+Andreas Karlsson,e:andreas@proxel.se,2019,5,3,2,1,0,0,0
+Kuntal Ghosh,e:kuntalghosh.2007@gmail.com,2019,5,0,3,1,1,0,0
+Adrien Nayrat,n:adrien nayrat,2019,5,4,0,1,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2019,5,5,0,0,0,0,0
+Hugh Ranalli,e:hugh@whtc.ca,2019,5,4,0,1,0,0,0
+Laurenz Albe,e:laurenz.albe@cybertec.at,2019,5,3,2,1,0,0,0
+Arthur Zakirov,e:a.zakirov@postgrespro.ru,2019,5,2,3,0,0,0,0
+Oleksii Kliukin,n:oleksii kliukin,2019,5,2,2,2,0,1,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2019,5,4,1,0,0,0,0
+Mi Tar,e:mmitar@gmail.com,2019,5,0,5,0,0,0,0
+Amit Khandekar,e:amitdkhan.pg@gmail.com,2019,4,4,0,1,0,0,0
+Craig Ringer,e:craig.ringer@enterprisedb.com,2019,4,3,0,1,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2019,4,1,0,2,0,1,0
+Nikolay Shaplov,e:dhyan@nataraj.su,2019,4,4,0,0,0,0,0
+Rushabh Lathia,e:rushabh.lathia@gmail.com,2019,4,2,0,3,0,0,0
+Takayuki Tsunakawa,e:tsunakawa.takay@jp.fujitsu.com,2019,4,2,2,0,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2019,4,2,1,2,0,1,0
+Paul Guo,e:guopa@vmware.com,2019,4,3,1,0,0,0,0
+David Steele,e:david@pgmasters.net,2019,4,1,2,1,0,0,0
+Melanie Plageman,e:melanieplageman@gmail.com,2019,4,0,3,1,0,0,0
+Shawn Debnath,n:shawn debnath,2019,4,2,2,0,0,0,0
+others,n1:others,2019,4,2,1,1,0,0,0
+Surafel Temesgen,e:surafel3000@gmail.com,2019,4,3,1,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2019,4,1,2,1,0,0,0
+Chapman Flack,e:chap@anastigmatix.net,2019,4,2,1,1,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2019,4,1,3,0,0,0,0
+Mahendra Singh,n:mahendra singh,2019,3,1,2,1,0,0,0
+Alexey Bashtanov,e:bashtanov@imap.cc,2019,3,2,0,1,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2019,3,2,1,0,0,0,0
+Manuel Rigger,n:manuel rigger,2019,3,0,0,3,0,0,0
+Gilles Darold,e:gilles@darold.net,2019,3,3,0,1,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2019,3,1,1,1,0,0,0
+Lars Kanis,e:lars@greiz-reinsdorf.de,2019,3,1,1,1,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2019,3,3,0,0,0,0,0
+Jimmy Yih,n:jimmy yih,2019,3,3,0,0,0,0,0
+Tatsuro Yamada,e:tatsuro.yamada.tf@nttcom.co.jp,2019,3,1,2,0,0,0,0
+Alexander Kukushkin,e:cyberdemn@gmail.com,2019,3,2,0,1,0,0,0
+Markus Winand,n:markus winand,2019,3,2,0,1,0,0,0
+Jesper Pedersen,n:jesper pedersen,2019,3,1,2,0,0,0,0
+Rafia Sabih,e:rafia.sabih@enterprisedb.com,2019,3,0,3,0,0,0,0
+Donald Dong,e:xdong@csumb.edu,2019,3,1,2,0,0,0,0
+Dmitry Marakasov,e:amdmi3@amdmi3.ru,2019,3,0,0,3,0,0,0
+Tuomas Leikola,n:tuomas leikola,2019,2,0,0,2,0,0,0
+Eugen Konkov,n:eugen konkov,2019,2,0,0,2,0,0,0
+James Coleman,e:jtc331@gmail.com,2019,2,1,0,2,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2019,2,0,0,2,0,0,0
+Dent John,n:dent john,2019,2,0,2,0,0,0,0
+Yuli Khodorkovskiy,n:yuli khodorkovskiy,2019,2,2,0,0,0,0,0
+Yu Kimura,n:yu kimura,2019,2,1,1,0,0,0,0
+based on a suggestion from Andres Freund,n:based on a suggestion from andres freund,2019,2,2,0,0,0,0,0
+Dongming Liu,e:ldming101@gmail.com,2019,2,1,1,0,0,0,0
+Jim Nasby,e:jim.nasby@gmail.com,2019,2,0,2,0,0,0,0
+Hans Buschmann,e:buschmann@nidsa.net,2019,2,0,0,2,0,0,0
+Sawada Masahiko,n:sawada masahiko,2019,2,2,0,0,0,0,0
+Paul Ramsey,e:pramsey@cleverelephant.ca,2019,2,1,1,0,0,0,0
+Aleksandr Parfenov,n:aleksandr parfenov,2019,2,0,2,0,0,0,0
+Victor Wagner,e:vitus@wagner.pp.ru,2019,2,1,0,1,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2019,2,2,0,1,0,0,0
+Nikolay Sharplov,n:nikolay sharplov,2019,2,1,0,1,0,0,0
+Mark G,e:markg735@gmail.com,2019,2,2,0,0,0,0,0
+fn ln,e:emuser20140816@gmail.com,2019,2,1,0,1,0,0,0
+Asim Praveen,n:asim praveen,2019,2,0,2,0,0,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2019,2,1,1,1,0,0,0
+Jürgen Purtz,e:juergen@purtz.de,2019,2,2,0,0,0,0,0
+Yuzuko Hosoya,e:hosoya.yuzuko@lab.ntt.co.jp,2019,2,2,0,0,0,0,0
+Yoshikazu Imai,e:imai.yoshikazu@fujitsu.com,2019,2,0,2,0,0,0,0
+Sehrope Sarkuni,e:sehrope@jackdb.com,2019,2,1,1,0,0,0,0
+Rajkumar Raghuwanshi,e:rajkumar.raghuwanshi@enterprisedb.com,2019,2,0,0,2,0,0,0
+some adjustments by Thomas Munro,n:some adjustments by thomas munro,2019,2,2,0,0,0,0,0
+Thom Brown,e:thom@linux.com,2019,2,0,0,2,0,0,0
+Robert Treat,e:rob@xzilla.net,2019,2,1,1,0,0,0,0
+Michael,n1:michael,2019,2,0,2,0,0,0,0
+improvements by me,n:improvements by me,2019,2,2,0,0,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2019,2,2,0,0,0,0,0
+Gaby Schilders,n:gaby schilders,2019,2,0,0,2,0,0,0
+Jeevan Chalke,e:jeevan.chalke@enterprisedb.com,2019,2,0,0,1,0,1,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2019,2,0,0,2,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2019,2,0,2,0,0,0,0
+Petr Jelinek,e:petr@2ndquadrant.com,2019,2,0,2,0,0,0,0
+Georgios Kokolatos,e:gkokolatos@protonmail.com,2019,2,0,2,0,0,0,0
+Grigory Smolkin,e:g.smolkin@postgrespro.ru,2019,2,0,1,0,0,1,0
+Jakub Janeček,n:jakub janecek,2019,2,0,0,2,0,0,0
+Mithun C Y,n:mithun c y,2019,2,0,0,0,2,0,0
+Prabhat Sahu,n:prabhat sahu,2019,1,0,0,1,0,0,0
+thanks also to Tomas Vondra,n:thanks also to tomas vondra,2019,1,0,1,0,0,0,0
+Andres Freund for testing,n:andres freund for testing,2019,1,0,1,0,0,0,0
+discussion,n1:discussion,2019,1,0,1,0,0,0,0
+Ireneusz Pluta,n:ireneusz pluta,2019,1,0,0,1,0,0,0
+Pavlo Golub,e:pavlo.golub@gmail.com,2019,1,0,0,1,0,0,0
+Josef Šimánek,e:josef.simanek@gmail.com,2019,1,1,0,0,0,0,0
+Dmitry Uspenskiy,n:dmitry uspenskiy,2019,1,0,0,1,0,0,0
+after a suggestion from Andres Freund,n:after a suggestion from andres freund,2019,1,1,0,0,0,0,0
+Hadi Moshayedi,n:hadi moshayedi,2019,1,1,0,0,0,0,0
+Daniel Gustaffson,n:daniel gustaffson,2019,1,1,0,0,0,0,0
+cili,n1:cili,2019,1,0,0,1,0,0,0
+contributions from Michael Paquier,n:contributions from michael paquier,2019,1,1,0,0,0,0,0
+Paul Spencer,n:paul spencer,2019,1,0,0,1,0,0,0
+Tels,n1:tels,2019,1,0,1,0,0,0,0
+Jerry Sievers,n:jerry sievers,2019,1,0,0,1,0,0,0
+testcase by Vignesh C,n:testcase by vignesh c,2019,1,1,0,0,0,0,0
+contributions from Álvaro Herrera,n:contributions from alvaro herrera,2019,1,1,0,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2019,1,0,1,0,0,0,0
+Takao Fujii,e:btfujiitkp@oss.nttdata.com,2019,1,1,0,0,0,0,0
+bug-fixes,n1:bug-fixes,2019,1,1,0,0,0,0,0
+minor changes by Dilip Kumar,n:minor changes by dilip kumar,2019,1,1,0,0,0,0,0
+ZhenHua Cai,n:zhenhua cai,2019,1,0,0,1,0,0,0
+Chen Huajun,n:chen huajun,2019,1,0,0,1,0,0,0
+ideas from others,n:ideas from others,2019,1,1,0,0,0,0,0
+changes by Dilip Kumar,n:changes by dilip kumar,2019,1,1,0,0,0,0,0
+changes by me,n:changes by me,2019,1,1,0,0,0,0,0
+Anthony Nowocien,n:anthony nowocien,2019,1,0,1,0,0,0,0
+Tim Clarke,e:tim.clarke@minerva.info,2019,1,0,0,1,0,0,0
+Anna Endo,n:anna endo,2019,1,0,1,0,0,0,0
+e:matthew.alton@gmail.com,e:matthew.alton@gmail.com,2019,1,0,0,1,0,0,0
+Wyatt Alt,n:wyatt alt,2019,1,0,0,1,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2019,1,1,0,0,0,0,0
+Asim / apraveen@pivotal.io,n:asim apraveen pivotal io,2019,1,0,0,1,0,0,0
+Ed Morley,n:ed morley,2019,1,0,0,1,0,0,0
+Tiago Anastacio,n:tiago anastacio,2019,1,0,0,1,0,0,0
+Jeremy Schneider,n:jeremy schneider,2019,1,1,0,1,0,0,0
+based on a suggestion from Christoph Berg,n:based on a suggestion from christoph berg,2019,1,1,0,0,0,0,0
+anonymous,n1:anonymous,2019,1,0,0,1,0,0,0
+e:basil.bourque@gmail.com,e:basil.bourque@gmail.com,2019,1,0,0,1,0,0,0
+e:juha-pekka.eloranta@reaktor.fi,e:juha-pekka.eloranta@reaktor.fi,2019,1,0,0,1,0,0,0
+David Harper,n:david harper,2019,1,0,0,1,0,0,0
+e:ivaylo.zlatanov@gmail.com,e:ivaylo.zlatanov@gmail.com,2019,1,0,0,1,0,0,0
+Asif Rehman,e:asifr.rehman@gmail.com,2019,1,0,1,0,0,0,0
+Binguo Bao,n:binguo bao,2019,1,1,0,0,0,0,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2019,1,1,0,0,0,0,0
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2019,1,1,0,0,0,0,0
+Ashwin Agrawal.  A few tweaks by Álvaro Herrera,n:ashwin agrawal a few tweaks by alvaro herrera,2019,1,1,0,0,0,0,0
+Filip Rembiałkowski,n:filip rembia kowski,2019,1,1,0,1,0,0,0
+Yusuke Egashita,n:yusuke egashita,2019,1,0,0,1,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2019,1,1,0,0,0,0,0
+Shenhao Wang,e:wangsh.fnst@fujitsu.com,2019,1,1,0,0,0,0,0
+Moon Insung,n:moon insung,2019,1,0,1,0,0,0,0
+stemming from Fabien Coelho's complaints,n:stemming from fabien coelho's complaints,2019,1,1,0,0,0,0,0
+Ramanarayana,n1:ramanarayana,2019,1,1,0,0,0,0,0
+Hari Babu Kommi,n:hari babu kommi,2019,1,1,0,0,0,0,0
+yi huang,n:yi huang,2019,1,0,0,1,0,0,0
+Masahiho Sawada,n:masahiho sawada,2019,1,1,0,0,0,0,0
+Ryohei Takahashi,e:r.takahashi_2@fujitsu.com,2019,1,0,1,1,0,0,0
+who spotted the second problem,n:who spotted the second problem,2019,1,0,1,0,0,0,0
+Movead Li,n:movead li,2019,1,1,0,0,0,0,0
+Takuma Hoshiai,n:takuma hoshiai,2019,1,1,0,0,0,0,0
+Sean Farrell,n:sean farrell,2019,1,0,0,1,0,0,0
+Amit Langote.  I  again mangled the patch somewhat.,n:amit langote i again mangled the patch somewhat,2019,1,1,0,0,0,0,0
+Shawn Wang,e:shawn.wang.pg@gmail.com,2019,1,0,1,0,0,0,0
+Thibaut Madeleine,n:thibaut madeleine,2019,1,0,1,0,0,0,0
+Kyotaro,n1:kyotaro,2019,1,0,1,0,0,0,0
+Jeevan Ladhe,e:jeevan.ladhe@enterprisedb.com,2019,1,1,0,0,0,0,0
+in an earlier version,n:in an earlier version,2019,1,0,1,0,0,0,0
+Brandur Leach,n:brandur leach,2019,1,1,0,0,0,0,0
+Edmund Horner,n:edmund horner,2019,1,0,1,0,0,0,0
+Rafael Castro,n:rafael castro,2019,1,0,0,1,0,0,0
+Jeremy Smith,n:jeremy smith,2019,1,0,0,1,0,0,0
+Roby,n1:roby,2019,1,0,0,1,0,0,0
+bisected to the relevant commit by Jeff Janes,n:bisected to the relevant commit by jeff janes,2019,1,0,0,1,0,0,0
+sqlsmith via Andreas Seltenreich,n:sqlsmith via andreas seltenreich,2019,1,0,0,1,0,0,0
+Raymond Martin,n:raymond martin,2019,1,1,0,0,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2019,1,0,1,1,0,0,0
+Brad DeJong,n:brad dejong,2019,1,1,0,0,0,0,0
+Basil Bourque,n:basil bourque,2019,1,0,0,1,0,0,0
+based on earlier code from Andres Freund,n:based on earlier code from andres freund,2019,1,1,0,0,0,0,0
+Lucas Viecelli,n:lucas viecelli,2019,1,1,0,0,0,0,0
+Rares Salcudean,n:rares salcudean,2019,1,0,0,1,0,0,0
+Alex Aktsipetrov,n:alex aktsipetrov,2019,1,1,0,0,0,0,0
+Patrick McHardy,n:patrick mchardy,2019,1,1,0,0,0,0,0
+Panagiotis Mavrogiorgos,e:pmav99@gmail.com,2019,1,1,0,0,0,0,0
+"""Zhang",n1:zhang,2019,1,1,0,0,0,0,0
+"Jie""",e:zhangjie2@cn.fujitsu.com,2019,1,1,0,0,0,0,0
+Yang Xiao,e:yangx92@hotmail.com,2019,1,1,0,0,0,0,0
+Sergey Pashkov,n:sergey pashkov,2019,1,0,0,1,0,0,0
+Steve Singer,n:steve singer,2019,1,1,0,1,0,0,0
+Vladimir Kriukov,n:vladimir kriukov,2019,1,0,0,1,0,0,0
+Shohei Mochizuki,n:shohei mochizuki,2019,1,1,0,0,0,0,0
+Clemens Ladisch,n:clemens ladisch,2019,1,0,0,1,0,0,0
+Jan Chochol,n:jan chochol,2019,1,1,0,0,0,0,0
+Wu Fei,n:wu fei,2019,1,1,0,1,0,0,0
+TAKATSUKA Haruka,e:harukat@sraoss.co.jp,2019,1,0,0,1,0,0,0
+Andrea Gelmini,n:andrea gelmini,2019,1,1,0,0,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2019,1,1,0,0,0,0,0
+Tobias Bussmann,e:t.bussmann@gmx.net,2019,1,1,0,0,0,0,0
+some small additions by Andres Freund,n:some small additions by andres freund,2019,1,1,0,0,0,0,0
+Matsumura-san,e:matsumura.ryo@jp.fujitsu.com,2019,1,1,0,0,0,0,0
+Joe Wildish,e:joe@lateraljoin.com,2019,1,0,0,1,0,0,0
+e:nickb@imap.cc,e:nickb@imap.cc,2019,1,0,0,1,0,0,0
+Stephen Amell,n:stephen amell,2019,1,1,0,0,0,0,0
+Rikard Falkeborn,n:rikard falkeborn,2019,1,1,0,0,0,0,0
+Matsumura Ryo,n:matsumura ryo,2019,1,1,0,0,0,0,0
+Andreas Joseph Krogh,n:andreas joseph krogh,2019,1,0,0,1,0,0,0
+Serge Latyntsev,e:dnsl48@gmail.com,2019,1,0,0,1,0,0,0
+Michel Pelletier,n:michel pelletier,2019,1,0,0,1,0,0,0
+editorialized a bit by Andres Freund,n:editorialized a bit by andres freund,2019,1,1,0,0,0,0,0
+Emanuel Araújo,n:emanuel araujo,2019,1,0,0,1,0,0,0
+Piotr Stefaniak,n:piotr stefaniak,2019,1,0,0,1,0,0,0
+Roman Zharkov,e:r.zharkov@postgrespro.ru,2019,1,0,0,1,0,0,0
+e:postgresql@cohi.at,e:postgresql@cohi.at,2019,1,0,0,1,0,0,0
+Jamison Kirk,n:jamison kirk,2019,1,0,1,0,0,0,0
+e:mjf@pearson.co.uk,e:mjf@pearson.co.uk,2019,1,0,0,1,0,0,0
+Tsunakawa Takayuki,n:tsunakawa takayuki,2019,1,1,0,0,0,0,0
+when investigating a bug bug fix to another bug,n:when investigating a bug bug fix to another bug,2019,1,0,0,1,0,0,0
+by Amit Langote,n:by amit langote,2019,1,0,0,1,0,0,0
+help from Mathias Brossard,n:help from mathias brossard,2019,1,1,0,0,0,0,0
+Mathias Brossard,n:mathias brossard,2019,1,0,1,0,0,0,0
+Ryohei Nagaura,n:ryohei nagaura,2019,1,1,0,0,0,0,0
+Kirk,n1:kirk,2019,1,0,1,0,0,0,0
+Stepan Yankevych,n:stepan yankevych,2019,1,0,0,1,0,0,0
+José Arthur Benetasso Villanova,n:jose arthur benetasso villanova,2019,1,0,1,0,0,0,0
+partly after a suggestion from Masahiko Sawada,n:partly after a suggestion from masahiko sawada,2019,1,1,0,0,0,0,0
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2019,1,0,1,0,0,0,0
+Robbie Harwood,n:robbie harwood,2019,1,1,0,0,0,0,0
+changes to the read,n:changes to the read,2019,1,1,0,0,0,0,0
+write functions by me.,n:write functions by me,2019,1,1,0,0,0,0,0
+Pavan Deolasee,e:pavan.deolasee@2ndquadrant.com,2019,1,0,1,0,0,0,0
+Darafei Praliaskouski,n:darafei praliaskouski,2019,1,0,1,0,0,0,0
+Regina Obe,n:regina obe,2019,1,0,1,0,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2019,1,1,0,0,0,0,0
+Jerry Jelinek,n:jerry jelinek,2019,1,1,0,0,0,0,0
+Bossart,n1:bossart,2019,1,1,0,0,0,0,0
+Nikita Gluknov,n:nikita gluknov,2019,1,1,0,0,0,0,0
+Jie Zhang,n:jie zhang,2019,1,0,0,1,0,0,0
+Mithun Cy,n:mithun cy,2019,1,0,0,1,0,0,0
+Sho Kato,n:sho kato,2019,1,1,0,0,0,0,0
+Kevin Grittner,n:kevin grittner,2019,1,0,1,0,0,0,0
+Paul Martinez,e:hellopfm@gmail.com,2019,1,1,0,0,0,0,0
+Seigei Kornilov,n:seigei kornilov,2019,1,0,1,0,0,0,0
+Derek Hans,n:derek hans,2019,1,0,0,1,0,0,0
+small changes by me,n:small changes by me,2019,1,1,0,0,0,0,0
+Julian Markwort,n:julian markwort,2019,1,1,0,0,0,0,0
+Marius Timmer,n:marius timmer,2019,1,1,0,0,0,0,0
+light editing by Álvaro.,n:light editing by alvaro,2019,1,1,0,0,0,0,0
+Devrim Gündüz,e:devrim@gunduz.org,2019,1,0,0,1,0,0,0
+David Rowley.  Lightly edited by Álvaro.,n:david rowley lightly edited by alvaro,2019,1,1,0,0,0,0,0
+Dimitri Dolgov,n:dimitri dolgov,2019,1,1,0,0,0,0,0
+Dimitri Golgov,n:dimitri golgov,2019,1,1,0,0,0,0,0
+Raúl Marín Rodríguez,n:raul marin rodriguez,2019,1,0,1,0,0,0,0
+Yuri Kurenkov,n:yuri kurenkov,2019,1,0,0,1,0,1,0
+Tom Lane based on buildfarm results,n:tom lane based on buildfarm results,2019,1,0,0,1,0,0,0
+Thomas Poty,n:thomas poty,2019,1,0,0,1,0,0,0
+Ildar Musin,n:ildar musin,2019,1,0,0,1,0,1,0
+Jakub Glapa,n:jakub glapa,2019,1,0,0,1,0,0,0
+John Klann,n:john klann,2019,1,0,0,1,0,0,0
+James Sewell,n:james sewell,2019,1,1,0,0,1,0,0
+Bruce Klein,n:bruce klein,2019,1,0,0,1,0,0,0
+Higuchi-san,n1:higuchi-san,2019,1,1,0,0,0,0,0
+Matsumura-san,n1:matsumura-san,2019,1,1,0,0,0,0,0
+an additional change by me,n:an additional change by me,2019,1,1,0,0,0,0,0
+realyota,n1:realyota,2019,1,0,0,1,0,0,0
+Ideriha-san,n1:ideriha-san,2019,1,1,0,0,0,0,0
+Kuroda-san,n1:kuroda-san,2019,1,1,0,0,0,0,0
+Rick Otten,n:rick otten,2019,1,0,0,1,0,0,0
+Sand Stone,n:sand stone,2019,1,0,0,1,0,0,0
+Arne Roland,e:a.roland@index.de,2019,1,0,0,1,0,0,0
+Arseny Sher,e:a.sher@postgrespro.ru,2019,1,1,0,0,0,0,0
+David Fetter,e:david@fetter.org,2019,1,0,1,0,0,0,0
+Kevin Hale Boyes,n:kevin hale boyes,2019,1,0,0,1,0,0,0
+Shouyu Luo,n:shouyu luo,2019,1,0,0,1,0,0,0
+Oleksii,n1:oleksii,2019,1,0,1,0,0,0,0
+Jean-Marc Voillequin,e:jean-marc.voillequin@moodys.com,2019,1,0,0,1,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2019,1,0,1,0,0,0,0
+Nishant Fnu,n:nishant fnu,2019,1,1,0,1,0,0,0
+Andreas Scherbaum,e:ads@pgug.de,2019,1,1,0,0,0,0,0
+Ryan Lambert,n:ryan lambert,2019,1,0,1,0,0,0,0
+Stas Kelvish,n:stas kelvish,2019,1,1,0,0,0,0,0
+Peter Slavov,e:pet.slavov@gmail.com,2019,1,0,0,1,0,0,0
+Alex Kliukin,n:alex kliukin,2019,1,1,0,0,0,0,0
+design inputs,n:design inputs,2019,1,1,0,0,0,0,0
+some code contribution by Amit Kapila,n:some code contribution by amit kapila,2019,1,1,0,0,0,0,0
+Moon,n1:moon,2019,1,1,0,0,0,0,0
+Insung,n1:insung,2019,1,1,0,0,0,0,0
+loosely based on earlier work by Haribabu Kommi,n:loosely based on earlier work by haribabu kommi,2019,1,1,0,0,0,0,0
+Sanyo Capobiango,n:sanyo capobiango,2019,1,0,0,1,0,0,0
+a few additional changes by me,n:a few additional changes by me,2019,1,1,0,0,0,0,0
+Lim Myungkyu,n:lim myungkyu,2019,1,0,1,0,0,0,0
+editorialized by me,n:editorialized by me,2019,1,1,0,0,0,0,0
+few additional changes by me,n:few additional changes by me,2019,1,1,0,0,0,0,0
+Karl O. Pinc,e:kop@meme.com,2019,1,1,0,0,0,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2020,672,571,82,23,1,1,567
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2020,258,231,18,9,1,0,260
+Michael Paquier,e:michael.paquier@gmail.com,2020,222,120,93,8,1,0,244
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2020,150,84,62,4,0,0,122
+Peter Geoghegan,e:pg@bowt.ie,2020,130,112,15,5,0,0,115
+Bruce Momjian,e:bruce@momjian.us,2020,123,121,2,0,0,0,132
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2020,112,53,54,8,0,0,108
+Andres Freund,e:andres@andres@anarazel.de,2020,99,57,34,10,0,1,59
+Thomas Munro,e:thomas.munro@enterprisedb.com,2020,85,59,22,4,0,0,69
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2020,84,43,38,3,0,0,0
+Amit Kapila,e:akapila@postgresql.org,2020,83,39,60,1,0,3,92
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2020,78,27,49,4,0,0,0
+Robert Haas,e:robertmhaas@gmail.com,2020,78,48,30,0,0,0,48
+Justin Pryzby,e:justin@telsasoft.com,2020,75,47,15,16,1,0,0
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2020,60,32,25,4,0,0,42
+Noah Misch,e:noah@leadboat.com,2020,52,47,5,0,0,0,47
+David Rowley,e:david.rowley@2ndquadrant.com,2020,51,38,12,2,0,0,42
+Julien Rouhaud,e:julien.rouhaud@free.fr,2020,51,24,28,4,0,0,0
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2020,49,39,10,0,1,0,56
+Jeff Davis,e:pgsql@j-davis.com,2020,48,42,6,0,0,0,42
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2020,42,36,5,1,0,0,48
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2020,40,19,21,1,1,1,0
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2020,36,12,23,1,0,0,0
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2020,34,23,9,3,0,0,0
+Sawada Masahiko,n:sawada masahiko,2020,27,9,18,5,0,0,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2020,26,20,6,0,0,0,22
+James Coleman,e:jtc331@gmail.com,2020,21,17,4,0,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2020,21,13,7,1,0,0,31
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2020,19,13,5,2,0,0,0
+John Naylor,e:john.naylor@2ndquadrant.com,2020,16,9,7,1,0,0,0
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2020,15,13,2,1,0,0,0
+Fabien Coelho,e:coelho@cri.ensmp.fr,2020,15,5,7,3,0,0,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2020,14,5,7,3,0,2,0
+Vignesh C,e:vignesh21@gmail.com,2020,13,8,5,1,0,0,0
+David Steele,e:david@pgmasters.net,2020,13,1,11,1,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2020,12,4,7,1,0,0,0
+Kuntal Ghosh,e:kuntalghosh.2007@gmail.com,2020,12,0,11,1,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2020,11,0,9,2,0,1,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2020,11,9,2,0,0,0,8
+Ian Barwick,e:ian@2ndquadrant.com,2020,11,10,0,2,0,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2020,10,2,0,7,0,1,0
+Erik Rijkers,e:er@xs4all.nl,2020,10,4,3,3,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2020,10,2,3,6,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2020,10,8,1,2,0,0,0
+Juan José Santamaría Flecha,e:juanjo.santamaria@gmail.com,2020,10,4,5,1,0,0,0
+Jürgen Purtz,e:juergen@purtz.de,2020,10,9,1,2,0,0,0
+Andrew Gierth,e:rhodiumtoad@postgresql.org,2020,9,7,1,1,0,0,6
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2020,9,1,8,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2020,9,3,6,0,0,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2020,9,7,1,1,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2020,9,2,6,1,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2020,8,2,5,1,0,0,0
+Alexey Kondratov,e:a.kondratov@postgrespro.ru,2020,8,6,2,0,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2020,8,4,3,1,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2020,8,2,5,1,0,0,0
+Andrey Borodin,e:amborodin86@gmail.com,2020,8,4,3,2,0,0,0
+Etsuro Fujita,e:efujita@postgresql.org,2020,8,8,0,0,0,0,8
+Neha Sharma,n:neha sharma,2020,8,0,0,1,7,0,0
+Mahendra Singh Thalor,e:mahi6run@gmail.com,2020,8,2,1,0,5,0,0
+Laurenz Albe,e:laurenz.albe@cybertec.at,2020,8,3,4,1,0,0,0
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2020,7,5,2,0,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2020,7,3,4,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2020,7,5,1,1,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2020,7,1,6,0,0,0,0
+Tatsuhito Kasahara,n:tatsuhito kasahara,2020,6,3,3,1,0,0,0
+Masahiro Ikeda,e:masahiro.ikeda@nttdata.com,2020,6,5,1,0,0,0,0
+Jeff Janes,e:jeff.janes@gmail.com,2020,6,4,0,3,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2020,6,4,0,3,0,0,0
+Peter Smith,e:peter.b.smith@fujitsu.com,2020,5,2,3,0,1,0,0
+Nathan Bossart,e:bossartn@amazon.com,2020,5,2,1,2,0,0,0
+David Zhang,e:david.zhang@highgo.ca,2020,5,1,4,0,0,0,0
+Georgios Kokolatos,e:gkokolatos@protonmail.com,2020,5,1,4,0,0,0,0
+Craig Ringer,e:craig.ringer@enterprisedb.com,2020,5,2,2,1,0,0,0
+Antonin Houska,e:ah@cybertec.at,2020,5,3,1,2,0,0,0
+Pascal Legrand,n:pascal legrand,2020,5,4,0,0,0,1,0
+Joe Conway,e:mail@joeconway.com,2020,5,5,0,0,0,0,5
+Ajin Cherian,e:itsajin@gmail.com,2020,4,2,2,0,2,0,0
+Stephen Frost,e:sfrost@snowman.net,2020,4,3,1,0,0,0,3
+Naoki Nakamichi,n:naoki nakamichi,2020,4,4,0,0,0,0,0
+Japin Li,e:japinli@hotmail.com,2020,4,3,1,0,0,0,0
+Ashwin Agrawal,e:aagrawal@pivotal.io,2020,4,3,1,0,0,0,0
+Haiying Tang,e:tanghy.fnst@cn.fujitsu.com,2020,4,3,1,1,0,0,0
+Melanie Plageman,e:melanieplageman@gmail.com,2020,4,2,2,0,0,0,0
+Petr Jelinek,e:petr@2ndquadrant.com,2020,4,0,4,0,0,0,0
+Erwin Brandstetter,e:brsaweda@gmail.com,2020,4,0,0,4,0,0,0
+Michail Nikolaev,e:michail.nikolaev@gmail.com,2020,4,3,1,1,0,1,0
+Ahsan Hadi,e:ahsan.hadi@gmail.com,2020,4,0,4,0,0,0,0
+Jesse Zhang,e:sbjesse@gmail.com,2020,4,2,2,0,0,0,0
+Rafia Sabih,e:rafia.sabih@enterprisedb.com,2020,4,0,4,0,0,0,0
+Yoshikazu Imai,e:imai.yoshikazu@fujitsu.com,2020,4,0,4,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2020,4,1,2,1,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2020,3,2,0,1,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2020,3,0,2,1,0,0,0
+me,n1:me,2020,3,3,0,0,0,0,0
+revised by me,n:revised by me,2020,3,3,0,0,0,0,0
+David Fetter,e:david@fetter.org,2020,3,2,1,0,0,0,0
+Kirk Jamison,e:k.jamison@fujitsu.com,2020,3,1,2,0,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2020,3,2,1,1,0,0,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2020,3,0,3,0,0,0,0
+tweaked a bit by Fujii Masao,n:tweaked a bit by fujii masao,2020,3,3,0,0,0,0,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2020,3,1,0,0,2,0,0
+Asif Rehman,e:asifr.rehman@gmail.com,2020,3,0,3,0,0,0,0
+Tatsuro Yamada,e:tatsuro.yamada.tf@nttcom.co.jp,2020,3,1,2,0,0,0,0
+Michael Banck,e:mbanck@debian.org,2020,3,2,0,2,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2020,3,2,1,0,0,0,2
+Hamid Akhtar,e:hamid.akhtar@gmail.com,2020,3,0,3,0,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2020,3,1,2,0,0,0,0
+Aleksander Alekseev,e:aleksander@timescale.com,2020,3,0,3,0,0,0,0
+Andreas Karlsson,e:andreas@proxel.se,2020,3,0,3,0,0,0,0
+few changes by Amit Kapila,n:few changes by amit kapila,2020,3,3,0,0,0,0,0
+Mahendra Singh,n:mahendra singh,2020,3,1,1,0,1,0,0
+buildfarm member sifaka,n:buildfarm member sifaka,2020,2,0,0,2,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2020,2,2,0,0,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2020,2,1,1,0,0,0,0
+Yuki Seino,e:seinoyu@oss.nttdata.com,2020,2,2,1,0,0,0,0
+Benoit Lobréau,e:benoit.lobreau@dalibo.com,2020,2,1,0,1,0,0,0
+Jim Nasby,e:jim.nasby@gmail.com,2020,2,1,0,1,0,0,0
+Movead Li,n:movead li,2020,2,1,1,0,0,0,0
+Katsuragi Yuta,n:katsuragi yuta,2020,2,2,0,0,0,0,0
+Greg Nancarrow,e:gregn4422@gmail.com,2020,2,0,1,1,0,0,0
+Alexey Bashtanov,e:bashtanov@imap.cc,2020,2,1,0,1,0,0,0
+Victor Yegorov,e:vyegorov@gmail.com,2020,2,0,1,1,0,0,0
+e:e.indrupskaya@postgrespro.ru,e:e.indrupskaya@postgrespro.ru,2020,2,0,0,2,0,0,0
+tweaked by Fujii Masao,n:tweaked by fujii masao,2020,2,2,0,0,0,0,0
+Jaime Casanova,e:jcasanov@systemguards.com.ec,2020,2,0,0,2,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2020,2,1,0,2,0,0,0
+Wells Oliver,e:wells.oliver@gmail.com,2020,2,0,0,2,0,0,0
+Keisuke Kuroda,e:keisuke.kuroda.3862@gmail.com,2020,2,0,2,0,0,0,0
+Grigory Smolkin,e:g.smolkin@postgrespro.ru,2020,2,1,1,1,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2020,2,1,0,1,0,0,0
+Mark Wong,e:markwkm@gmail.com,2020,2,1,0,0,1,0,0
+Nikhil Sontakke,e:nikhils@2ndquadrant.com,2020,2,2,0,0,0,0,0
+Frank Gagnepain,n:frank gagnepain,2020,2,0,0,2,0,0,0
+Dave Cramer,e:davecramer@gmail.com,2020,2,2,0,0,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2020,2,1,1,0,0,0,0
+Kyle Kingsbury,e:aphyr@jepsen.io,2020,2,0,0,2,0,0,0
+Richard Guo,e:rguo@postgresql.org,2020,2,2,0,0,0,0,0
+Jie Zhang,n:jie zhang,2020,2,2,0,0,0,0,0
+some minor adjustments by me,n:some minor adjustments by me,2020,2,2,0,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2020,2,1,1,1,0,0,0
+Surafel Temesgen,e:surafel3000@gmail.com,2020,2,1,1,0,0,0,0
+Takao Fujii,e:btfujiitkp@oss.nttdata.com,2020,2,0,2,0,0,0,0
+Kirill Bychik,n:kirill bychik,2020,2,2,0,0,0,0,0
+slightly revised by Fujii Masao,n:slightly revised by fujii masao,2020,2,2,0,0,0,0,0
+Alexander,n1:alexander,2020,2,0,2,0,0,0,0
+Luis Carril,e:luis.carril@swarm64.com,2020,2,2,0,0,0,0,0
+Adam Lee,e:adam8157@gmail.com,2020,2,1,1,0,0,0,0
+Taylor Vesely,n:taylor vesely,2020,2,0,2,0,0,0,0
+Arseny Sher,e:a.sher@postgrespro.ru,2020,2,2,0,1,0,1,0
+Arthur Zakirov,e:a.zakirov@postgrespro.ru,2020,2,0,2,0,0,0,0
+Amit Kapila based on previous work by Nikhil Sontakke,n:amit kapila based on previous work by nikhil sontakke,2020,1,1,0,0,0,0,0
+Stas Kelvich,n:stas kelvich,2020,1,1,0,0,0,0,0
+Shinoda,n1:shinoda,2020,1,1,0,1,0,0,0
+Noriyoshi,n1:noriyoshi,2020,1,1,0,1,0,0,0
+buildfarm member walleye,n:buildfarm member walleye,2020,1,0,0,1,0,0,0
+buildfarm member florican,n:buildfarm member florican,2020,1,0,0,1,0,0,0
+Luis Roberto,n:luis roberto,2020,1,0,0,1,0,0,0
+Isaac Morland,e:isaac.morland@gmail.com,2020,1,0,1,0,0,0,0
+Junfeng Yang,n:junfeng yang,2020,1,1,0,0,0,0,0
+https:,n1:https,2020,1,0,1,0,0,0,0
+www.postgresql.org,n:www postgresql org,2020,1,0,1,0,0,0,0
+message-id,n1:message-id,2020,1,0,1,0,0,0,0
+flat,n1:flat,2020,1,0,1,0,0,0,0
+3e3ccddb-41bd-ecd8-29fe-195e34d9886f%40enterprisedb.com,n:e ccddb- bd-ecd - fe- e d f enterprisedb com,2020,1,0,1,0,0,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2020,1,0,1,0,0,0,0
+Yaroslav Schekin,n:yaroslav schekin,2020,1,1,0,0,0,0,0
+Denis Patron,e:denis.patron@previnet.it,2020,1,0,0,1,0,0,0
+Neil Chen,e:carpenter.nail.cz@gmail.com,2020,1,0,1,0,0,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2020,1,0,1,0,0,0,0
+Chris Wilson,n:chris wilson,2020,1,0,0,1,0,0,0
+but implementation idea is from Soumyadeep Chakraborty,n:but implementation idea is from soumyadeep chakraborty,2020,1,1,0,0,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2020,1,1,0,1,0,0,0
+modified,n1:modified,2020,1,1,0,0,0,0,0
+Brar Piening,e:brar@gmx.de,2020,1,0,0,1,0,0,0
+Seino Yuki,n:seino yuki,2020,1,1,0,0,0,0,0
+Tang,n1:tang,2020,1,1,0,0,0,0,0
+Peter Eisentraunt,n:peter eisentraunt,2020,1,0,1,0,0,0,0
+e:bob.henkel@gmail.com,e:bob.henkel@gmail.com,2020,1,0,0,1,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2020,1,1,0,1,0,0,0
+Markus Wanner,e:markus.wanner@2ndquadrant.com,2020,1,1,0,0,0,0,0
+Onder Kalaci,e:onderk@microsoft.com,2020,1,0,0,1,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2020,1,0,0,1,0,0,0
+e:kghost0@gmail.com,e:kghost0@gmail.com,2020,1,0,0,1,0,0,0
+Shinya Okano,n:shinya okano,2020,1,1,0,0,0,0,0
+Henry Hinze,e:henry.hinze@gmail.com,2020,1,0,0,1,0,0,0
+e:guyren@gmail.com,e:guyren@gmail.com,2020,1,0,0,1,0,0,0
+Rémi Lapeyre,e:remi.lapeyre@lenstra.fr,2020,1,0,0,1,0,0,0
+e:karimelghazouly@gmail.com,e:karimelghazouly@gmail.com,2020,1,0,0,1,0,0,0
+Robert Treat,e:rob@xzilla.net,2020,1,1,0,0,0,0,0
+Takayuki Tsunakawa,e:tsunakawa.takay@jp.fujitsu.com,2020,1,0,1,0,0,0,0
+Bertrand Drouvot,e:bdrouvot@amazon.com,2020,1,1,0,0,0,0,0
+Nagaraj Raj,e:nagaraj.sf@yahoo.com,2020,1,0,0,1,0,0,0
+Jeevan Ladhe,e:jeevan.ladhe@enterprisedb.com,2020,1,0,1,0,0,0,0
+Alessandro Gherardi,n:alessandro gherardi,2020,1,1,0,0,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2020,1,0,1,1,0,0,0
+James Hunter,e:james.hunter.pg@gmail.com,2020,1,1,0,0,0,0,0
+Andrew Bille,e:andrewbille@gmail.com,2020,1,0,0,1,0,0,0
+Yuta Katsuragi,n:yuta katsuragi,2020,1,1,0,0,0,0,0
+Philippe Beaudoin,e:pbh.emaj@free.fr,2020,1,0,0,1,0,0,0
+"""Wang",n1:wang,2020,1,0,0,1,0,0,0
+"Shenhao""",e:wangsh.fnst@cn.fujitsu.com,2020,1,0,0,1,0,0,0
+Sandro Mani,e:manisandro@gmail.com,2020,1,0,0,1,0,0,0
+Robert Kahlert,n:robert kahlert,2020,1,0,0,1,0,0,0
+"""Hou",n1:hou,2020,1,1,0,0,0,0,0
+"Zhijie""",n1:zhijie,2020,1,1,0,0,0,0,0
+Kelly Min,n:kelly min,2020,1,0,0,1,0,0,0
+Asim Praveen,n:asim praveen,2020,1,0,1,0,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2020,1,0,0,1,0,0,0
+Jan Mussler,e:jan.mussler@zalando.de,2020,1,0,0,1,0,0,0
+e:ajulien@shaktiware.fr,e:ajulien@shaktiware.fr,2020,1,0,0,1,0,0,0
+Oleg Samoilov,n:oleg samoilov,2020,1,0,0,1,0,0,0
+e:sean@materialize.io,e:sean@materialize.io,2020,1,0,0,1,0,0,0
+e:2552891@gmail.com,e:2552891@gmail.com,2020,1,0,0,1,0,0,0
+Robin Abbi,n:robin abbi,2020,1,0,0,1,0,0,0
+osdba,n1:osdba,2020,1,0,0,1,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2020,1,0,1,0,0,0,0
+Pierre Giraud,e:pierre.giraud@dalibo.com,2020,1,0,1,1,0,0,0
+Abhijit Menon-Sen,n:abhijit menon-sen,2020,1,0,1,0,0,0,0
+Marco Atzeri,e:marco.atzeri@gmail.com,2020,1,0,1,0,0,0,0
+Vyacheslav Shablistyy,n:vyacheslav shablistyy,2020,1,0,0,1,0,0,0
+Shenhao Wang,e:wangsh.fnst@fujitsu.com,2020,1,1,0,0,0,0,0
+Stéphane Lorek,n:stephane lorek,2020,1,0,0,1,0,0,0
+Lu,n1:lu,2020,1,1,0,0,0,0,0
+Chenyang,e:lucy.fnst@cn.fujitsu.com,2020,1,1,0,0,0,0,0
+Steven Winfield,n:steven winfield,2020,1,1,0,0,0,0,0
+Odin Ugedal,e:odin@ugedal.com,2020,1,1,0,0,0,0,0
+Nazli Ugur Koyluoglu,n:nazli ugur koyluoglu,2020,1,0,0,1,0,0,0
+using SQLancer,n:using sqlancer,2020,1,0,0,1,0,0,0
+Hironobu SUZUKI,n:hironobu suzuki,2020,1,1,0,0,0,0,0
+Madan Kumar,n:madan kumar,2020,1,0,1,0,0,0,0
+Lee Dong Wook,e:sh95119@gmail.com,2020,1,0,0,1,0,0,0
+Robins Tharakan,e:tharakan@gmail.com,2020,1,0,0,1,0,0,0
+Daniel Dustafsson,n:daniel dustafsson,2020,1,1,0,0,0,0,0
+Felix Lechner,n:felix lechner,2020,1,1,0,1,0,0,0
+e:galiev_mr@taximaxim.ru,e:galiev_mr@taximaxim.ru,2020,1,0,0,1,0,0,0
+Ádám Balogh,n:adam balogh,2020,1,1,0,0,0,0,0
+e:petermpallesen@gmail.com,e:petermpallesen@gmail.com,2020,1,0,0,1,0,0,0
+Joseph Nahmias,n:joseph nahmias,2020,1,0,0,0,0,1,0
+Kyptaro Horiguchi,n:kyptaro horiguchi,2020,1,0,1,0,0,0,0
+Amit Khandekar,e:amitdkhan.pg@gmail.com,2020,1,0,0,1,0,0,0
+Martín Marqués,n:martin marques,2020,1,1,0,0,0,0,0
+Roman Zharkov,e:r.zharkov@postgrespro.ru,2020,1,1,0,0,0,0,0
+Dong Wook Lee,n:dong wook lee,2020,1,1,0,0,0,0,0
+Vladimir Sitnikov,n:vladimir sitnikov,2020,1,0,0,1,0,0,0
+TAKATSUKA Haruka,e:harukat@sraoss.co.jp,2020,1,0,0,1,0,0,0
+via sqlsmith,n:via sqlsmith,2020,1,0,0,1,0,0,0
+Arthur Nascimento,e:tureba@gmail.com,2020,1,0,0,1,0,0,0
+additional change by me,n:additional change by me,2020,1,1,0,0,0,0,0
+yigong hu,n:yigong hu,2020,1,0,0,1,0,0,0
+Arnold Müller,n:arnold muller,2020,1,1,0,0,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2020,1,1,0,0,0,0,0
+Alvaro Herrera revised by me,n:alvaro herrera revised by me,2020,1,1,0,0,0,0,0
+based on suggestion by Robert Haas,n:based on suggestion by robert haas,2020,1,1,0,0,0,0,0
+Davinder Singh,e:davinder.singh@enterprisedb.com,2020,1,1,0,0,0,0,0
+Mithun Chicklore Yogendra,n:mithun chicklore yogendra,2020,1,0,0,1,0,0,0
+Victor Wagner,e:vitus@wagner.pp.ru,2020,1,1,0,0,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2020,1,0,0,1,0,0,0
+Andrei Zubkov,n:andrei zubkov,2020,1,0,0,1,0,0,0
+Ben Cornett,n:ben cornett,2020,1,0,0,1,0,0,0
+e:taf1@cornell.edu,e:taf1@cornell.edu,2020,1,0,0,1,0,0,0
+Rajkumar Raghuwanshi,e:rajkumar.raghuwanshi@enterprisedb.com,2020,1,0,0,1,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2020,1,0,1,0,0,0,0
+Roman Peshkurov,n:roman peshkurov,2020,1,1,0,0,0,0,0
+Cameron Ezell,n:cameron ezell,2020,1,0,0,1,0,0,0
+Tushar Ahuja,e:tushar.ahuja@enterprisedb.com,2020,1,0,0,1,0,0,0
+few changes by me,n:few changes by me,2020,1,1,0,0,0,0,0
+Ethan Waldo,e:ewaldo@healthetechs.com,2020,1,0,0,1,0,0,0
+Ivan Kartyshov,n:ivan kartyshov,2020,1,1,0,0,0,0,0
+Anna Akenteva,n:anna akenteva,2020,1,1,0,0,0,0,0
+Ants Aasma,e:ants.aasma@cybertec.at,2020,1,0,1,0,0,0,0
+Dmitry Ivanov,n:dmitry ivanov,2020,1,0,1,0,0,0,0
+Pavel Suderevsky,n:pavel suderevsky,2020,1,0,1,0,0,0,0
+Marti Raudsepp,n:marti raudsepp,2020,1,0,1,0,0,0,0
+Alexander Kuzmenkov,e:a.kuzmenkov@postgrespro.ru,2020,1,0,1,0,0,0,0
+Roger Harkavy,e:rogerharkavy@gmail.com,2020,1,1,0,0,0,0,0
+Haribabu Kommi,n:haribabu kommi,2020,1,0,1,0,0,0,0
+Hugh Wang,n:hugh wang,2020,1,0,0,1,0,0,0
+Sergei Agalakov,n:sergei agalakov,2020,1,0,0,1,0,0,0
+e:jbird@nuna.com,e:jbird@nuna.com,2020,1,0,0,1,0,0,0
+e:me@sillymon.ch,e:me@sillymon.ch,2020,1,0,0,1,0,0,0
+e:adunham@arbormetrix.com,e:adunham@arbormetrix.com,2020,1,0,0,1,0,0,0
+e:mib@nic.at,e:mib@nic.at,2020,1,0,0,1,0,0,0
+revised by Fujii Masao,n:revised by fujii masao,2020,1,1,0,0,0,0,0
+Filip Janus,e:fjanus@redhat.com,2020,1,0,0,1,0,0,0
+Justin King,n:justin king,2020,1,0,0,1,0,0,0
+Darafei Praliaskouski,n:darafei praliaskouski,2020,1,1,0,0,0,0,0
+Chris Travers,n:chris travers,2020,1,0,1,0,0,0,0
+Pavan Deolasee,e:pavan.deolasee@2ndquadrant.com,2020,1,1,0,0,0,0,0
+Daniel WM,n:daniel wm,2020,1,0,0,1,0,0,0
+Chris Bandy,n:chris bandy,2020,1,1,0,1,0,0,0
+e:axykon@gmail.com,e:axykon@gmail.com,2020,1,0,0,1,0,0,0
+Pierre Ducroquet,e:p.psql@pinaraf.info,2020,1,1,0,0,0,0,0
+minor edits by Álvaro,n:minor edits by alvaro,2020,1,1,0,0,0,0,0
+Insung Moon,n:insung moon,2020,1,1,0,0,0,0,0
+Juan José Santamaría,n:juan jose santamaria,2020,1,0,1,0,0,0,0
+Sergey Cherkashin,e:s.cherkashin@postgrespro.ru,2020,1,1,0,0,0,0,0
+unsolicited help from Álvaro Herrera,n:unsolicited help from alvaro herrera,2020,1,1,0,0,0,0,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2020,1,0,0,1,0,0,0
+Hsu,n1:hsu,2020,1,0,0,1,0,0,0
+John,n1:john,2020,1,0,0,1,0,0,0
+Maxence Ahlouche,n:maxence ahlouche,2020,1,1,0,0,0,0,0
+Christophe Courtois,e:christophe.courtois@dalibo.com,2020,1,0,0,1,0,0,0
+Tomas,n1:tomas,2020,1,0,1,0,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2020,1,1,0,0,0,0,0
+Marko Tiikkaja,e:marko@joh.to,2020,1,0,1,0,0,0,0
+Mateusz Guzik,n:mateusz guzik,2020,1,0,0,0,1,0,0
+Matteo Beccati,n:matteo beccati,2020,1,0,0,0,1,0,0
+Keith Fiske,n:keith fiske,2020,1,0,0,0,1,0,0
+Rui DeSousa,n:rui desousa,2020,1,0,0,0,1,0,0
+Julian Backes,n:julian backes,2020,1,0,0,1,0,0,0
+Nicola Contu,e:nicola.contu@gmail.com,2020,1,0,0,1,0,0,0
+few modifications by me,n:few modifications by me,2020,1,1,0,0,0,0,0
+Shawn Debnath,n:shawn debnath,2020,1,0,1,0,0,0,0
+Beena Emerson,n:beena emerson,2020,1,0,1,0,0,0,0
+Cary Huang,e:hcary328@gmail.com,2020,1,0,1,0,0,0,0
+Deng,n1:deng,2020,1,0,0,1,0,0,0
+Gang,n1:gang,2020,1,0,0,1,0,0,0
+Manuel Rigger,n:manuel rigger,2020,1,0,0,1,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2020,1,0,0,1,0,0,0
+Amit Kamila,n:amit kamila,2020,1,0,1,0,0,0,0
+Emre Hasegeli,e:emre@hasegeli.com,2020,1,0,1,0,0,0,0
+Prabhat Sahu,n:prabhat sahu,2020,1,0,0,0,1,0,0
+Jobin Augustine,e:jobinau@gmail.com,2020,1,1,0,0,0,0,0
+Anthony Nowocien,n:anthony nowocien,2020,1,0,1,0,0,0,0
+Rob,e:rirans@comcast.net,2020,1,0,0,1,0,0,0
+changes by Amit Kapila,n:changes by amit kapila,2020,1,1,0,0,0,0,0
+Tham Nguyen,n:tham nguyen,2020,1,0,0,1,0,0,0
+Octopus ZHANG,n:octopus zhang,2020,1,0,0,1,0,0,0
+Jian Zhang,n:jian zhang,2020,1,0,0,1,0,0,0
+Jon Jensen,n:jon jensen,2020,1,1,0,1,0,0,0
+Petr Fedorov,e:petr.fedorov@phystech.edu,2020,1,0,0,1,0,0,0
+Michael Meskes,e:meskes@postgresql.org,2020,0,0,0,0,0,0,1
+Tom Lane,e:tgl@sss.pgh.pa.us,2021,642,552,73,14,0,3,550
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2021,236,215,17,4,0,0,249
+Michael Paquier,e:michael.paquier@gmail.com,2021,233,137,90,7,0,1,287
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2021,147,87,56,4,0,0,121
+Amit Kapila,e:akapila@postgresql.org,2021,114,25,92,2,0,0,126
+Andres Freund,e:andres@andres@anarazel.de,2021,112,57,38,20,0,6,55
+Peter Geoghegan,e:pg@bowt.ie,2021,107,93,11,4,0,0,102
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2021,105,34,69,4,0,0,102
+Robert Haas,e:robertmhaas@gmail.com,2021,97,76,21,0,0,0,74
+Thomas Munro,e:thomas.munro@enterprisedb.com,2021,96,78,15,6,0,0,93
+Justin Pryzby,e:justin@telsasoft.com,2021,96,47,31,24,0,0,0
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2021,96,28,68,4,0,0,0
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2021,78,51,23,4,1,0,69
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2021,75,41,33,1,0,0,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2021,71,53,17,1,0,1,52
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2021,67,31,31,5,0,2,0
+David Rowley,e:david.rowley@2ndquadrant.com,2021,64,57,9,1,0,0,70
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2021,63,40,23,0,0,0,50
+Bruce Momjian,e:bruce@momjian.us,2021,60,57,2,1,0,0,65
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2021,53,39,12,2,0,0,44
+John Naylor,e:john.naylor@2ndquadrant.com,2021,46,25,18,2,1,0,23
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2021,45,20,25,3,0,1,0
+Noah Misch,e:noah@leadboat.com,2021,44,38,2,4,0,1,38
+Vignesh C,e:vignesh21@gmail.com,2021,43,19,25,1,0,0,0
+Julien Rouhaud,e:julien.rouhaud@free.fr,2021,38,12,23,3,0,0,0
+Peter Smith,e:peter.b.smith@fujitsu.com,2021,36,27,9,2,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2021,35,12,22,0,0,1,0
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2021,34,20,16,1,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2021,33,0,33,0,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2021,25,13,11,1,0,0,26
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2021,24,17,7,0,0,0,22
+Nathan Bossart,e:bossartn@amazon.com,2021,23,11,12,0,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2021,21,8,14,0,0,0,0
+Greg Nancarrow,e:gregn4422@gmail.com,2021,20,8,12,0,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2021,20,14,5,1,0,0,13
+Jacob Champion,e:pchampion@vmware.com,2021,19,7,10,3,0,1,0
+Mark Dilger,e:hornschnorter@gmail.com,2021,17,6,8,3,0,0,0
+Stephen Frost,e:sfrost@snowman.net,2021,17,9,7,1,0,0,10
+Fabien Coelho,e:coelho@cri.ensmp.fr,2021,17,9,8,0,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2021,17,12,5,0,0,0,0
+Haiying Tang,e:tanghy.fnst@cn.fujitsu.com,2021,16,5,4,3,6,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2021,16,8,8,0,0,0,0
+Etsuro Fujita,e:efujita@postgresql.org,2021,16,16,0,0,0,0,17
+Laurenz Albe,e:laurenz.albe@cybertec.at,2021,15,5,9,1,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2021,13,5,6,1,1,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2021,12,2,2,10,1,0,0
+Sawada Masahiko,n:sawada masahiko,2021,12,7,6,0,0,0,0
+Masahiro Ikeda,e:masahiro.ikeda@nttdata.com,2021,11,7,4,0,0,0,0
+Jeff Davis,e:pgsql@j-davis.com,2021,11,7,1,3,0,0,8
+Aleksander Alekseev,e:aleksander@timescale.com,2021,11,4,7,0,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2021,11,5,4,5,0,0,0
+Takayuki Tsunakawa,e:tsunakawa.takay@jp.fujitsu.com,2021,11,4,7,0,0,0,0
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2021,10,5,5,0,0,0,0
+Japin Li,e:japinli@hotmail.com,2021,10,6,4,0,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2021,10,7,3,1,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2021,10,8,2,0,0,1,0
+Amul Sul,e:amul.sul@enterprisedb.com,2021,9,7,2,0,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2021,9,3,4,2,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2021,9,3,2,4,1,0,0
+Jaime Casanova,e:jcasanov@systemguards.com.ec,2021,8,1,0,6,1,0,0
+Andrey Borodin,e:amborodin86@gmail.com,2021,8,5,3,0,0,0,0
+Georgios Kokolatos,e:gkokolatos@protonmail.com,2021,8,4,3,1,0,0,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2021,8,8,0,1,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2021,8,2,6,0,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2021,8,1,5,2,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2021,7,3,3,0,1,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2021,7,4,4,1,0,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2021,7,4,3,0,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2021,7,4,2,1,0,0,0
+Bertrand Drouvot,e:bdrouvot@amazon.com,2021,7,4,2,1,0,0,0
+Craig Ringer,e:craig.ringer@enterprisedb.com,2021,7,6,1,0,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2021,7,1,6,0,0,0,0
+Juan José Santamaría Flecha,e:juanjo.santamaria@gmail.com,2021,6,2,4,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2021,6,3,2,1,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2021,6,2,4,0,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2021,6,3,2,1,0,0,2
+James Coleman,e:jtc331@gmail.com,2021,6,5,2,0,0,0,0
+Alexey Kondratov,e:a.kondratov@postgrespro.ru,2021,6,2,4,0,0,0,0
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2021,5,2,3,0,0,0,0
+Ken Kato,n:ken kato,2021,5,5,0,0,0,0,0
+Asif Rehman,e:asifr.rehman@gmail.com,2021,5,0,5,0,0,0,0
+Anton Voloshin,e:a.voloshin@postgrespro.ru,2021,5,2,0,3,0,0,0
+Sehrope Sarkuni,e:sehrope@jackdb.com,2021,5,4,1,0,0,0,0
+Tatsuro Yamada,e:tatsuro.yamada.tf@nttcom.co.jp,2021,5,4,1,0,0,0,0
+"""Hou",n1:hou,2021,5,3,2,0,0,0,0
+Kota Miyake,n:kota miyake,2021,5,5,0,0,0,0,0
+Josef Šimánek,e:josef.simanek@gmail.com,2021,4,3,1,0,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2021,4,2,1,1,0,0,0
+Michael Banck,e:mbanck@debian.org,2021,4,2,1,1,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2021,4,1,2,1,0,0,0
+David Steele,e:david@pgmasters.net,2021,4,1,3,0,0,0,0
+Kirk Jamison,e:k.jamison@fujitsu.com,2021,4,1,3,0,0,0,0
+Arthur Zakirov,e:a.zakirov@postgrespro.ru,2021,4,0,4,0,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2021,3,1,0,2,0,0,0
+Paul Martinez,e:hellopfm@gmail.com,2021,3,3,0,0,0,0,0
+Tang Haiying,n:tang haiying,2021,3,1,1,1,0,0,0
+Hans Buschmann,e:buschmann@nidsa.net,2021,3,1,0,2,0,0,0
+Jeevan Ladhe,e:jeevan.ladhe@enterprisedb.com,2021,3,0,3,0,0,0,0
+Matthijs van der Vleuten,e:postgresql@zr40.nl,2021,3,1,0,2,0,0,0
+Nikolai Berkoff,e:nikolai.berkoff@pm.me,2021,3,2,0,1,0,0,0
+Andrew Gierth,e:rhodiumtoad@postgresql.org,2021,3,1,0,2,0,0,1
+Petr Jelinek,e:petr@2ndquadrant.com,2021,3,0,2,1,0,0,0
+Greg Sabino Mullane,e:greg@turnstep.com,2021,3,2,1,0,0,0,0
+Sait Talha Nisanci,e:sait.nisanci@microsoft.com,2021,3,1,0,1,1,0,0
+Tom Lane as per buildfarm,n:tom lane as per buildfarm,2021,3,0,0,3,0,0,0
+Mahendra Singh Thalor,e:mahi6run@gmail.com,2021,3,0,3,0,0,0,0
+as per buildfarm,n:as per buildfarm,2021,3,0,0,3,0,0,0
+Dave Cramer,e:davecramer@gmail.com,2021,3,1,0,2,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2021,3,2,1,0,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2021,3,1,0,2,0,0,0
+Boris Kolpackov,e:boris@codesynthesis.com,2021,3,0,0,3,0,0,0
+Joe Conway,e:mail@joeconway.com,2021,3,2,1,0,0,0,3
+Pavan Deolasee,e:pavan.deolasee@2ndquadrant.com,2021,3,1,1,2,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2021,3,0,3,0,0,0,0
+Antonin Houska,e:ah@cybertec.at,2021,3,0,2,1,0,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2021,3,0,3,1,0,0,0
+Jürgen Purtz,e:juergen@purtz.de,2021,3,3,0,0,0,0,0
+Aya Iwata,e:iwata.aya@jp.fujitsu.com,2021,3,1,2,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2021,3,1,2,0,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2021,3,0,1,0,2,0,0
+Markus Wanner,e:markus.wanner@2ndquadrant.com,2021,3,1,1,1,0,0,0
+David Fetter,e:david@fetter.org,2021,3,1,2,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2021,3,2,2,0,0,0,0
+"Zhijie""",n1:zhijie,2021,3,2,1,0,0,0,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2021,3,1,2,0,0,0,0
+Dian M Fay,n:dian m fay,2021,3,0,3,0,0,0,0
+Chapman Flack,e:chap@anastigmatix.net,2021,3,0,3,0,0,0,0
+Merlin Moncure,e:mmoncure@gmail.com,2021,3,0,3,0,0,0,0
+Jim Nasby,e:jim.nasby@gmail.com,2021,3,0,3,0,0,0,0
+Josh Berkus,n:josh berkus,2021,3,0,3,0,0,0,0
+Victor Wagner,e:vitus@wagner.pp.ru,2021,3,0,3,0,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2021,3,0,3,0,0,0,0
+tweaked by Fujii Masao,n:tweaked by fujii masao,2021,3,3,0,0,0,0,0
+Melanie Plageman,e:melanieplageman@gmail.com,2021,2,2,1,0,0,0,0
+Wei Wang,e:wangw.fnst@fujitsu.com,2021,2,2,0,0,0,0,0
+Gilles Darold,e:gilles@darold.net,2021,2,0,2,0,0,0,0
+Ashwin Agrawal,e:aagrawal@pivotal.io,2021,2,1,1,0,0,0,0
+Jian Guo,n:jian guo,2021,2,0,2,0,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2021,2,1,1,0,0,0,0
+Sven Klemm,e:sven@timescale.com,2021,2,1,0,1,0,0,0
+Sergey Shinderuk,e:s.shinderuk@postgrespro.ru,2021,2,2,0,0,0,0,0
+Koyu Tanigawa,n:koyu tanigawa,2021,2,2,0,0,0,0,0
+Ekaterina Kiryanova,e:e.kiryanova@postgrespro.ru,2021,2,2,0,0,0,0,0
+Tatsuhito Kasahara,n:tatsuhito kasahara,2021,2,1,1,1,0,0,0
+Yuzuko Hosoya,e:hosoya.yuzuko@lab.ntt.co.jp,2021,2,2,0,0,0,0,0
+David Zhang,e:david.zhang@highgo.ca,2021,2,0,2,0,0,0,0
+Ryo Matsumura,e:matsumura.ryo@fujitsu.com,2021,2,0,2,0,0,0,0
+Chen Jiaoqian,e:chenjq.jy@fujitsu.com,2021,2,0,0,2,0,0,0
+Michael Meskes,e:meskes@postgresql.org,2021,2,2,0,0,0,0,4
+Jakub Wartak,e:jakub.wartak@tomtom.com,2021,2,0,0,0,2,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2021,2,0,2,2,0,0,0
+Amit Kapila based on previous work by Nikhil Sontakke,n:amit kapila based on previous work by nikhil sontakke,2021,2,2,0,0,0,0,0
+Stas Kelvich,n:stas kelvich,2021,2,2,0,0,0,0,0
+Quan Zongliang,e:quanzongliang@yeah.net,2021,2,2,0,0,0,0,0
+Alexander Pyhalov,e:a.yhalov@postgrespro.ru,2021,2,1,0,1,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2021,2,2,0,0,0,0,0
+Neil Chen,e:carpenter.nail.cz@gmail.com,2021,2,0,2,0,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2021,2,0,2,0,0,0,0
+Tom Lane based on buildfarm reports,n:tom lane based on buildfarm reports,2021,2,0,0,2,0,0,0
+Jeff Janes,e:jeff.janes@gmail.com,2021,2,1,1,1,0,0,0
+lx zou,e:zoulx1982@163.com,2021,2,0,0,2,0,0,0
+Julien Rohaud,n:julien rohaud,2021,2,2,0,0,0,0,0
+Muhammad Usama,n:muhammad usama,2021,2,0,2,0,0,0,0
+Arseny Sher,e:a.sher@postgrespro.ru,2021,2,1,1,0,0,0,0
+Andrus,n1:andrus,2021,2,0,0,2,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2021,2,0,1,1,0,0,0
+Tomas,n1:tomas,2021,2,0,2,0,0,0,0
+Tang,n1:tang,2021,2,1,0,1,1,0,0
+"Haiying""",n1:haiying,2021,2,1,0,1,1,0,0
+Benoit Lobréau,e:benoit.lobreau@dalibo.com,2021,2,2,0,0,0,0,0
+Arthur Nascimento,e:tureba@gmail.com,2021,2,1,1,2,0,0,0
+revised by Tom Lane,n:revised by tom lane,2021,2,2,0,0,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2021,2,0,1,1,0,0,0
+Hamid Akhtar,e:hamid.akhtar@gmail.com,2021,2,0,2,0,0,0,0
+Victor Yegorov,e:vyegorov@gmail.com,2021,2,0,2,0,0,0,0
+Andrew Bille,e:andrewbille@gmail.com,2021,1,0,0,1,0,0,0
+based on suggestion from Andres Freund,n:based on suggestion from andres freund,2021,1,1,0,0,0,0,0
+Chris Lowder,n:chris lowder,2021,1,0,0,1,0,0,0
+Kevin Zheng,e:1642644905@qq.com,2021,1,0,0,1,0,0,0
+based on suggestions by Andres Freund,n:based on suggestions by andres freund,2021,1,1,0,0,0,0,0
+Alexey Ermakov,n:alexey ermakov,2021,1,0,0,1,0,0,0
+Florin Irion,e:florin.irion@enterprisedb.com,2021,1,1,0,0,0,0,0
+Lingjie Qiang,n:lingjie qiang,2021,1,1,0,0,0,0,0
+via buildfarm member jacana,n:via buildfarm member jacana,2021,1,0,0,1,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2021,1,1,0,0,0,0,0
+Alexander Kozhemyakin,e:a.kozhemyakin@postgrespro.ru,2021,1,0,0,1,0,0,0
+via AddressSanitizer,n:via addresssanitizer,2021,1,0,0,1,0,0,0
+Stan Hu,e:stanhu@gmail.com,2021,1,0,1,1,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2021,1,0,1,0,0,0,0
+Emre Hasegeli,e:emre@hasegeli.com,2021,1,1,0,0,0,0,0
+Andreas Seltenreich,n:andreas seltenreich,2021,1,0,0,1,0,0,0
+RekGRpth,e:rekgrpth@gmail.com,2021,1,0,0,1,0,0,0
+Suraj Khamkar,n:suraj khamkar,2021,1,0,1,0,0,0,0
+Andrew B,n:andrew b,2021,1,0,0,1,0,0,0
+Kamigishi Rei,e:iijima.yun@koumakan.jp,2021,1,0,0,1,0,0,0
+Kosei Masumura,n:kosei masumura,2021,1,1,0,0,0,0,0
+htalaco,n1:htalaco,2021,1,0,0,1,0,0,0
+via github,n:via github,2021,1,0,0,1,0,0,0
+Onder Kalaci,e:onderk@microsoft.com,2021,1,0,0,1,0,0,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2021,1,0,1,0,0,0,0
+Alex Kozhemyakin,n:alex kozhemyakin,2021,1,1,0,0,0,0,0
+Chris Bandy,n:chris bandy,2021,1,0,1,0,0,0,0
+Rachel Heaton,e:rheaton@vmware.com,2021,1,1,0,0,0,0,0
+Kevin Burke,e:kevin@burke.dev,2021,1,1,0,0,0,0,0
+Erica Zhang,e:ericazhangy2021@qq.com,2021,1,1,0,0,0,0,0
+rir,n1:rir,2021,1,0,0,1,0,0,0
+Jeremy Schneider,n:jeremy schneider,2021,1,1,0,0,0,0,0
+Jelte Fennema-Nio,e:jelte.fennema@microsoft.com,2021,1,0,0,1,0,0,0
+ryancaicse,n1:ryancaicse,2021,1,0,0,1,0,0,0
+Sebastian Kemper,e:sebastian_ml@gmx.net,2021,1,1,0,0,0,0,0
+Filip Gospodinov,e:f@gospodinov.ch,2021,1,0,0,1,0,0,0
+B Sadhu Prasad Patro,n:b sadhu prasad patro,2021,1,1,0,0,0,0,0
+Himanshu Upadhyaya,e:upadhyaya.himanshu@gmail.com,2021,1,0,1,0,0,0,0
+based on suggestion by Thomas Munro,n:based on suggestion by thomas munro,2021,1,1,0,0,0,0,0
+Elena Indrupskaya,n:elena indrupskaya,2021,1,1,0,0,0,0,0
+based on suggestion by Andres Freund,n:based on suggestion by andres freund,2021,1,1,0,0,0,0,0
+Egor Rogov,n:egor rogov,2021,1,0,0,1,0,0,0
+Shenhao Wang,e:wangsh.fnst@fujitsu.com,2021,1,1,0,0,0,0,0
+Zhangjie,e:zhangjie2@fujitsu.com,2021,1,0,0,1,0,0,0
+Zhangjie,n1:zhangjie,2021,1,1,0,0,0,0,0
+Itamar Gafni,n:itamar gafni,2021,1,1,0,0,0,0,0
+Andreas Grob,n:andreas grob,2021,1,0,0,1,0,0,0
+Mike Fiedler,e:miketheman@gmail.com,2021,1,1,0,0,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2021,1,0,1,0,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2021,1,1,0,0,0,0,0
+Liu Huailing,n:liu huailing,2021,1,1,0,0,0,0,0
+Bryn Llewelly,n:bryn llewelly,2021,1,0,0,1,0,0,0
+e:michal.palenik@freemap.sk,e:michal.palenik@freemap.sk,2021,1,0,0,1,0,0,0
+e:jim@jdoherty.net,e:jim@jdoherty.net,2021,1,0,0,1,0,0,0
+e:wangzk.fnstxz@fujitsu.com,e:wangzk.fnstxz@fujitsu.com,2021,1,1,0,0,0,0,0
+"""suyu.cmj""",e:mengjuan.cmj@alibaba-inc.com,2021,1,0,0,1,0,0,0
+e:troy@frericks.us,e:troy@frericks.us,2021,1,0,0,1,0,0,0
+Jason Harvey,n:jason harvey,2021,1,0,0,1,0,0,0
+Floris Van Nee,n:floris van nee,2021,1,0,0,1,0,0,0
+Arne Roland,e:a.roland@index.de,2021,1,1,0,0,0,0,0
+Dmitry Marakasov,e:amdmi3@amdmi3.ru,2021,1,1,0,0,0,0,0
+Zhang Wenjie,n:zhang wenjie,2021,1,0,0,1,0,0,0
+Tom Lane as per coverity,n:tom lane as per coverity,2021,1,0,0,1,0,0,0
+Marcin Krupowicz,e:mk@071.ovh,2021,1,0,0,1,0,0,0
+Mikhail Kulagin,n:mikhail kulagin,2021,1,1,0,0,0,0,0
+the comment revised by David Rowley,n:the comment revised by david rowley,2021,1,1,0,0,0,0,0
+YoungHwan Joo,e:rulyox@gmail.com,2021,1,0,0,1,0,0,0
+Gregory Smith,e:gregsmithpgsql@gmail.com,2021,1,0,0,1,0,0,0
+Martín Marqués,n:martin marques,2021,1,0,0,1,0,0,0
+e:tom@crystae.net,e:tom@crystae.net,2021,1,0,0,1,0,0,0
+Eric Mutta,e:eric.mutta@gmail.com,2021,1,0,0,1,0,0,0
+Paquier Michael,n:paquier michael,2021,1,0,1,0,0,0,0
+buildfarm member fairywren,n:buildfarm member fairywren,2021,1,0,0,1,0,0,0
+e:shinya11.kato@nttdata.com,e:shinya11.kato@nttdata.com,2021,1,1,0,0,0,0,0
+Brar Piening,e:brar@gmx.de,2021,1,1,0,0,0,0,0
+Yaoguang Chen,n:yaoguang chen,2021,1,0,0,1,0,0,0
+the additional changes by me,n:the additional changes by me,2021,1,1,0,0,0,0,0
+zhanyi,e:w@hidva.com,2021,1,1,0,0,0,0,0
+inoas,n1:inoas,2021,1,0,0,1,0,0,0
+from IRC,n:from irc,2021,1,0,0,1,0,0,0
+Honza Horak,e:hhorak@redhat.com,2021,1,1,0,0,0,0,0
+Mathis Rudolf,n:mathis rudolf,2021,1,0,0,1,0,0,0
+Eric Thinnes,e:e.thinnes@gmx.de,2021,1,0,0,1,0,0,0
+Brian Ye,n:brian ye,2021,1,0,0,1,0,0,0
+Coverity,n1:coverity,2021,1,0,0,1,0,0,0
+via Tom Lane,n:via tom lane,2021,1,0,0,1,0,0,0
+test case by Haiying Tang,n:test case by haiying tang,2021,1,1,0,0,0,0,0
+Tang,e:tanghy.fnst@fujitsu.com,2021,1,0,0,1,0,0,0
+Santosh Udupi,e:email@hitha.net,2021,1,0,0,1,0,0,0
+Valentin Gatien-Baron,n:valentin gatien-baron,2021,1,0,0,1,0,0,0
+e:20210425115726.ga2353095@rfd.leadboat.com,e:20210425115726.ga2353095@rfd.leadboat.com,2021,1,0,0,0,0,1,0
+Amit Khandekar,e:amitdkhan.pg@gmail.com,2021,1,1,0,1,0,0,0
+Joel Jacobson,e:joel@compiler.org,2021,1,1,0,0,0,0,0
+test case by Vignesh C,n:test case by vignesh c,2021,1,1,0,0,0,0,0
+test case by Li Japin,n:test case by li japin,2021,1,1,0,0,0,0,0
+Yukun Wang,n:yukun wang,2021,1,1,0,0,0,0,0
+Shi yu,e:shiy.fnst@fujitsu.com,2021,1,0,0,1,0,0,0
+yanliang lei,e:msdnchina@163.com,2021,1,0,0,1,0,0,0
+Ludovic Kuty,n:ludovic kuty,2021,1,0,0,1,0,0,0
+Theodor Arsenij Larionov-Trichkin,n:theodor arsenij larionov-trichkin,2021,1,0,0,1,0,0,0
+Kazutaka Onishi,n:kazutaka onishi,2021,1,1,0,0,0,0,0
+Kohei KaiGai,e:kaigai@heterodb.com,2021,1,1,0,0,0,0,0
+slightly modified by Fujii Masao,n:slightly modified by fujii masao,2021,1,1,0,0,0,0,0
+Takashi Menjo,e:takashi.menjo@gmail.com,2021,1,0,1,0,0,0,0
+Ryan Lambert,n:ryan lambert,2021,1,0,1,0,0,0,0
+"""Iwata",n1:iwata,2021,1,0,1,0,0,0,0
+using SQLsmith,n:using sqlsmith,2021,1,0,0,1,0,0,0
+Petr Fedorov,e:petr.fedorov@phystech.edu,2021,1,0,0,1,0,0,0
+David Pirotte,n:david pirotte,2021,1,1,0,0,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2021,1,0,1,1,0,0,0
+Sergey Cherkashin,e:s.cherkashin@postgrespro.ru,2021,1,1,0,0,0,0,0
+Maksim Milyutin,e:milyutinma@gmail.com,2021,1,0,1,0,0,0,0
+Tsunakawa,n1:tsunakawa,2021,1,0,1,0,0,0,0
+Takayuki,n1:takayuki,2021,1,0,1,0,0,0,0
+Wang Shenhao,n:wang shenhao,2021,1,0,0,1,0,0,0
+Greg Rychlewski,n:greg rychlewski,2021,1,1,0,0,0,0,0
+Suraj Kharage,e:suraj.kharage@enterprisedb.com,2021,1,1,0,0,0,0,0
+"""Nagaura",n1:nagaura,2021,1,0,1,0,0,0,0
+"Ryohei""",e:nagaura.ryohei@jp.fujitsu.com,2021,1,0,1,0,0,0,0
+Jim Doty,e:jdoty@pivotal.io,2021,1,0,1,0,0,0,0
+e:neverov.max@gmail.com,e:neverov.max@gmail.com,2021,1,0,0,1,0,0,0
+Nico Williams,e:nico@cryptonector.com,2021,1,0,1,0,0,0,0
+Shawn Wang,e:shawn.wang.pg@gmail.com,2021,1,0,1,0,0,0,0
+Isaac Morland,e:isaac.morland@gmail.com,2021,1,0,1,0,0,0,0
+Artur Zakirov,e:zaartur@gmail.com,2021,1,0,1,0,0,0,0
+Tomohiro Hiramitsu,n:tomohiro hiramitsu,2021,1,1,0,0,0,0,0
+Guy Burgess,n:guy burgess,2021,1,0,0,1,0,0,0
+Yaroslav Pashinsky,n:yaroslav pashinsky,2021,1,0,0,1,0,0,0
+Thomas Trenz,n:thomas trenz,2021,1,0,0,1,0,0,0
+Jimmy Yih,n:jimmy yih,2021,1,1,0,0,0,0,0
+Kevin Yeap,n:kevin yeap,2021,1,1,0,0,0,0,0
+Michael Brown,e:michael.brown@discourse.org,2021,1,0,0,1,0,0,0
+Paul Guo,e:guopa@vmware.com,2021,1,0,1,0,0,0,0
+Thomas Munro as per buildfarm,n:thomas munro as per buildfarm,2021,1,0,0,1,0,0,0
+Luc Vlaming,e:luc@swarm64.com,2021,1,0,1,0,0,0,0
+Matthieu Garrigues,e:matthieu.garrigues@gmail.com,2021,1,1,0,0,0,0,0
+Nikhil Sontakke,e:nikhils@2ndquadrant.com,2021,1,0,1,0,0,0,0
+Vaishnavi Prabakaran,e:vaishnavip@fast.au.fujitsu.com,2021,1,0,1,0,0,0,0
+e:max1@inbox.ru,e:max1@inbox.ru,2021,1,0,0,1,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2021,1,0,1,0,0,0,0
+Nikita Konev,n:nikita konev,2021,1,0,0,1,0,0,0
+Josef,n1:josef,2021,1,0,1,0,0,0,0
+Alexey Bashtanov,e:bashtanov@imap.cc,2021,1,1,0,0,0,0,0
+Robert Treat,e:rob@xzilla.net,2021,1,0,1,0,0,0,0
+based on idea by Andres Freund,n:based on idea by andres freund,2021,1,1,0,0,0,0,0
+Edmund Horner,n:edmund horner,2021,1,1,0,0,0,0,0
+Philipp Gramzow,n:philipp gramzow,2021,1,0,0,1,0,0,0
+Christophe Courtois,e:christophe.courtois@dalibo.com,2021,1,0,0,1,0,0,0
+Dmitriy Kuzmin,e:kuzmin.db4@gmail.com,2021,1,0,0,1,0,0,0
+Alvaro,n1:alvaro,2021,1,0,1,0,0,0,0
+Önder Kalacı,n:onder kalac,2021,1,0,1,0,0,0,0
+Barry Pederson,n:barry pederson,2021,1,0,0,1,0,0,0
+Thomas Kellerer,n:thomas kellerer,2021,1,0,1,1,0,0,0
+Alexandex Korotkov,n:alexandex korotkov,2021,1,1,0,0,0,0,0
+Phillip Menke,e:pg@pmenke.de,2021,1,0,0,1,0,0,0
+Harisai Hari,n:harisai hari,2021,1,0,0,1,0,0,0
+tweaked a bit by Fujii Masao,n:tweaked a bit by fujii masao,2021,1,1,0,0,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2021,1,0,0,1,0,0,0
+Robert Grange,n:robert grange,2021,1,0,0,1,0,0,0
+Duncan Sands,e:duncan.sands@deepbluecap.com,2021,1,0,0,1,0,0,0
+Kuntal Ghosh,e:kuntalghosh.2007@gmail.com,2021,1,0,1,0,0,0,0
+Tatsuro Ishii,n:tatsuro ishii,2021,1,0,1,0,0,0,0
+Darafei Praliaskouski,n:darafei praliaskouski,2021,1,0,1,0,0,0,0
+Michael Vastola,n:michael vastola,2021,1,0,0,1,0,0,0
+me,n1:me,2021,1,1,0,0,0,0,0
+e:funnyxj.fxj@alibaba-inc.com,e:funnyxj.fxj@alibaba-inc.com,2021,1,0,0,1,0,1,0
+Mark Zhao,n:mark zhao,2021,1,1,0,0,0,0,0
+Kirk Jamison based on ideas by Amit Kapila,n:kirk jamison based on ideas by amit kapila,2021,1,1,0,0,0,0,0
+e:fotis.koutoupas@gmail.com,e:fotis.koutoupas@gmail.com,2021,1,0,0,1,0,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2022,628,486,126,18,0,3,481
+Andres Freund,e:andres@andres@anarazel.de,2022,329,217,104,14,0,3,243
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2022,319,261,53,5,0,2,317
+Michael Paquier,e:michael.paquier@gmail.com,2022,215,140,72,3,0,1,323
+Robert Haas,e:robertmhaas@gmail.com,2022,170,124,44,4,0,1,122
+Thomas Munro,e:thomas.munro@enterprisedb.com,2022,169,131,35,4,0,0,140
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2022,129,91,36,4,0,1,138
+Justin Pryzby,e:justin@telsasoft.com,2022,109,52,41,22,0,0,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2022,100,81,15,2,3,0,83
+John Naylor,e:john.naylor@2ndquadrant.com,2022,87,66,17,3,1,0,66
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2022,86,22,64,4,0,0,0
+David Rowley,e:david.rowley@2ndquadrant.com,2022,84,69,11,4,0,0,91
+Nathan Bossart,e:bossartn@amazon.com,2022,76,31,43,4,1,0,0
+Bruce Momjian,e:bruce@momjian.us,2022,70,62,7,1,0,0,74
+Peter Geoghegan,e:pg@bowt.ie,2022,65,61,4,0,0,0,64
+Amit Kapila,e:akapila@postgresql.org,2022,64,14,50,3,0,2,79
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2022,60,38,21,2,0,0,0
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2022,58,43,15,0,0,0,64
+Julien Rouhaud,e:julien.rouhaud@free.fr,2022,48,20,27,1,0,0,0
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2022,43,25,18,0,0,3,0
+Peter Smith,e:peter.b.smith@fujitsu.com,2022,41,27,11,4,0,0,0
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2022,39,26,11,3,3,2,30
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2022,31,27,7,1,0,0,0
+Noah Misch,e:noah@leadboat.com,2022,31,23,3,6,0,1,23
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2022,29,19,7,4,0,0,0
+Etsuro Fujita,e:efujita@postgresql.org,2022,29,29,0,0,0,0,29
+Jeff Davis,e:pgsql@j-davis.com,2022,28,25,3,0,0,0,33
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2022,25,11,13,1,0,0,22
+Richard Guo,e:rguo@postgresql.org,2022,22,6,15,1,0,0,0
+Vignesh C,e:vignesh21@gmail.com,2022,22,11,10,1,0,0,0
+Aleksander Alekseev,e:aleksander@timescale.com,2022,22,11,11,2,0,0,0
+Melanie Plageman,e:melanieplageman@gmail.com,2022,21,17,2,2,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2022,19,12,3,5,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2022,19,5,13,1,0,0,0
+Japin Li,e:japinli@hotmail.com,2022,19,6,11,3,0,0,0
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2022,19,14,7,0,0,0,17
+Shi yu,e:shiy.fnst@fujitsu.com,2022,18,7,11,3,0,0,0
+Bertrand Drouvot,e:bdrouvot@amazon.com,2022,16,12,4,0,0,0,0
+Zhang Mingli,e:avamingli@gmail.com,2022,16,7,8,1,0,0,0
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2022,16,15,1,0,0,0,16
+Jacob Champion,e:pchampion@vmware.com,2022,15,8,6,1,0,0,0
+Georgios Kokolatos,e:gkokolatos@protonmail.com,2022,15,8,7,0,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2022,15,6,8,1,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2022,15,4,10,1,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2022,14,12,1,1,0,0,11
+Pavel Borisov,e:pashkin.elfe@gmail.com,2022,14,3,11,0,0,0,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2022,14,13,1,0,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2022,14,5,4,7,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2022,12,0,12,0,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2022,12,3,9,0,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2022,11,1,7,3,0,0,0
+Nazir Bilal Yavuz,e:byavuz81@gmail.com,2022,11,7,2,2,0,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2022,11,7,4,0,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2022,10,5,3,2,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2022,10,3,7,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2022,10,10,0,1,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2022,10,4,4,2,0,0,6
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2022,9,4,4,1,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2022,9,5,0,4,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2022,9,2,4,3,0,0,0
+Greg Stark,e:stark@mit.edu,2022,9,0,8,1,0,0,0
+Junwang Zhao,e:zhjwpku@gmail.com,2022,8,7,0,2,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2022,8,1,4,3,0,0,0
+Fabien Coelho,e:coelho@cri.ensmp.fr,2022,8,6,2,0,0,0,0
+Laurenz Albe,e:laurenz.albe@cybertec.at,2022,7,5,2,0,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2022,7,1,3,3,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2022,7,0,7,0,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2022,7,4,2,1,0,0,8
+Cary Huang,e:hcary328@gmail.com,2022,7,3,4,0,0,0,0
+Justin Prysby,n:justin prysby,2022,7,2,2,3,0,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2022,7,4,3,1,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2022,7,7,0,0,0,0,0
+Anton A. Melnikov,e:aamelnikov@inbox.ru,2022,6,4,1,1,0,0,0
+Antonin Houska,e:ah@cybertec.at,2022,6,1,5,1,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2022,6,6,0,0,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2022,6,2,0,4,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2022,6,3,2,1,0,0,0
+Chapman Flack,e:chap@anastigmatix.net,2022,6,0,5,1,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2022,5,0,5,0,0,0,0
+"""Drouvot",n1:drouvot,2022,5,4,1,0,0,0,0
+James Coleman,e:jtc331@gmail.com,2022,5,4,1,0,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2022,4,3,1,0,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2022,4,0,4,0,0,0,0
+Michael,n1:michael,2022,4,0,4,0,0,0,0
+Ted Yu,e:yuzhihong@gmail.com,2022,4,3,1,0,0,0,0
+Juan José Santamaría Flecha,e:juanjo.santamaria@gmail.com,2022,4,3,1,0,0,0,0
+Steve Chavez,e:steve@supabase.io,2022,4,4,1,0,0,0,0
+Sergey Shinderuk,e:s.shinderuk@postgrespro.ru,2022,4,1,2,2,0,0,0
+Joe Conway,e:mail@joeconway.com,2022,4,2,2,0,0,0,3
+Melih Mutlu,e:m.melihmutlu@gmail.com,2022,4,3,0,1,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2022,4,3,1,0,0,0,0
+Shinoda,n1:shinoda,2022,4,4,0,0,0,0,0
+Dong Wook Lee,n:dong wook lee,2022,4,4,0,0,0,0,0
+Rachel Heaton,e:rheaton@vmware.com,2022,4,3,1,0,0,0,0
+Greg Nancarrow,e:gregn4422@gmail.com,2022,4,0,4,0,0,0,0
+Haiying Tang,e:tanghy.fnst@cn.fujitsu.com,2022,4,0,4,1,0,0,0
+Jaime Casanova,e:jcasanov@systemguards.com.ec,2022,3,1,0,2,0,0,0
+samay sharma,e:smilingsamay@gmail.com,2022,3,2,1,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2022,3,1,2,0,0,0,0
+Tatsuhiro Nakamori,e:bt22nakamorit@oss.nttdata.com,2022,3,2,0,1,0,0,0
+Sirisha Chamarthi,e:sirichamarthi22@gmail.com,2022,3,3,0,0,0,0,0
+Robert Treat,e:rob@xzilla.net,2022,3,0,2,1,0,0,0
+Dave Page,e:dpage@pgadmin.org,2022,3,3,0,0,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2022,3,1,2,0,0,0,0
+Osumi Takamichi,n:osumi takamichi,2022,3,1,1,1,0,0,0
+Ekaterina Kiryanova,e:e.kiryanova@postgrespro.ru,2022,3,2,0,1,0,0,0
+Wang wei,n:wang wei,2022,3,1,2,0,0,0,0
+Stephen Frost,e:sfrost@snowman.net,2022,3,1,2,0,0,0,2
+Andrey Borodin,e:amborodin86@gmail.com,2022,3,1,1,1,0,0,0
+Eric Mutta,e:eric.mutta@gmail.com,2022,3,0,0,3,0,0,0
+David Steele,e:david@pgmasters.net,2022,3,1,2,0,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2022,3,2,1,0,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2022,3,1,0,1,0,1,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2022,3,0,3,0,0,0,0
+Hannu Krosing,e:hannuk@google.com,2022,3,0,3,0,0,0,0
+Sehrope Sarkuni,e:sehrope@jackdb.com,2022,3,3,0,0,0,0,0
+Sho Kato,n:sho kato,2022,2,1,1,0,0,0,0
+Kuroda Hayato,n:kuroda hayato,2022,2,1,2,0,0,0,0
+Sami Imseih,e:simseih@amazon.com,2022,2,2,0,0,0,0,0
+Roman Zharkov,e:r.zharkov@postgrespro.ru,2022,2,0,2,1,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2022,2,2,0,0,0,0,0
+Robins Tharakan,e:tharakan@gmail.com,2022,2,1,1,1,0,0,0
+Jeff Janes,e:jeff.janes@gmail.com,2022,2,0,1,1,0,0,0
+Rob,e:rirans@comcast.net,2022,2,2,0,2,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2022,2,0,2,0,0,0,0
+Asim R Praveen,e:apraveen@pivotal.io,2022,2,2,0,0,0,0,0
+Paul Guo,e:guopa@vmware.com,2022,2,2,0,0,0,2,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2022,2,0,2,0,0,0,0
+David,n1:david,2022,2,0,2,0,0,0,0
+Tang Haiying,n:tang haiying,2022,2,1,1,1,0,0,0
+Sandeep Thakkar,e:sandeep.thakkar@enterprisedb.com,2022,2,0,0,2,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2022,2,1,1,1,0,0,0
+as per buildfarm,n:as per buildfarm,2022,2,0,0,2,0,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2022,2,1,1,0,0,0,0
+Leslie LEMAIRE,e:leslie.lemaire@developpement-durable.gouv.fr,2022,2,0,0,2,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2022,2,1,0,0,1,0,0
+Arthur Zakirov,e:a.zakirov@postgrespro.ru,2022,2,0,2,0,0,0,0
+"Gunnar ""Nick"" Bluth",n:gunnar nick bluth,2022,2,2,0,0,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2022,2,0,2,0,0,0,0
+Rémi Lapeyre,e:remi.lapeyre@lenstra.fr,2022,2,2,0,0,0,0,0
+Pavan Deolasee,e:pavan.deolasee@2ndquadrant.com,2022,2,2,0,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2022,2,0,2,0,0,0,0
+Jeevan Ladhe,e:jeevan.ladhe@enterprisedb.com,2022,2,2,0,0,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2022,2,1,0,1,0,0,0
+Maksim Milyutin,e:milyutinma@gmail.com,2022,2,0,2,0,0,0,0
+Aliaksandr Kalenik,n:aliaksandr kalenik,2022,2,2,0,0,0,0,0
+Arne Roland,e:a.roland@index.de,2022,2,0,2,0,0,0,0
+Matthias van de,n:matthias van de,2022,1,0,1,0,0,0,0
+Sawada Masahiko,n:sawada masahiko,2022,1,0,1,0,0,0,0
+Shveta Mallik,n:shveta mallik,2022,1,0,1,0,0,0,0
+Karina Litskevich,e:litskevichkarina@gmail.com,2022,1,1,0,0,0,0,0
+Erwin Brandstetter,e:brsaweda@gmail.com,2022,1,0,1,0,0,0,0
+Victor Spirin,e:v.spirin@postgrespro.ru,2022,1,1,0,0,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2022,1,0,0,1,0,0,0
+Maciek Sakrejda,e:maciek@pganalyze.com,2022,1,1,0,0,0,0,0
+Alexey Makhmutov,e:a.makhmutov@postgrespro.ru,2022,1,0,0,1,0,0,0
+buildfarm member wrasse,n:buildfarm member wrasse,2022,1,0,0,1,0,0,0
+using valgrind,n:using valgrind,2022,1,0,0,1,0,0,0
+Sven Klemm,e:sven@timescale.com,2022,1,0,0,1,0,0,0
+e:wolakk@gmail.com,e:wolakk@gmail.com,2022,1,0,0,1,0,0,0
+e:lemes.marcelo26@gmail.com,e:lemes.marcelo26@gmail.com,2022,1,0,0,1,0,0,0
+Gunnar Morling,e:gunnar.morling@googlemail.com,2022,1,0,0,1,0,0,0
+e:iphatiey5eu2au6@pasms.be,e:iphatiey5eu2au6@pasms.be,2022,1,0,0,1,0,0,0
+David Zhang,e:david.zhang@highgo.ca,2022,1,0,0,0,1,0,0
+Amit Kapila based on suggestions by Andres Freund,n:amit kapila based on suggestions by andres freund,2022,1,1,0,0,0,0,0
+Andres Freund <andres@anarazel.de,n:andres freund andres anarazel de,2022,1,0,1,0,0,0,0
+Myo Wai Thant,e:myo.waithant@fujitsu.com,2022,1,1,0,0,0,0,0
+Ankit Kumar Pandey,e:itsankitkp@gmail.com,2022,1,0,1,0,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2022,1,0,1,1,0,0,0
+Matheus Alcantara,e:mths.dev@pm.me,2022,1,0,1,0,0,0,0
+Nuko Yokohama,n:nuko yokohama,2022,1,0,0,1,0,0,0
+Alex Denman,n:alex denman,2022,1,0,0,1,0,0,0
+Denis Laxalde,e:denis.laxalde@dalibo.com,2022,1,1,0,0,0,0,0
+Ayaki Tachikake,n:ayaki tachikake,2022,1,1,0,0,0,0,0
+Bilva Sanaba,n:bilva sanaba,2022,1,1,0,0,0,0,0
+Elena Indrupskaya,n:elena indrupskaya,2022,1,1,0,1,0,0,0
+Tatsu Nakamori,n:tatsu nakamori,2022,1,1,0,0,0,0,0
+Önder Kalacı,n:onder kalac,2022,1,0,0,1,0,0,0
+"e:""wangw.fnst@fujitsu.com""","e:""wangw.fnst@fujitsu.com""",2022,1,0,0,1,0,0,0
+Kotaro Kawamoto,n:kotaro kawamoto,2022,1,1,0,0,0,0,0
+Mary Xu,n:mary xu,2022,1,0,0,1,0,0,0
+Florin Irion,e:florin.irion@enterprisedb.com,2022,1,1,0,0,0,0,0
+Reid Thompson,e:reid.thompson@crunchydata.com,2022,1,0,0,1,0,0,0
+Okano Naoki,n:okano naoki,2022,1,0,0,1,0,0,0
+Vitaly Burovoy,e:vitaly.burovoy@gmail.com,2022,1,1,0,0,0,0,0
+Drew DeVault,n:drew devault,2022,1,0,0,1,0,0,0
+e:michal.palenik@freemap.sk,e:michal.palenik@freemap.sk,2022,1,0,0,1,0,0,0
+Andreas Dijkman,n:andreas dijkman,2022,1,0,0,1,0,0,0
+Joel Jacobson,e:joel@compiler.org,2022,1,0,0,1,0,0,0
+Erki Eessaar,e:erki.eessaar@taltech.ee,2022,1,0,0,1,0,0,0
+e:philippe.godfrin@nov.com,e:philippe.godfrin@nov.com,2022,1,0,0,1,0,0,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2022,1,0,0,1,0,0,0
+Whale Song,n:whale song,2022,1,0,0,1,0,0,0
+Maxim Yablokov,n:maxim yablokov,2022,1,1,0,0,0,0,0
+e:marcmaiwald@googlemail.com,e:marcmaiwald@googlemail.com,2022,1,0,0,1,0,0,0
+Onder Kalaci,e:onderk@microsoft.com,2022,1,1,0,0,0,0,0
+Brad Nicholson,n:brad nicholson,2022,1,0,0,1,0,0,0
+Noboru Saito,e:noborusai@gmail.com,2022,1,1,0,0,0,0,0
+e:coleman.rik@gmail.com,e:coleman.rik@gmail.com,2022,1,0,0,1,0,0,0
+e:liambowen@gmail.com,e:liambowen@gmail.com,2022,1,0,0,1,0,0,0
+e:robertcorrington@gmail.com,e:robertcorrington@gmail.com,2022,1,0,0,1,0,0,0
+e:frank_limpert@yahoo.com,e:frank_limpert@yahoo.com,2022,1,0,0,1,0,0,0
+Alexey Borzov,e:borz_off@cs.msu.su,2022,1,0,0,1,0,0,0
+Mike Oh,n:mike oh,2022,1,0,0,1,0,0,0
+Ahsan Hadi,e:ahsan.hadi@gmail.com,2022,1,0,1,0,0,0,0
+doc suggestion by Stephen Frost,n:doc suggestion by stephen frost,2022,1,0,0,1,0,0,0
+王海洋,e:wanghaiyang.001@bytedance.com,2022,1,1,0,0,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2022,1,0,1,0,0,0,0
+Phil Florent,n:phil florent,2022,1,0,0,1,0,0,0
+Gilles Darold,e:gilles@darold.net,2022,1,1,0,0,0,0,0
+Peter,n1:peter,2022,1,0,1,0,0,0,0
+e:axel.kluener@gmail.com,e:axel.kluener@gmail.com,2022,1,0,0,1,0,0,0
+Japin,n1:japin,2022,1,0,1,0,0,0,0
+Michel Pelletier,n:michel pelletier,2022,1,1,0,0,0,0,0
+Mason Sharp,n:mason sharp,2022,1,0,1,0,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2022,1,0,1,0,0,0,0
+Nikhil Shetty,n:nikhil shetty,2022,1,0,0,1,0,0,0
+Takeshi Ideriha,e:iderihatakeshi@gmail.com,2022,1,0,0,1,0,0,0
+Troy Frericks,n:troy frericks,2022,1,0,0,1,0,0,0
+Nicola Contu,e:nicola.contu@gmail.com,2022,1,0,0,1,0,0,0
+Justin,n1:justin,2022,1,0,1,0,0,0,0
+Noriyoshi,n1:noriyoshi,2022,1,1,0,0,0,0,0
+wenjing zeng,e:wjzeng2012@gmail.com,2022,1,0,1,0,0,0,0
+Kyotaro,n1:kyotaro,2022,1,0,1,0,0,0,0
+Daniele Varrazzo,e:daniele.varrazzo@gmail.com,2022,1,0,0,1,0,0,0
+Roberto Mello,n:roberto mello,2022,1,1,0,0,0,0,0
+Przemysław Sztoch,n:przemys aw sztoch,2022,1,1,0,0,0,0,0
+Olaf Bohlen,e:olbohlen@eenfach.de,2022,1,0,0,1,0,0,0
+e:pg@kirasoft.com,e:pg@kirasoft.com,2022,1,0,0,1,0,0,0
+e:akhilhello@gmail.com,e:akhilhello@gmail.com,2022,1,0,0,1,0,0,0
+Josh Soref,e:jsoref@gmail.com,2022,1,1,0,0,0,0,0
+Alastair McKinley,e:a.mckinley@analyticsengines.com,2022,1,0,0,1,0,0,0
+Tushar Ahuja,e:tushar.ahuja@enterprisedb.com,2022,1,0,0,1,0,0,0
+Ales Zeleny,n:ales zeleny,2022,1,0,0,1,0,0,0
+Vladimir Sitnikov,n:vladimir sitnikov,2022,1,0,0,1,0,0,0
+Dave Crammer,n:dave crammer,2022,1,1,0,0,0,0,0
+Peter Slavov,e:pet.slavov@gmail.com,2022,1,0,0,1,0,0,0
+Jeremy Evans,n:jeremy evans,2022,1,0,0,1,0,0,0
+Lauren Fliksteen,e:dancernerd32@gmail.com,2022,1,0,0,1,0,0,0
+Rajakavitha Kodhandapani,e:krajakavitha@gmail.com,2022,1,0,1,0,0,0,0
+Wang Ke,e:krking@zju.edu.cn,2022,1,0,0,1,0,0,0
+Fabrice Chapuis,e:fabrice636861@gmail.com,2022,1,0,0,1,0,0,0
+e:20220510210235.gd19626@telsasoft.com,e:20220510210235.gd19626@telsasoft.com,2022,1,0,0,0,0,1,0
+Geoff Winkless,n:geoff winkless,2022,1,0,0,1,0,0,0
+Rui Zhao,e:zhaorui126@gmail.com,2022,1,0,0,1,0,0,0
+Martín Marqués,n:martin marques,2022,1,1,0,0,0,0,0
+Joseph Koshakow,e:koshy44@gmail.com,2022,1,0,0,1,0,0,0
+Joey Bodoia,e:jbodoia21@cmc.edu,2022,1,0,1,0,0,0,0
+Daria Lepikhova,e:daria.n.lepikhova@gmail.com,2022,1,0,0,1,0,0,0
+Joe Wildish,e:joe@lateraljoin.com,2022,1,0,0,1,0,0,0
+Frédéric Yhuel,e:frederic.yhuel@dalibo.com,2022,1,1,0,0,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2022,1,0,1,0,0,0,0
+RKN Sai Krishna,n:rkn sai krishna,2022,1,0,1,0,0,0,0
+Lukas Fittl,e:lukas@fittl.com,2022,1,0,1,0,0,0,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2022,1,0,0,0,1,0,0
+Sait Talha Nisanci,e:sait.nisanci@microsoft.com,2022,1,0,0,0,1,0,0
+Michael Banck,e:mbanck@debian.org,2022,1,0,1,0,0,0,0
+Alexander Kukushkin,e:cyberdemn@gmail.com,2022,1,0,1,0,0,0,0
+"""Iwata",n1:iwata,2022,1,0,1,0,0,0,0
+Aya Iwata,e:iwata.aya@jp.fujitsu.com,2022,1,0,1,0,0,0,0
+Fabrice Fontaine,e:fontaine.fabrice@gmail.com,2022,1,1,0,0,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2022,1,0,1,0,0,0,0
+Claudio Freire,n:claudio freire,2022,1,0,1,0,0,0,0
+via buildfarm member skink,n:via buildfarm member skink,2022,1,0,0,1,0,0,0
+based on an idea from me,n:based on an idea from me,2022,1,1,0,0,0,0,0
+Joshua Brindle,n:joshua brindle,2022,1,1,0,0,0,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2022,1,0,0,1,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2022,1,1,0,0,0,0,0
+Suraj Kharage,e:suraj.kharage@enterprisedb.com,2022,1,0,1,0,0,0,0
+Andres,n1:andres,2022,1,0,1,0,0,0,0
+Freund,n1:freund,2022,1,0,1,0,0,0,0
+Petr Jelinek,e:petr@2ndquadrant.com,2022,1,0,1,0,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2022,1,1,0,0,0,0,0
+Kevin Grittner,n:kevin grittner,2022,1,0,1,0,0,0,0
+Ildus Kurbangaliev,n:ildus kurbangaliev,2022,1,0,1,0,0,0,0
+Eduard Català,e:eduard.catala@gmail.com,2022,1,0,0,1,0,0,0
+Victor Yegorov,e:vyegorov@gmail.com,2022,1,0,0,1,0,0,0
+Otto Kekalainen,n:otto kekalainen,2022,1,1,0,0,0,0,0
+Amita Kapila,n:amita kapila,2022,1,0,0,1,0,0,0
+based on initial by Tomas Vondra,n:based on initial by tomas vondra,2022,1,1,0,0,0,0,0
+Brar Piening,e:brar@gmx.de,2022,1,1,0,0,0,0,0
+KAWAMOTO Masaya,n:kawamoto masaya,2022,1,1,0,0,0,0,0
+based on suggestions by Andres Freund,n:based on suggestions by andres freund,2022,1,1,0,0,0,0,0
+Wei Wang,e:wangw.fnst@fujitsu.com,2022,1,0,1,0,0,0,0
+Miles Delahunty,n:miles delahunty,2022,1,0,0,1,0,0,0
+Ryohei Takahashi,e:r.takahashi_2@fujitsu.com,2022,1,0,1,0,0,0,0
+Tatsuhito Kasahara,n:tatsuhito kasahara,2022,1,1,0,1,0,0,0
+Christopher Berg,n:christopher berg,2022,1,0,0,1,0,0,0
+Ken Kato,n:ken kato,2022,1,1,0,0,0,0,0
+Sergei Shoulbakov,n:sergei shoulbakov,2022,1,1,0,0,0,0,0
+Björn Harrtell,n:bjorn harrtell,2022,1,0,1,0,0,0,0
+Darafei Praliaskouski,n:darafei praliaskouski,2022,1,0,1,0,0,0,0
+e:davs2rt@gmail.com,e:davs2rt@gmail.com,2022,1,0,0,1,0,0,0
+e:nassehk@gmail.com,e:nassehk@gmail.com,2022,1,0,0,1,0,0,0
+Victor Wagner,e:vitus@wagner.pp.ru,2022,1,1,0,0,0,0,0
+Abhijit Menon-Sen,n:abhijit menon-sen,2022,1,0,1,0,0,0,0
+Feike Steenbergen,e:feikesteenbergen@gmail.com,2022,1,0,0,1,0,0,0
+Alex Kingsborough,n:alex kingsborough,2022,1,1,0,0,0,1,0
+Nikolai Berkoff,e:nikolai.berkoff@pm.me,2022,1,1,0,0,0,0,0
+Tim McNamara,e:tim@mcnamara.nz,2022,1,0,0,1,0,0,0
+Tang,e:tanghy.fnst@fujitsu.com,2022,1,1,0,0,0,0,0
+Takayuki Tsunakawa,e:tsunakawa.takay@jp.fujitsu.com,2022,1,0,1,0,0,0,0
+Klaudie Willis,e:klaudie.willis@protonmail.com,2022,1,0,0,1,0,0,0
+Michael Mühlbeyer,n:michael muhlbeyer,2022,1,0,0,1,0,0,0
+Bossart,n1:bossart,2022,1,0,0,0,1,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2023,449,340,83,24,1,5,336
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2023,324,240,70,11,0,3,284
+Andres Freund,e:andres@andres@anarazel.de,2023,235,125,98,16,0,7,144
+Michael Paquier,e:michael.paquier@gmail.com,2023,233,131,91,15,0,1,317
+Thomas Munro,e:thomas.munro@enterprisedb.com,2023,109,82,24,5,0,0,90
+David Rowley,e:david.rowley@2ndquadrant.com,2023,102,70,28,4,0,0,106
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2023,98,47,51,0,0,0,101
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2023,94,54,40,1,0,0,67
+Robert Haas,e:robertmhaas@gmail.com,2023,93,57,36,1,0,0,57
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2023,92,50,41,2,0,0,59
+Nathan Bossart,e:bossartn@amazon.com,2023,88,58,25,6,0,0,57
+Bruce Momjian,e:bruce@momjian.us,2023,87,86,0,1,0,0,121
+Melanie Plageman,e:melanieplageman@gmail.com,2023,81,43,30,8,0,2,0
+Amit Kapila,e:akapila@postgresql.org,2023,79,13,69,1,0,0,87
+Jeff Davis,e:pgsql@j-davis.com,2023,78,62,11,6,0,0,69
+Justin Pryzby,e:justin@telsasoft.com,2023,64,18,32,17,0,0,0
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2023,62,20,38,6,0,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2023,59,18,12,34,2,0,0
+Peter Geoghegan,e:pg@bowt.ie,2023,59,39,13,8,0,0,46
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2023,58,30,26,5,0,0,47
+Peter Smith,e:peter.b.smith@fujitsu.com,2023,55,23,31,1,0,0,0
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2023,54,37,17,0,0,1,0
+Bertrand Drouvot,e:bdrouvot@amazon.com,2023,54,31,26,1,0,0,0
+Richard Guo,e:rguo@postgresql.org,2023,49,18,23,10,0,0,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2023,45,30,8,7,0,0,30
+Tristan Partin,e:tristan@neon.tech,2023,45,23,21,1,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2023,44,32,11,2,0,0,32
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2023,39,35,7,0,0,0,53
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2023,39,22,11,7,0,0,19
+Aleksander Alekseev,e:aleksander@timescale.com,2023,39,10,32,0,0,0,0
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2023,38,22,14,2,0,1,0
+Vignesh C,e:vignesh21@gmail.com,2023,30,12,18,0,0,0,0
+Noah Misch,e:noah@leadboat.com,2023,30,23,5,1,0,2,23
+John Naylor,e:john.naylor@2ndquadrant.com,2023,28,14,9,5,0,0,14
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2023,25,21,4,0,0,0,20
+Jacob Champion,e:pchampion@vmware.com,2023,23,11,12,1,0,0,0
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2023,21,13,7,1,0,0,0
+Jelte Fennema-Nio,e:jelte.fennema@microsoft.com,2023,18,13,5,0,0,0,0
+Julien Rouhaud,e:julien.rouhaud@free.fr,2023,17,4,13,0,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2023,17,1,16,4,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2023,17,7,9,1,0,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2023,16,6,6,4,0,0,0
+Etsuro Fujita,e:efujita@postgresql.org,2023,16,16,0,0,0,0,15
+Laurenz Albe,e:laurenz.albe@cybertec.at,2023,15,8,6,3,0,1,0
+Kuroda Hayato,n:kuroda hayato,2023,15,6,9,0,0,0,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2023,14,6,11,0,0,0,0
+Nazir Bilal Yavuz,e:byavuz81@gmail.com,2023,14,12,2,0,0,0,0
+Japin Li,e:japinli@hotmail.com,2023,13,8,4,1,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2023,13,6,8,0,0,0,0
+Masahiro Ikeda,e:masahiro.ikeda@nttdata.com,2023,13,9,3,1,0,0,0
+Shi yu,e:shiy.fnst@fujitsu.com,2023,13,5,8,0,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2023,12,2,10,1,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2023,11,5,4,4,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2023,11,3,5,3,0,0,0
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2023,11,2,6,3,0,0,2
+Stephen Frost,e:sfrost@snowman.net,2023,11,8,3,0,0,0,8
+"""Drouvot",n1:drouvot,2023,11,8,7,0,0,0,0
+Georgios Kokolatos,e:gkokolatos@protonmail.com,2023,11,10,2,0,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2023,10,3,6,1,0,0,6
+jian he,e:jian.universality@gmail.com,2023,10,2,4,4,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2023,10,0,10,1,0,0,0
+Sawada Masahiko,n:sawada masahiko,2023,10,2,8,1,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2023,9,0,1,7,1,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2023,9,8,1,0,0,0,0
+Sami Imseih,e:simseih@amazon.com,2023,9,6,2,1,0,0,0
+Junwang Zhao,e:zhjwpku@gmail.com,2023,8,5,1,2,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2023,8,4,3,2,0,0,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2023,8,5,0,3,0,0,0
+David Steele,e:david@pgmasters.net,2023,8,3,5,1,0,1,0
+Karl O. Pinc,e:kop@meme.com,2023,8,4,3,1,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2023,7,6,0,1,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2023,7,3,3,1,0,0,0
+Anton A. Melnikov,e:aamelnikov@inbox.ru,2023,7,3,4,1,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2023,7,6,1,0,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2023,7,6,1,0,0,0,0
+Andrey Borodin,e:amborodin86@gmail.com,2023,7,1,6,0,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2023,7,0,7,0,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2023,7,3,4,0,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2023,7,2,3,2,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2023,7,1,6,0,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2023,6,1,3,2,0,0,0
+Zhang Mingli,e:avamingli@gmail.com,2023,6,4,2,0,0,0,0
+Jim Jones,e:jim.jones@uni-muenster.de,2023,6,1,5,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2023,6,6,0,0,0,0,0
+Joseph Koshakow,e:koshy44@gmail.com,2023,6,5,0,0,0,1,0
+Onder Kalaci,e:onderk@microsoft.com,2023,6,4,2,0,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2023,6,0,6,0,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2023,5,1,4,0,0,0,0
+Mikhail Gribkov,e:youzhick@gmail.com,2023,5,3,1,1,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2023,5,2,3,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2023,5,3,1,1,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2023,5,5,0,0,0,0,0
+Amit Khandekar,e:amitdkhan.pg@gmail.com,2023,5,5,0,0,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2023,4,0,3,1,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2023,4,0,1,3,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2023,4,4,0,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2023,4,0,4,0,0,0,0
+Ted Yu,e:yuzhihong@gmail.com,2023,4,1,3,0,0,0,0
+Tristen Raab,e:tristen.raab@highgo.ca,2023,4,0,4,0,0,0,0
+Ryoga Yoshida,n:ryoga yoshida,2023,4,4,0,2,0,0,0
+Melih Mutlu,e:m.melihmutlu@gmail.com,2023,4,2,2,0,0,0,0
+Wang wei,n:wang wei,2023,4,4,0,0,0,0,0
+Alexander Pyhalov,e:a.yhalov@postgrespro.ru,2023,3,2,0,1,0,0,0
+Shubham Khanna,e:shubham.khanna@fujitsu.com,2023,3,0,3,0,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2023,3,3,0,0,0,0,0
+Andrei Zubkov,n:andrei zubkov,2023,3,2,0,1,0,0,0
+Alena Rybakina,e:lena.ribackina@yandex.ru,2023,3,0,3,0,0,0,0
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2023,3,3,0,0,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2023,3,0,0,3,0,0,0
+Elena Indrupskaya,n:elena indrupskaya,2023,3,2,0,1,0,0,0
+Ekaterina Kiryanova,e:e.kiryanova@postgrespro.ru,2023,3,3,0,0,0,0,0
+Jaime Casanova,e:jcasanov@systemguards.com.ec,2023,3,0,1,2,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2023,3,1,2,2,0,0,0
+Cary Huang,e:hcary328@gmail.com,2023,3,1,2,0,0,0,0
+Kuwamura Masaki,e:kuwamura@db.is.i.nagoya-u.ac.jp,2023,3,3,0,1,0,0,0
+Fabien Coelho,e:coelho@cri.ensmp.fr,2023,3,0,3,0,0,0,0
+Reid Thompson,e:reid.thompson@crunchydata.com,2023,3,0,3,0,0,0,0
+Artem Anisimov,e:artem.anisimov.255@gmail.com,2023,3,0,0,3,0,0,0
+Brar Piening,e:brar@gmx.de,2023,3,2,1,0,0,0,0
+Juan José Santamaría Flecha,e:juanjo.santamaria@gmail.com,2023,3,3,0,0,0,0,0
+Osumi Takamichi,n:osumi takamichi,2023,3,1,2,0,0,0,0
+Rachel Heaton,e:rheaton@vmware.com,2023,3,0,3,0,0,0,0
+Erik Wienhold,e:ewie@ewie.name,2023,2,2,0,1,0,0,0
+Emre Hasegeli,e:emre@hasegeli.com,2023,2,2,0,0,0,0,0
+Tim,e:tim.needham2@gmail.com,2023,2,1,0,1,0,0,0
+Fei Changhong,e:feichanghong@qq.com,2023,2,1,0,1,0,1,0
+Shlok Kyal,e:shlok.kyal.oss@gmail.com,2023,2,1,1,0,0,0,0
+Nikolay Shaplov,e:dhyan@nataraj.su,2023,2,1,1,0,0,0,0
+Yurii Rashkovskii,e:yrashk@omnigres.com,2023,2,2,0,0,0,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2023,2,1,1,0,0,0,0
+Bowen Shi,e:zxwsbg12138@gmail.com,2023,2,1,1,0,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2023,2,1,0,1,0,0,0
+Yuki Seino,e:seinoyu@oss.nttdata.com,2023,2,0,2,0,0,0,0
+Chengxi Sun,e:sunchengxi@highgo.com,2023,2,0,2,0,0,0,0
+Darren Rush,n:darren rush,2023,2,0,2,0,0,0,0
+Egor Rogov,n:egor rogov,2023,2,2,0,0,0,0,0
+Jeff Janes,e:jeff.janes@gmail.com,2023,2,1,0,2,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2023,2,1,1,0,0,0,0
+Zuming Jiang,n:zuming jiang,2023,2,0,0,2,0,0,0
+Eric Mutta,e:eric.mutta@gmail.com,2023,2,0,0,2,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2023,2,1,1,0,0,0,0
+Greg Stark,e:stark@mit.edu,2023,2,0,2,0,0,0,0
+Oleg Sibiryakov,e:o.sibiryakov@postgrespro.ru,2023,2,2,0,0,0,0,0
+Maxim,n1:maxim,2023,2,2,0,0,0,0,0
+Sergey Shinderuk,e:s.shinderuk@postgrespro.ru,2023,2,1,1,0,0,0,0
+Sergei Glukhov,e:s.glukhov@postgrespro.ru,2023,2,0,2,2,0,0,0
+Tender Wang,e:tndrwang@gmail.com,2023,2,0,2,0,0,0,0
+Nishant Sharma,e:nishant.sharma@enterprisedb.com,2023,2,1,1,0,0,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2023,2,1,1,0,0,0,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2023,2,1,1,0,0,0,0
+James Coleman,e:jtc331@gmail.com,2023,2,1,0,1,0,0,0
+Suraj Kharage,e:suraj.kharage@enterprisedb.com,2023,2,1,1,0,0,0,0
+Michail Nikolaev,e:michail.nikolaev@gmail.com,2023,2,1,0,1,0,0,0
+Ryo Matsumura,e:matsumura.ryo@fujitsu.com,2023,2,1,0,1,0,0,0
+Will Mortensen,e:will@extrahop.com,2023,2,1,0,1,0,1,0
+Greg Sabino Mullane,e:greg@turnstep.com,2023,2,2,0,0,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2023,2,2,0,0,0,0,0
+Kirk Wolak,n:kirk wolak,2023,2,1,1,0,0,0,0
+Michael,n1:michael,2023,2,0,2,0,0,0,0
+Rui Zhao,e:zhaorui126@gmail.com,2023,2,2,0,0,0,0,0
+Shinoda,n1:shinoda,2023,2,2,0,0,0,0,0
+Shruthi Gowda,e:gowdashru@gmail.com,2023,2,1,1,1,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2023,2,1,0,1,0,0,0
+Miroslav Bendik,n:miroslav bendik,2023,2,1,0,1,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2023,2,0,2,0,0,0,0
+Ankit Kumar Pandey,e:itsankitkp@gmail.com,2023,2,2,0,0,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2023,2,1,1,0,0,0,0
+Thom Brown,e:thom@linux.com,2023,2,2,0,0,0,0,0
+Daniel Watzinger,n:daniel watzinger,2023,2,1,0,2,0,0,0
+Michael Banck,e:mbanck@debian.org,2023,2,0,2,0,0,0,0
+Mason Sharp,n:mason sharp,2023,2,0,2,0,0,0,0
+Chris Travers,n:chris travers,2023,2,0,2,0,0,0,0
+Sébastien Lardière,e:sebastien@lardiere.net,2023,2,1,1,0,0,0,0
+David Geier,e:geidav.pg@gmail.com,2023,2,1,0,1,1,0,0
+Anban Company,n:anban company,2023,2,0,0,2,0,0,0
+Sravan Kumar,n:sravan kumar,2023,2,2,0,0,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2023,2,1,1,0,0,0,0
+Lukas Fittl,e:lukas@fittl.com,2023,2,1,1,0,0,0,0
+Shveta Mallik,n:shveta mallik,2023,2,0,2,0,0,0,0
+e:juha.mustonen@iki.fi,e:juha.mustonen@iki.fi,2023,1,0,0,1,0,0,0
+John Hsu,e:johnhyvr@gmail.com,2023,1,1,0,0,0,0,0
+e:neil@fairwindsoft.com,e:neil@fairwindsoft.com,2023,1,0,0,1,0,0,0
+robert,e:lists@humanleg.org.uk,2023,1,0,0,1,0,0,0
+Christophe Courtois,e:christophe.courtois@dalibo.com,2023,1,1,0,1,0,0,0
+Yuuki Fujii,n:yuuki fujii,2023,1,0,1,0,0,0,0
+Tomonari Katsumata,e:t.katsumata1122@gmail.com,2023,1,1,0,0,0,0,0
+Garrett Thornburg,n:garrett thornburg,2023,1,1,0,0,0,0,0
+Erki Eessaar,e:erki.eessaar@taltech.ee,2023,1,0,1,1,0,0,0
+Nikhil Benesch,n:nikhil benesch,2023,1,1,0,0,0,0,0
+Willi Mann,n:willi mann,2023,1,1,0,1,0,0,0
+CharSyam,n1:charsyam,2023,1,1,0,1,0,0,0
+Josh Kupershmidt,n:josh kupershmidt,2023,1,1,0,1,0,0,0
+Vinayak Pokale,n:vinayak pokale,2023,1,1,0,1,0,0,0
+e:ap@robillo.net,e:ap@robillo.net,2023,1,0,0,1,0,0,0
+Justin G,n:justin g,2023,1,0,0,1,0,0,0
+Antonin Houska,e:ah@cybertec.at,2023,1,1,0,0,0,0,0
+John Ekins,n:john ekins,2023,1,1,0,1,0,0,0
+Martín Marqués,n:martin marques,2023,1,1,0,1,0,0,0
+Hongxu Ma,e:interma@outlook.com,2023,1,1,0,0,0,0,0
+Gilles Darold,e:gilles@darold.net,2023,1,1,0,0,0,0,0
+Ngigi Waithaka,n:ngigi waithaka,2023,1,0,0,1,0,0,0
+Alex Malek,n:alex malek,2023,1,0,0,1,0,0,0
+e:jani.rahkola@iki.fi,e:jani.rahkola@iki.fi,2023,1,0,0,1,0,0,0
+Wolfgang Walther,e:walther@technowledgy.de,2023,1,0,0,1,0,0,0
+e:zhoushulin1992@gmail.com,e:zhoushulin1992@gmail.com,2023,1,0,0,1,0,0,0
+Sanjay Minni,n:sanjay minni,2023,1,0,0,1,0,0,0
+e:ampxbo=m35hch1g4vg=krj0-77fojcvdrdivf5ksoadog-lvkq@mail.gmail.com,e:ampxbo=m35hch1g4vg=krj0-77fojcvdrdivf5ksoadog-lvkq@mail.gmail.com,2023,1,0,0,0,0,1,0
+Evan Macbeth,n:evan macbeth,2023,1,0,0,1,0,0,0
+Joshua D. Drake,n:joshua drake,2023,1,1,0,1,0,0,0
+Aramaki Zyake,n:aramaki zyake,2023,1,1,0,1,0,0,0
+Shihao Zhong,e:zhong950419@gmail.com,2023,1,0,1,0,0,0,0
+Hayato Kuroda based on a suggestion by Andrew Dunstan,n:hayato kuroda based on a suggestion by andrew dunstan,2023,1,1,0,0,0,0,0
+John,e:johrss@amazon.com,2023,1,0,0,1,0,0,0
+Svante Richter,n:svante richter,2023,1,0,0,1,0,0,0
+e:david@kapitaltrading.com,e:david@kapitaltrading.com,2023,1,0,0,1,0,0,0
+Jordi Gutiérrez Hermoso,n:jordi gutierrez hermoso,2023,1,0,0,1,0,0,0
+Tang,e:tanghy.fnst@fujitsu.com,2023,1,0,0,1,0,0,0
+Wei Sun,n:wei sun,2023,1,0,0,1,0,0,0
+Олег Самойлов,e:splarv@ya.ru,2023,1,0,0,1,0,0,0
+adjustments by me,n:adjustments by me,2023,1,1,0,0,0,0,0
+e:suchithjn22@gmail.com,e:suchithjn22@gmail.com,2023,1,0,0,1,0,0,0
+Daniel Fredouille,n:daniel fredouille,2023,1,0,1,0,0,0,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2023,1,1,0,0,0,0,0
+e:andyatkinson@gmail.com,e:andyatkinson@gmail.com,2023,1,0,0,1,0,0,0
+e:wolakk@gmail.com,e:wolakk@gmail.com,2023,1,0,0,1,0,0,0
+Alexander Kuzmenkov,e:a.kuzmenkov@postgrespro.ru,2023,1,1,0,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2023,1,0,1,0,0,0,0
+Hywel Carver,e:hywel@skillerwhale.com,2023,1,0,1,0,0,0,0
+Michał Kłeczek,e:michal@kleczek.org,2023,1,0,1,0,0,0,0
+Maxime Boyer,e:maxime.boyer@cra-arc.gc.ca,2023,1,0,0,1,0,0,0
+Tung Nguyen,n:tung nguyen,2023,1,0,1,0,0,0,0
+Tomas,n1:tomas,2023,1,0,1,0,0,0,0
+Takayuki Tsunakawa,e:tsunakawa.takay@jp.fujitsu.com,2023,1,0,1,0,0,0,0
+Greg Nancarrow,e:gregn4422@gmail.com,2023,1,0,1,0,0,0,0
+Ivan Panchenko,n:ivan panchenko,2023,1,0,1,0,0,0,0
+Andrey Sokolov,n:andrey sokolov,2023,1,0,1,0,0,0,0
+Gregory Stark,n:gregory stark,2023,1,0,1,0,0,0,0
+Nikita Malakhov,e:n.malakhov@postgrespro.ru,2023,1,0,1,0,0,0,0
+Ivan Kolombet,e:enderstd@gmail.com,2023,1,0,0,1,0,0,0
+Andrew Atkinson,n:andrew atkinson,2023,1,1,0,0,0,0,0
+e:mark.a.sloan@gmail.com,e:mark.a.sloan@gmail.com,2023,1,0,0,1,0,0,0
+e:tpo_deb@sourcepole.ch,e:tpo_deb@sourcepole.ch,2023,1,0,0,1,0,0,0
+e:t.kitynski@gmail.com,e:t.kitynski@gmail.com,2023,1,0,0,1,0,0,0
+Pete Storer,n:pete storer,2023,1,0,0,1,0,0,0
+Steve Atkins,n:steve atkins,2023,1,0,0,1,0,0,0
+Orlov Aleksej,n:orlov aleksej,2023,1,1,0,1,0,0,0
+Ethan Mertz,e:ethan.mertz@gmail.com,2023,1,0,0,1,0,0,0
+amutu,n1:amutu,2023,1,0,0,1,0,0,0
+Kyatoro Horiguchi,n:kyatoro horiguchi,2023,1,0,1,0,0,0,0
+Kurt Roeckx,e:kurt@roeckx.be,2023,1,0,0,1,0,0,0
+Lauri Laanmets,e:pcspets@gmail.com,2023,1,0,0,1,0,0,0
+e:davecramer@postgres.rocks,e:davecramer@postgres.rocks,2023,1,0,0,1,0,0,0
+David Cook,n:david cook,2023,1,0,0,1,0,0,0
+hape,e:postgres-hape@gmx.de,2023,1,0,0,1,0,0,0
+Michael Paquier <michael@paquier.xyz,n:michael paquier michael paquier xyz,2023,1,0,1,0,0,0,0
+Martin Schlossarek,n:martin schlossarek,2023,1,0,0,1,0,0,0
+Pierre Ducroquet,e:p.psql@pinaraf.info,2023,1,0,0,0,1,0,0
+Boshomi Phenix,e:boshomi@gmail.com,2023,1,0,0,1,0,0,0
+Krishnakumar R,e:kksrcv001@gmail.com,2023,1,1,0,0,0,0,0
+Karina Litskevich,e:litskevichkarina@gmail.com,2023,1,1,0,1,0,0,0
+"""James Pang """,e:chaolpan@cisco.com,2023,1,0,0,1,0,0,0
+Jingtang Zhang,e:mrdrivingduck@gmail.com,2023,1,1,0,0,0,0,0
+as per buildfarm,n:as per buildfarm,2023,1,0,0,1,0,0,0
+Wei Wang,e:wangw.fnst@fujitsu.com,2023,1,0,0,0,1,0,0
+Zhao Junwang,n:zhao junwang,2023,1,1,0,0,0,0,0
+e:barsikdacat@gmail.com,e:barsikdacat@gmail.com,2023,1,0,0,1,0,0,0
+Jacob Speidel,n:jacob speidel,2023,1,0,0,1,0,1,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2023,1,1,0,0,0,0,0
+Shaun Thomas,n:shaun thomas,2023,1,0,0,1,0,0,0
+Thomas Munro based on cfbot reports.,n:thomas munro based on cfbot reports,2023,1,0,0,1,0,0,0
+Eric Radman,n:eric radman,2023,1,1,0,0,0,0,0
+Dag Lem,n:dag lem,2023,1,0,1,0,0,0,0
+Dave Cramer,e:davecramer@gmail.com,2023,1,1,0,0,0,0,0
+Mitsuru Hinata,n:mitsuru hinata,2023,1,0,0,1,0,0,0
+a few tweaks from me.,n:a few tweaks from me,2023,1,1,0,0,0,0,0
+Alex Hsieh,n:alex hsieh,2023,1,1,0,0,0,0,0
+Tim Palmer,n:tim palmer,2023,1,0,0,1,0,0,0
+Melih Mutlu based on suggestions by Melanie Plageman,n:melih mutlu based on suggestions by melanie plageman,2023,1,1,0,0,0,0,0
+Alexander Kozhemyakin,e:a.kozhemyakin@postgrespro.ru,2023,1,0,0,1,0,0,0
+Bharath,n1:bharath,2023,1,0,1,0,0,0,0
+Önder Kalacı,n:onder kalac,2023,1,0,1,0,0,0,0
+Victoria Shepard,n:victoria shepard,2023,1,0,0,1,0,0,0
+"""suyu.cmj""",e:mengjuan.cmj@alibaba-inc.com,2023,1,1,0,1,0,0,0
+Farias de Oliveira,e:matheusfarias519@gmail.com,2023,1,0,0,1,0,0,0
+Evgeny Morozov,e:postgresql3@realityexists.net,2023,1,0,0,1,0,0,0
+Matheus Alcantara,e:mths.dev@pm.me,2023,1,1,0,0,0,0,0
+Akshat Jaimini,n:akshat jaimini,2023,1,0,1,0,0,0,0
+Anatoly Zaretsky,e:anatoly.zaretsky@gmail.com,2023,1,1,0,0,0,0,0
+bowenshi,e:zxwsbg@qq.com,2023,1,0,0,1,0,0,0
+Dongming Liu,e:ldming101@gmail.com,2023,1,1,0,0,0,0,0
+Yuya Watari,e:watari.yuya@gmail.com,2023,1,0,1,0,0,0,0
+Zu-Ming Jiang,n:zu-ming jiang,2023,1,0,0,1,0,0,0
+Suraj Khamkar,n:suraj khamkar,2023,1,0,1,0,0,0,0
+Joe Conway,e:mail@joeconway.com,2023,1,0,0,1,0,0,0
+Steve Chavez,e:steve@supabase.io,2023,1,1,0,0,0,0,0
+Pierre,e:pbaumard@gmail.com,2023,1,0,0,1,0,0,0
+Robert Sjöblom,n:robert sjoblom,2023,1,1,0,0,0,0,0
+Tor Erik Linnerud,n:tor erik linnerud,2023,1,0,0,1,0,0,0
+Sho Kato,n:sho kato,2023,1,1,0,0,0,0,0
+Evan Jones,n:evan jones,2023,1,1,0,0,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2023,1,1,1,0,0,0,0
+Mehmet Emin KARAKAS,e:emin100@gmail.com,2023,1,1,0,0,0,0,0
+Youmiu Mo,n:youmiu mo,2023,1,0,0,1,0,0,0
+e:bzm@2bz.de,e:bzm@2bz.de,2023,1,0,0,1,0,0,0
+Sehrope Sarkuni,e:sehrope@jackdb.com,2023,1,0,0,1,0,0,0
+Vibhor Kumar,n:vibhor kumar,2023,1,0,0,1,0,0,0
+Hans Buschmann,e:buschmann@nidsa.net,2023,1,0,0,1,0,0,0
+David Zhang,e:david.zhang@highgo.ca,2023,1,0,1,0,0,0,0
+Xing Guo,e:higuoxing@gmail.com,2023,1,1,0,1,0,0,0
+Oleg Tselebrovskiy,e:o.tselebrovskiy@postgrespro.ru,2023,1,1,0,0,0,0,0
+Hou Zhijie based on inputs from Sawada Masahiko,n:hou zhijie based on inputs from sawada masahiko,2023,1,1,0,0,0,0,0
+Song Hongyu,n:song hongyu,2023,1,0,0,1,0,0,0
+Xu Xingwang,n:xu xingwang,2023,1,0,0,1,0,0,0
+Andreas Scherbaum,e:ads@pgug.de,2023,1,1,0,0,0,0,0
+Artur Zakirov,e:zaartur@gmail.com,2023,1,1,0,0,0,0,0
+Anton Voloshin,e:a.voloshin@postgrespro.ru,2023,1,0,0,1,0,0,0
+Andrew Gierth,e:rhodiumtoad@postgresql.org,2023,1,0,0,1,0,0,0
+David Gilman,n:david gilman,2023,1,1,0,0,0,0,0
+Sebastien Flaesch,e:sebastien.flaesch@4js.com,2023,1,0,0,1,0,0,0
+David Kimura,n:david kimura,2023,1,0,1,1,0,0,0
+Craig Ringer,e:craig.ringer@enterprisedb.com,2023,1,1,0,0,0,0,0
+Peifeng Qiu,n:peifeng qiu,2023,1,1,0,0,0,0,0
+Thomas Habets,e:thomas@habets.se,2023,1,1,0,0,0,0,0
+Andreas Karlsson,e:andreas@proxel.se,2023,1,0,1,0,0,0,0
+Koshi Shibagaki,e:shibagaki.koshi@fujitsu.com,2023,1,1,0,0,0,0,0
+Amit Langote <amitlangote09@gmail.com,n:amit langote amitlangote gmail com,2023,1,1,0,0,0,0,0
+myzhen,e:zhenmingyang@yeah.net,2023,1,0,0,1,0,0,0
+Josef Šimánek,e:josef.simanek@gmail.com,2023,1,1,0,0,0,0,0
+Alexey Ermakov,n:alexey ermakov,2023,1,0,0,1,0,0,0
+Paul Guo,e:guopa@vmware.com,2023,1,0,0,0,0,1,0
+Jeevan Ladhe,e:jeevan.ladhe@enterprisedb.com,2023,1,0,1,0,0,0,0
+Egor Chindyaskin,e:kyzevan23@mail.ru,2023,1,0,0,1,0,0,0
+Keisuke Kuroda,e:keisuke.kuroda.3862@gmail.com,2023,1,1,0,0,0,0,0
+Reiner Peterke,e:zedaardv@drizzle.com,2023,1,0,0,1,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2023,1,0,1,0,0,0,0
+Katsuragi Yuta,n:katsuragi yuta,2023,1,1,0,0,0,0,0
+"Gunnar ""Nick"" Bluth",n:gunnar nick bluth,2023,1,0,0,1,0,0,0
+Zheng Li,e:zhengli10@gmail.com,2023,1,1,0,0,0,0,0
+samay sharma,e:smilingsamay@gmail.com,2023,1,1,0,0,0,0,0
+Maciek Sakrejda,e:maciek@pganalyze.com,2023,1,0,1,0,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2023,1,1,0,0,0,0,0
+Robins Tharakan,e:tharakan@gmail.com,2023,1,0,0,1,0,0,0
+Dmytro Astapov,e:dastapov@gmail.com,2023,1,1,0,0,0,0,0
+Laurence Parry,e:greenreaper@hotmail.com,2023,1,0,0,1,0,0,0
+Lakshmi Narayanan Sreethar,n:lakshmi narayanan sreethar,2023,1,0,0,1,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2023,1,1,0,0,0,0,0
+Noriyoshi,n1:noriyoshi,2023,1,1,0,0,0,0,0
+Arne Roland,e:a.roland@index.de,2023,1,1,0,0,0,0,0
+design inputs from Sawada Masahiko,n:design inputs from sawada masahiko,2023,1,1,0,0,0,0,0
+Hung Nguyen,n:hung nguyen,2023,1,0,0,1,0,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2024,460,330,95,36,0,3,326
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2024,366,265,77,25,0,1,345
+Michael Paquier,e:michael.paquier@gmail.com,2024,265,139,117,10,0,3,304
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2024,218,160,53,7,0,0,187
+Robert Haas,e:robertmhaas@gmail.com,2024,154,88,64,3,0,2,87
+Andres Freund,e:andres@andres@anarazel.de,2024,141,29,96,14,0,10,26
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2024,138,88,43,9,0,0,125
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2024,132,113,18,3,0,0,157
+David Rowley,e:david.rowley@2ndquadrant.com,2024,131,99,26,7,0,1,129
+Nathan Bossart,e:bossartn@amazon.com,2024,131,99,30,3,0,0,138
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2024,122,67,54,2,0,1,101
+Alexander Lakhin,e:exclusion@gmail.com,2024,117,12,14,92,1,3,0
+Noah Misch,e:noah@leadboat.com,2024,102,65,22,18,0,0,64
+Thomas Munro,e:thomas.munro@enterprisedb.com,2024,97,72,17,9,0,1,67
+jian he,e:jian.universality@gmail.com,2024,94,21,52,30,0,1,0
+Jeff Davis,e:pgsql@j-davis.com,2024,90,72,11,6,0,1,95
+Bertrand Drouvot,e:bdrouvot@amazon.com,2024,83,34,49,0,0,0,0
+Amit Kapila,e:akapila@postgresql.org,2024,81,12,70,1,0,2,90
+Bruce Momjian,e:bruce@momjian.us,2024,81,77,3,1,0,0,89
+Richard Guo,e:rguo@postgresql.org,2024,73,45,19,13,0,0,31
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2024,70,26,40,6,0,0,43
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2024,70,25,39,3,2,1,43
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2024,59,43,13,4,0,0,41
+Peter Geoghegan,e:pg@bowt.ie,2024,54,39,11,4,0,0,42
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2024,53,49,4,1,0,0,55
+John Naylor,e:john.naylor@2ndquadrant.com,2024,52,38,14,2,0,1,36
+Peter Smith,e:peter.b.smith@fujitsu.com,2024,52,18,31,6,0,0,0
+Melanie Plageman,e:melanieplageman@gmail.com,2024,51,39,10,5,0,0,18
+Jelte Fennema-Nio,e:jelte.fennema@microsoft.com,2024,50,28,19,3,0,0,0
+Vignesh C,e:vignesh21@gmail.com,2024,46,18,27,1,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2024,45,16,28,3,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2024,43,15,29,1,0,0,0
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2024,42,34,8,1,0,1,0
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2024,42,16,27,1,0,0,36
+Jacob Champion,e:pchampion@vmware.com,2024,38,19,15,4,0,0,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2024,38,8,28,2,0,0,0
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2024,38,16,20,3,0,0,0
+Aleksander Alekseev,e:aleksander@timescale.com,2024,37,9,26,1,1,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2024,36,12,23,2,0,0,0
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2024,35,11,19,6,0,0,0
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2024,34,11,21,2,1,1,0
+Andreas Karlsson,e:andreas@proxel.se,2024,32,13,20,0,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2024,32,26,5,1,0,0,26
+shveta malik,e:shveta.malik@gmail.com,2024,32,16,16,1,0,0,0
+Tender Wang,e:tndrwang@gmail.com,2024,30,17,13,4,0,1,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2024,29,17,10,1,0,1,0
+Andrey Borodin,e:amborodin86@gmail.com,2024,27,10,17,0,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2024,26,19,6,1,0,0,0
+Nazir Bilal Yavuz,e:byavuz81@gmail.com,2024,22,8,12,2,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2024,21,8,10,3,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2024,21,3,17,1,0,0,0
+Tristan Partin,e:tristan@neon.tech,2024,20,4,16,0,0,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2024,19,12,7,1,0,0,0
+Justin Pryzby,e:justin@telsasoft.com,2024,18,5,8,7,0,0,0
+Anthonin Bonnefoy,e:anthonin.bonnefoy@datadoghq.com,2024,18,18,1,2,0,0,0
+Alena Rybakina,e:lena.ribackina@yandex.ru,2024,17,4,12,1,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2024,17,3,9,4,0,1,0
+Junwang Zhao,e:zhjwpku@gmail.com,2024,15,6,8,1,0,0,0
+Japin Li,e:japinli@hotmail.com,2024,15,7,8,0,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2024,15,9,6,0,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2024,15,7,8,0,0,0,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2024,14,12,2,0,0,0,0
+Shubham Khanna,e:shubham.khanna@fujitsu.com,2024,14,5,9,0,0,0,0
+Greg Sabino Mullane,e:greg@turnstep.com,2024,13,9,5,0,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2024,13,0,12,0,0,1,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2024,13,6,7,1,0,0,8
+Laurenz Albe,e:laurenz.albe@cybertec.at,2024,13,6,7,0,0,0,0
+Kuroda Hayato,n:kuroda hayato,2024,13,6,7,0,0,0,0
+Kirill Reshke,e:reshkekirill@gmail.com,2024,12,10,2,0,0,0,0
+Erik Wienhold,e:ewie@ewie.name,2024,12,10,1,1,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2024,12,4,7,1,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2024,12,12,0,0,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2024,12,10,2,0,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2024,11,2,8,1,0,0,0
+Ilya Gladyshev,n:ilya gladyshev,2024,11,0,11,0,0,0,0
+Shlok Kyal,e:shlok.kyal.oss@gmail.com,2024,10,3,6,0,1,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2024,10,4,5,1,0,0,0
+Nisha Moond,e:nisha.moond412@gmail.com,2024,9,1,8,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2024,9,3,6,0,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2024,9,5,3,2,0,0,0
+Wolfgang Walther,e:walther@technowledgy.de,2024,8,7,0,1,0,0,0
+David Steele,e:david@pgmasters.net,2024,8,3,5,0,0,0,0
+Joseph Koshakow,e:koshy44@gmail.com,2024,7,6,1,0,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2024,7,1,5,1,0,0,0
+Sutou Kouhei,e:kou@clear-code.com,2024,7,4,3,0,0,0,0
+Zhang Mingli,e:avamingli@gmail.com,2024,7,2,5,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2024,7,0,5,2,0,0,0
+Anton A. Melnikov,e:aamelnikov@inbox.ru,2024,7,1,3,3,0,0,0
+Masahiro Ikeda,e:masahiro.ikeda@nttdata.com,2024,7,3,3,2,0,1,0
+Erik Rijkers,e:er@xs4all.nl,2024,7,1,1,5,0,0,0
+Melih Mutlu,e:m.melihmutlu@gmail.com,2024,7,3,4,0,0,0,0
+Etsuro Fujita,e:efujita@postgresql.org,2024,7,6,1,0,0,0,6
+Michael Banck,e:mbanck@debian.org,2024,6,5,0,1,0,0,0
+Karina Litskevich,e:litskevichkarina@gmail.com,2024,6,2,4,0,0,0,0
+Stepan Neretin,e:sncfmgg@gmail.com,2024,6,0,5,1,0,0,0
+Joel Jacobson,e:joel@compiler.org,2024,6,6,0,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2024,6,6,0,0,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2024,6,6,0,0,0,0,0
+Victor Yegorov,e:vyegorov@gmail.com,2024,5,0,5,0,0,0,0
+Marcos Pegoraro,e:marcos@f10.com.br,2024,5,0,1,4,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2024,5,2,2,1,0,0,4
+Xing Guo,e:higuoxing@gmail.com,2024,5,5,0,0,0,0,0
+Sami Imseih,e:simseih@amazon.com,2024,5,1,4,1,0,0,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2024,5,1,5,0,0,0,0
+Mats Kindahl,e:mats@timescale.com,2024,5,3,2,1,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2024,5,1,3,2,0,0,0
+Tomasz Rybak,e:tomasz.rybak@post.pl,2024,5,0,5,0,0,0,0
+Joe Conway,e:mail@joeconway.com,2024,5,3,2,0,0,0,3
+Jeremy Schneider,n:jeremy schneider,2024,5,0,5,0,0,0,0
+ChangAo Chen,e:cca5507@qq.com,2024,4,4,0,0,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2024,4,3,0,1,0,0,0
+Yushi Ogiwara,e:btogiwarayuushi@oss.nttdata.com,2024,4,4,0,0,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2024,4,3,1,0,0,0,0
+Anton Voloshin,e:a.voloshin@postgrespro.ru,2024,4,2,0,2,0,0,0
+Roman Zharkov,e:r.zharkov@postgrespro.ru,2024,4,0,4,0,0,0,0
+David E. Wheeler,e:david@justatheory.com,2024,4,4,0,0,0,0,0
+Jeevan Chalke,e:jeevan.chalke@enterprisedb.com,2024,4,3,1,0,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2024,4,0,4,0,0,0,0
+Nikita Malakhov,e:n.malakhov@postgrespro.ru,2024,4,0,4,0,0,0,0
+Reid Thompson,e:reid.thompson@crunchydata.com,2024,4,1,3,0,0,0,0
+Vitaly Davydov,e:v.davydov@postgrespro.ru,2024,3,1,2,1,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2024,3,2,1,0,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2024,3,0,3,0,0,0,0
+Lukas Fittl,e:lukas@fittl.com,2024,3,0,2,1,0,0,0
+Oleg Tselebrovskiy,e:o.tselebrovskiy@postgrespro.ru,2024,3,3,0,0,0,0,0
+Raghuveer Devulapalli,e:raghuveer.devulapalli@intel.com,2024,3,1,2,0,0,0,0
+Alexander Kukushkin,e:cyberdemn@gmail.com,2024,3,3,0,0,0,0,0
+Artur Zakirov,e:zaartur@gmail.com,2024,3,1,2,0,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2024,3,0,3,0,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2024,3,2,0,1,0,0,0
+Aidar Imamov,e:a.imamov@postgrespro.ru,2024,3,2,0,1,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2024,3,0,3,0,0,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2024,3,2,1,0,0,0,0
+Stephen Frost,e:sfrost@snowman.net,2024,3,0,3,0,0,0,0
+Alexander Lakhin as per buildfarm,n:alexander lakhin as per buildfarm,2024,3,0,0,3,0,0,0
+Zuming Jiang,n:zuming jiang,2024,3,0,0,3,0,0,0
+Cary Huang,e:hcary328@gmail.com,2024,3,2,1,0,0,0,0
+Greg Stark,e:stark@mit.edu,2024,3,2,1,0,0,0,0
+Yong Li,n:yong li,2024,3,0,3,0,0,0,0
+Julien Rouhaud,e:julien.rouhaud@free.fr,2024,3,1,1,1,0,0,0
+Fei Changhong,e:feichanghong@qq.com,2024,3,2,1,0,0,0,0
+Yongtao Huang,n:yongtao huang,2024,3,3,0,0,0,0,0
+Ilia Evdokimov,e:ilya.evdokimov@tantorlabs.ru,2024,2,1,1,0,0,0,0
+Andrew Kane,e:andrew@ankane.org,2024,2,0,0,2,0,0,0
+Vladlen Popolitov,e:v.popolitov@postgrespro.ru,2024,2,1,1,0,0,0,0
+Cédric Villemain,e:cedric.villemain+pgsql@abcsql.com,2024,2,0,2,0,0,0,0
+Egor Rogov,n:egor rogov,2024,2,1,0,1,0,0,0
+Sergey Prokhorenko,e:sergeyprokhorenko@yahoo.com.au,2024,2,0,2,0,0,0,0
+Przemysław Sztoch,n:przemys aw sztoch,2024,2,0,2,0,0,0,0
+Michael Christofides,e:michael@pgmustard.com,2024,2,0,2,0,0,0,0
+James Coleman,e:jtc331@gmail.com,2024,2,1,1,0,0,0,0
+Christophe Courtois,e:christophe.courtois@dalibo.com,2024,2,0,0,2,0,0,0
+Jim Nasby,e:jim.nasby@gmail.com,2024,2,0,2,0,0,0,0
+Alexander Kozhemyakin,e:a.kozhemyakin@postgrespro.ru,2024,2,0,0,2,0,0,0
+Koen De Groote,n:koen de groote,2024,2,0,0,2,0,0,0
+Will Mortensen,e:will@extrahop.com,2024,2,1,0,1,0,0,0
+David Zhang,e:david.zhang@highgo.ca,2024,2,2,0,1,0,0,0
+Benoit Lobréau,e:benoit.lobreau@dalibo.com,2024,2,2,0,0,0,0,0
+wenhui qiu,e:qiuwenhuifx@gmail.com,2024,2,0,2,0,0,0,0
+Koki Nakamura,e:btnakamurakoukil@oss.nttdata.com,2024,2,2,0,0,0,0,0
+Rafia Sabih,e:rafia.sabih@enterprisedb.com,2024,2,1,1,0,0,0,0
+Erica Zhang,e:ericazhangy2021@qq.com,2024,2,2,0,0,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2024,2,1,0,1,0,0,0
+Yuto Sasaki,n:yuto sasaki,2024,2,1,1,0,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2024,2,0,1,1,0,0,0
+Kuntal Ghosh,e:kuntalghosh.2007@gmail.com,2024,2,1,1,0,0,0,0
+Kevin Hale Boyes,n:kevin hale boyes,2024,2,0,0,2,0,0,0
+Kartyshov Ivan,e:i.kartyshov@postgrespro.ru,2024,2,2,0,0,0,0,0
+Coverity,n1:coverity,2024,2,0,0,2,0,0,0
+Dave Page,e:dpage@pgadmin.org,2024,2,0,0,2,0,0,0
+Anthony Leung,n:anthony leung,2024,2,1,1,0,0,0,0
+Donghang Lin,e:donghanglin@gmail.com,2024,2,1,1,1,0,0,0
+Markus Winand,n:markus winand,2024,2,0,0,2,0,0,0
+yajun Hu,e:1026592243@qq.com,2024,2,0,0,2,0,0,0
+Satoru Koizumi,e:koizumistr@minos.ocn.ne.jp,2024,2,1,0,1,0,0,0
+Ilyasov Ian,e:ianilyasov@outlook.com,2024,2,2,0,0,0,0,0
+Jingxian Li,e:aqktjcm@qq.com,2024,2,0,1,1,0,0,0
+Kashif Zeeshan,e:kashi.zeeshan@gmail.com,2024,2,0,2,0,0,0,0
+Yaroslav Saburov,e:y.saburov@gmail.com,2024,2,0,0,2,0,0,0
+Akash Shankaran,n:akash shankaran,2024,2,0,2,0,0,0,0
+Yurii Rashkovskii,e:yrashk@omnigres.com,2024,2,2,0,0,0,0,0
+Reviewed-by: Pavel Borisov,n:reviewed-by pavel borisov,2024,2,0,2,0,0,0,0
+Ants Aasma,e:ants.aasma@cybertec.at,2024,2,2,0,0,0,0,0
+Paul Amonson,e:paul.d.amonson@intel.com,2024,2,2,0,0,0,0,0
+Stephane Tachoires,e:stephane.tachoires@gmail.com,2024,2,0,2,0,0,0,0
+Robert Treat,e:rob@xzilla.net,2024,2,2,0,0,0,0,0
+Chris Travers,n:chris travers,2024,2,0,2,0,0,0,0
+Michael Zhilin,n:michael zhilin,2024,2,1,1,0,0,0,0
+Egor Chindyaskin,e:kyzevan23@mail.ru,2024,2,0,0,2,0,0,0
+Shihao Zhong,e:zhong950419@gmail.com,2024,2,1,1,0,0,0,0
+Kuroda,n1:kuroda,2024,2,0,2,0,0,0,0
+Hayato,n1:hayato,2024,2,0,2,0,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2024,2,2,0,0,0,0,0
+Dilip,n1:dilip,2024,2,0,2,0,0,0,0
+Xin Zhang,e:zhanghien@qq.com,2024,1,1,0,0,0,0,0
+SQLsmith,n1:sqlsmith,2024,1,0,0,1,0,0,0
+e:rootcause000@gmail.com,e:rootcause000@gmail.com,2024,1,0,0,1,0,0,0
+Nazir,n1:nazir,2024,1,0,1,0,0,0,0
+Paul Ramsey,e:pramsey@cleverelephant.ca,2024,1,0,0,1,0,0,0
+Andreas Scherbaum,e:ads@pgug.de,2024,1,0,0,1,0,0,0
+Alastair Turner,n:alastair turner,2024,1,0,1,0,0,0,0
+Ľuboslav Špilák,n:luboslav spilak,2024,1,0,0,1,0,0,0
+Adam Rauch,n:adam rauch,2024,1,0,0,1,0,0,0
+Matheus Alcantara,e:mths.dev@pm.me,2024,1,1,0,0,0,0,0
+Tofig Aliev,e:t.aliev@postgrespro.ru,2024,1,1,0,0,0,0,0
+Matthew Kim,n:matthew kim,2024,1,1,0,0,0,0,0
+Jayesh Dehankar,n:jayesh dehankar,2024,1,0,0,1,0,0,0
+Pierre Giraud,e:pierre.giraud@dalibo.com,2024,1,1,0,0,0,0,0
+Gabriele Bartolini,e:gabriele.bartolini@enterprisedb.com,2024,1,0,0,1,0,0,0
+Jingtang Zhang,e:mrdrivingduck@gmail.com,2024,1,0,0,1,0,0,0
+Erki Eessaar,e:erki.eessaar@taltech.ee,2024,1,0,0,1,0,0,0
+Ryohei Takahashi,e:r.takahashi_2@fujitsu.com,2024,1,0,1,0,0,0,0
+Karina,n1:karina,2024,1,0,1,0,0,0,0
+Sam James,e:sam@gentoo.org,2024,1,0,0,1,0,0,0
+Nikolay Shaplov,e:dhyan@nataraj.su,2024,1,0,1,0,0,0,0
+Erik Nordström,e:erik@timescale.com,2024,1,0,1,1,0,0,0
+Bastien Roucariès,e:rouca@debian.org,2024,1,0,0,0,0,1,0
+Antonin Houska,e:ah@cybertec.at,2024,1,0,0,1,0,0,0
+Boyu Yang,n:boyu yang,2024,1,1,0,0,0,0,0
+Олег Самойлов,e:splarv@ya.ru,2024,1,0,0,1,0,0,0
+Полина Бунгина,e:bungina@gmail.com,2024,1,1,0,0,0,0,0
+Nicolas Maus,n:nicolas maus,2024,1,0,0,1,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2024,1,1,0,0,0,0,0
+Webbo Han,e:1105066510@qq.com,2024,1,1,0,1,0,0,0
+e:nat@makarevitch.org,e:nat@makarevitch.org,2024,1,0,0,1,0,0,0
+Nazir Bilal Yavuzk,n:nazir bilal yavuzk,2024,1,1,0,0,0,0,0
+inputs from Tom Lane,n:inputs from tom lane,2024,1,0,1,0,0,0,0
+e:marlene.brandstaetter@cargonet.software,e:marlene.brandstaetter@cargonet.software,2024,1,0,0,1,0,0,0
+e:dwayne.towell@gmail.com,e:dwayne.towell@gmail.com,2024,1,0,0,1,0,0,0
+Agustín,n1:agustin,2024,1,0,0,1,0,0,0
+e:elionescu@yahoo.com,e:elionescu@yahoo.com,2024,1,0,0,1,0,0,0
+e:marc@msys.ch,e:marc@msys.ch,2024,1,0,0,1,0,0,0
+e:k.man.113@gmail.com,e:k.man.113@gmail.com,2024,1,0,0,1,0,0,0
+Yasir Hussain,n:yasir hussain,2024,1,0,0,1,0,0,0
+Maxim Boguk,e:maxim.boguk@gmail.com,2024,1,0,0,1,0,0,0
+e:shixiong327926@gmail.com,e:shixiong327926@gmail.com,2024,1,0,0,1,0,0,0
+Pavel Nekrasov,n:pavel nekrasov,2024,1,1,0,1,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2024,1,1,0,1,0,0,0
+Thomas Baehler,e:thomas.baehler2@sbb.ch,2024,1,0,0,1,0,0,0
+e:alvaro@datadoghq.com,e:alvaro@datadoghq.com,2024,1,0,0,1,0,0,0
+Fabio R. Sluzala,e:fabio3rs@gmail.com,2024,1,0,0,0,0,1,0
+Seino Yuki,n:seino yuki,2024,1,1,0,0,0,0,0
+Pixian Shi,n:pixian shi,2024,1,1,0,0,0,0,0
+Craig Milhiser,e:craig@milhiser.com,2024,1,0,0,1,0,0,0
+Alex Richman,n:alex richman,2024,1,0,0,1,0,0,0
+Michael Guissine,n:michael guissine,2024,1,0,0,1,0,0,0
+Avi Weinberg,n:avi weinberg,2024,1,0,0,1,0,0,0
+James Hunter,e:james.hunter.pg@gmail.com,2024,1,1,0,0,0,0,0
+David Benjamin,e:davidben@google.com,2024,1,1,0,0,0,0,0
+Daniel Gustafsson as per buildfarm,n:daniel gustafsson as per buildfarm,2024,1,0,0,1,0,0,0
+Murat Efendioğlu,n:murat efendioglu,2024,1,0,0,1,0,0,0
+Max Johnson,n:max johnson,2024,1,1,0,0,0,0,0
+Takeshi Ideriha,e:iderihatakeshi@gmail.com,2024,1,1,0,0,0,0,0
+Phil Eaton,n:phil eaton,2024,1,1,0,0,0,0,0
+Haifang Wang,e:v-haiwang@microsoft.com,2024,1,0,0,1,0,0,0
+Oleg Sibiryakov,e:o.sibiryakov@postgrespro.ru,2024,1,1,0,0,0,0,0
+wuchengwen,n1:wuchengwen,2024,1,1,0,0,0,0,0
+Yusuke Sugie,e:btsugieyuusuke@oss.nttdata.com,2024,1,0,0,1,0,0,0
+Alexander Kuznetsov,e:kuznetsovam@altlinux.org,2024,1,1,0,0,0,0,0
+VaibhaveS,n1:vaibhaves,2024,1,1,0,0,0,0,0
+Michael Harris,e:harmic@gmail.com,2024,1,1,0,0,0,0,0
+Kaido Vaikla,n:kaido vaikla,2024,1,0,0,1,0,0,0
+Ayush Vatsa,e:ayushvatsa1810@gmail.com,2024,1,1,0,0,0,0,0
+Marlene Reiterer,e:marlene.reiterer.03@gmail.com,2024,1,0,1,0,0,0,0
+Li Yong,n:li yong,2024,1,1,0,0,0,0,0
+Michail Nikolaev,e:michail.nikolaev@gmail.com,2024,1,1,0,0,0,0,0
+Anit Kapila,n:anit kapila,2024,1,0,1,0,0,0,0
+Alexander Pyhalov,e:a.yhalov@postgrespro.ru,2024,1,0,0,1,0,0,0
+Michael,n1:michael,2024,1,0,1,0,0,0,0
+e:grantgryczan@gmail.com,e:grantgryczan@gmail.com,2024,1,0,0,1,0,0,0
+Ole Peder Brandtzæg,e:olebra@samfundet.no,2024,1,1,0,0,0,0,0
+Holger Jakobs,n:holger jakobs,2024,1,0,0,1,0,0,0
+Sameer Kumar,n:sameer kumar,2024,1,1,0,0,0,0,0
+Alexey Dvoichenkov,e:alexey@hyperplane.net,2024,1,0,1,0,0,0,0
+Tels,e:nospam-pg-abuse@bloodgate.com,2024,1,0,1,0,0,0,0
+e:vrms@netcologne.de,e:vrms@netcologne.de,2024,1,0,0,1,0,0,0
+Cameron Vogt,e:cvogt@automaticcontrols.net,2024,1,0,0,1,0,0,0
+Fire Emerald,e:fire.github@gmail.com,2024,1,0,0,1,0,0,0
+Sergey Sargsyan,e:sergey.sargsyan.2001@gmail.com,2024,1,1,0,0,0,0,0
+Yogesh Sharma,n:yogesh sharma,2024,1,1,0,0,0,0,0
+Ayush Tiwari,e:ayushtiwari.slg01@gmail.com,2024,1,1,0,1,0,0,0
+e:philipp.salvisberg@gmail.com,e:philipp.salvisberg@gmail.com,2024,1,0,0,1,0,0,0
+Hugo Zhang,n:hugo zhang,2024,1,1,0,0,0,0,0
+Hironobu SUZUKI,n:hironobu suzuki,2024,1,0,0,1,0,0,0
+Sofia Kopikova,e:s.kopikova@postgrespro.ru,2024,1,1,0,0,0,0,0
+Senglee Choi,n:senglee choi,2024,1,1,0,0,0,0,0
+Dimitrios Apostolou,e:jimis@gmx.net,2024,1,0,0,1,0,0,0
+Rui Zhao,e:zhaorui126@gmail.com,2024,1,1,0,0,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2024,1,0,0,1,0,0,0
+px shi,n:px shi,2024,1,0,0,1,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2024,1,0,0,1,0,0,0
+Onder Kalaci,e:onderk@microsoft.com,2024,1,0,1,0,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2024,1,0,1,0,0,0,0
+Ted Yu,e:yuzhihong@gmail.com,2024,1,0,1,0,0,0,0
+Katsuragi Yuta,n:katsuragi yuta,2024,1,0,1,0,0,0,0
+Keisuke Kuroda,e:keisuke.kuroda.3862@gmail.com,2024,1,1,0,0,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2024,1,0,0,0,0,1,0
+Yuki Fujii,n:yuki fujii,2024,1,0,1,0,0,0,0
+Drew Callahan,n:drew callahan,2024,1,0,0,1,0,0,0
+Hajime Matsunaga,n:hajime matsunaga,2024,1,1,0,0,0,0,0
+Rintaro Ikeda,e:ikedarintarof@oss.nttdata.com,2024,1,1,0,0,0,0,0
+Thom Brown,e:thom@linux.com,2024,1,0,0,0,0,1,0
+David Geier,e:geidav.pg@gmail.com,2024,1,1,0,0,0,0,0
+Jelte Fenema-Nio,n:jelte fenema-nio,2024,1,1,0,0,0,0,0
+some editing by me.,n:some editing by me,2024,1,1,0,0,0,0,0
+Stan Hu,e:stanhu@gmail.com,2024,1,0,0,1,0,0,0
+Cees van Zeeland,e:cees.van.zeeland@freedom.nl,2024,1,0,0,1,0,0,0
+Isaac Morland,e:isaac.morland@gmail.com,2024,1,0,1,0,0,0,0
+Neil Conway,e:neil.conway@gmail.com,2024,1,0,1,0,0,0,0
+Bowen Shi,e:zxwsbg12138@gmail.com,2024,1,0,0,1,0,0,0
+Muralikrishna Bandaru,e:muralikrishna.bandaru@enterprisedb.com,2024,1,0,0,1,0,0,0
+Kohei KaiGai,e:kaigai@heterodb.com,2024,1,0,0,1,0,0,0
+Chapman Flack,e:chap@anastigmatix.net,2024,1,0,1,0,0,0,0
+Floris Van Nee,n:floris van nee,2024,1,1,0,0,0,0,0
+Stéphane Schildknecht,e:sas.postgresql@gmail.com,2024,1,0,0,1,0,0,0
+torikoshia,n1:torikoshia,2024,1,0,0,1,0,0,0
+Alexey Palazhchenko,n:alexey palazhchenko,2024,1,0,0,1,0,0,0
+Pantelis Theodosiou,n:pantelis theodosiou,2024,1,0,0,1,0,0,0
+Elena Indrupskaya,n:elena indrupskaya,2024,1,1,0,1,0,0,0
+Colin Caine,e:cmcaine@gmail.com,2024,1,0,0,1,0,0,0
+Andrew Bille,e:andrewbille@gmail.com,2024,1,0,0,1,0,0,0
+Zubeyr Eryilmaz,n:zubeyr eryilmaz,2024,1,0,0,1,0,0,0
+Jess Davis,n:jess davis,2024,1,0,1,0,0,0,0
+Palak Chaturvedi,e:chaturvedipalak1911@gmail.com,2024,1,1,0,0,0,0,0
+cosmetic adjustments by me,n:cosmetic adjustments by me,2024,1,1,0,0,0,0,0
+Quan Zongliang,e:quanzongliang@yeah.net,2024,1,0,0,0,1,0,0
+Kambam Vinay,n:kambam vinay,2024,1,1,0,0,0,0,0
+Peter Eisentraunt,n:peter eisentraunt,2024,1,0,1,0,0,0,0
+e:s.bailey@chorusintel.com,e:s.bailey@chorusintel.com,2024,1,0,0,1,0,0,0
+Mason Sharp,n:mason sharp,2024,1,0,1,0,0,0,0
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2024,1,1,0,0,0,0,0
+The authors themselves,n:the authors themselves,2024,1,0,1,0,0,0,0
+Tom Lane as per coverity,n:tom lane as per coverity,2024,1,0,0,1,0,0,0
+Svetlana Derevyanko,n:svetlana derevyanko,2024,1,1,0,0,0,0,0
+Bartosz Chroł,e:bartosz.chrol@handen.pl,2024,1,0,0,1,0,0,0
+Kirk Wolak,n:kirk wolak,2024,1,0,1,0,0,0,0
+Steve Chavez,e:steve@supabase.io,2024,1,1,0,0,0,0,0
+Tatsuro Yamada,e:tatsuro.yamada.tf@nttcom.co.jp,2024,1,1,0,0,0,0,0
+Denis Laxalde,e:denis.laxalde@dalibo.com,2024,1,0,1,0,0,0,0
+e:doughale@gmail.com,e:doughale@gmail.com,2024,1,0,0,1,0,0,0
+Tristen Raab,e:tristen.raab@highgo.ca,2024,1,0,1,0,0,0,0
+Michał Kłeczek,e:michal@kleczek.org,2024,1,0,0,1,0,0,0
+Elizabeth Christensen,n:elizabeth christensen,2024,1,1,0,0,0,0,0
+Horst Reiterer,n:horst reiterer,2024,1,0,0,1,0,0,0
+Tung Nguyen,n:tung nguyen,2024,1,1,0,0,0,0,0
+John Morris,n:john morris,2024,1,1,0,0,0,0,0
+Andrew Atkinson,n:andrew atkinson,2024,1,0,0,0,0,1,0
+Gilles Darold,e:gilles@darold.net,2024,1,0,1,0,0,0,0
+Anastasia Lubennikova,e:a.lubennikova@postgrespro.ru,2024,1,0,1,0,0,0,0
+Ivan Lazarev,n:ivan lazarev,2024,1,0,1,0,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2024,1,0,1,0,0,0,0
+Hou Zhijie based on design inputs by Masahiko Sawada,n:hou zhijie based on design inputs by masahiko sawada,2024,1,1,0,0,0,0,0
+Shveta Malik based on suggestions by Robert Haas,n:shveta malik based on suggestions by robert haas,2024,1,1,0,0,0,0,0
+bt23nguyent,e:bt23nguyent@oss.nttdata.com,2024,1,0,1,0,0,0,0
+Yuhang Qiu,e:iamqyh@gmail.com,2024,1,0,1,0,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2024,1,0,1,0,0,0,0
+Pavlo Golub,e:pavlo.golub@gmail.com,2024,1,1,0,0,0,0,0
+Hanefi Onaldi,e:hanefi.onaldi@microsoft.com,2024,1,0,0,1,0,0,0
+Ajin Cherian based on an earlier version by Peter Eisentraut,n:ajin cherian based on an earlier version by peter eisentraut,2024,1,1,0,0,0,0,0
+Mark Guertin,e:markguertin@gmail.com,2024,1,0,0,1,0,0,0
+Tobias Bussmann,e:t.bussmann@gmx.net,2024,1,0,1,0,0,0,0
+Tim,e:tim.needham2@gmail.com,2024,1,0,0,1,0,0,0
+e:konkove@gmail.com,e:konkove@gmail.com,2024,1,0,0,1,0,0,0
+Roman Lozko,e:lozko.roma@gmail.com,2024,1,0,0,1,0,0,0
+Alexander Kuzmenkov,e:a.kuzmenkov@postgrespro.ru,2024,1,1,0,0,0,0,0
+Mikhail Gribkov,e:youzhick@gmail.com,2024,1,1,0,0,0,0,0
+Gilles Parc,e:gparc@free.fr,2024,1,0,0,1,0,0,0
+Jubilee Young,n:jubilee young,2024,1,1,0,0,0,0,0
+Eric Ridge,e:eebbrr@gmail.com,2024,1,0,1,0,0,0,0
+Wang wei,n:wang wei,2024,1,1,0,0,0,0,0
+Matthias Kuhn,e:matthias@opengis.ch,2024,1,0,0,1,0,0,0
+e:alaa.attya91@gmail.com,e:alaa.attya91@gmail.com,2024,1,0,0,1,0,0,0
+Amadeo Gallardo,n:amadeo gallardo,2024,1,0,0,1,0,0,0
+comment fixes from Ashutosh Bapat.,n:comment fixes from ashutosh bapat,2024,1,1,0,0,0,0,0
+doc suggestions from Ashutosh Bapat.,n:doc suggestions from ashutosh bapat,2024,1,1,0,0,0,0,0
+Claudio Freire,n:claudio freire,2024,1,0,1,0,0,0,0
+Gavin Flower,n:gavin flower,2024,1,0,1,0,0,0,0
+Abhijit Menon-Sen,n:abhijit menon-sen,2024,1,0,1,0,0,0,0
+e:digitaldog4@gmail.com,e:digitaldog4@gmail.com,2024,1,0,0,1,0,0,0
+Damir Belyalov,n:damir belyalov,2024,1,1,0,0,0,0,0
+Alex Shulgin,n:alex shulgin,2024,1,1,0,0,0,0,0
+Anton Kirilov,n:anton kirilov,2024,1,1,0,0,0,0,0
+Denis,n1:denis,2024,1,0,1,0,0,0,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2024,1,1,0,0,0,0,0
+Karen Talarico,n:karen talarico,2024,1,0,0,1,0,0,0
+Vojtěch Beneš,n:vojtech benes,2024,1,0,0,1,0,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2025,545,282,210,52,4,15,348
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2025,353,256,87,9,0,5,357
+Michael Paquier,e:michael.paquier@gmail.com,2025,256,134,114,8,1,2,358
+Andres Freund,e:andres@andres@anarazel.de,2025,254,128,89,26,3,13,144
+Chao Li,e:1356863904@qq.com,2025,188,28,155,3,2,1,0
+Nathan Bossart,e:bossartn@amazon.com,2025,168,125,40,6,1,1,166
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2025,149,74,71,6,1,1,131
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2025,141,58,82,2,0,2,105
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2025,127,63,62,4,0,0,108
+David Rowley,e:david.rowley@2ndquadrant.com,2025,123,67,43,15,3,4,92
+Bertrand Drouvot,e:bdrouvot@amazon.com,2025,122,64,57,2,0,0,0
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2025,113,60,48,2,0,4,88
+Amit Kapila,e:akapila@postgresql.org,2025,109,4,106,1,0,0,105
+Jeff Davis,e:pgsql@j-davis.com,2025,107,89,16,1,0,1,101
+jian he,e:jian.universality@gmail.com,2025,106,50,36,29,0,3,0
+Noah Misch,e:noah@leadboat.com,2025,101,30,63,16,0,1,27
+Melanie Plageman,e:melanieplageman@gmail.com,2025,96,62,28,7,3,0,65
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2025,92,27,65,1,0,0,65
+Robert Haas,e:robertmhaas@gmail.com,2025,91,29,56,6,1,3,39
+Thomas Munro,e:thomas.munro@enterprisedb.com,2025,89,61,20,7,1,3,52
+Jacob Champion,e:pchampion@vmware.com,2025,77,51,25,4,0,1,36
+Richard Guo,e:rguo@postgresql.org,2025,74,47,19,6,1,3,52
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2025,74,24,42,7,2,1,43
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2025,72,29,41,2,0,0,0
+Vignesh C,e:vignesh21@gmail.com,2025,70,31,37,4,0,0,0
+Bruce Momjian,e:bruce@momjian.us,2025,67,65,2,0,0,0,80
+Nazir Bilal Yavuz,e:byavuz81@gmail.com,2025,64,36,28,0,1,0,0
+Peter Geoghegan,e:pg@bowt.ie,2025,62,47,13,3,0,0,47
+Sami Imseih,e:simseih@amazon.com,2025,62,31,31,5,0,0,0
+Peter Smith,e:peter.b.smith@fujitsu.com,2025,60,19,38,4,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2025,56,35,22,3,0,0,35
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2025,55,33,25,0,0,0,62
+Kirill Reshke,e:reshkekirill@gmail.com,2025,54,10,41,4,0,0,0
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2025,53,18,32,5,1,0,0
+Alexander Lakhin,e:exclusion@gmail.com,2025,53,3,6,44,1,2,0
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2025,49,33,13,3,0,2,0
+Corey Huinker,e:corey.huinker@gmail.com,2025,45,31,14,0,0,0,0
+Tender Wang,e:tndrwang@gmail.com,2025,42,17,21,2,0,3,0
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2025,39,18,20,1,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2025,38,7,29,2,0,1,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2025,38,17,21,2,0,0,0
+Laurenz Albe,e:laurenz.albe@cybertec.at,2025,36,14,21,2,0,0,0
+Xuneng Zhou,e:xunengzhou@gmail.com,2025,36,17,21,0,0,0,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2025,35,23,11,2,0,0,0
+shveta malik,e:shveta.malik@gmail.com,2025,35,6,29,0,0,0,0
+Andrey Borodin,e:amborodin86@gmail.com,2025,35,10,24,2,0,1,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2025,35,5,30,2,0,0,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2025,34,19,10,6,1,0,33
+Jelte Fennema-Nio,e:jelte.fennema@microsoft.com,2025,33,17,13,5,0,0,0
+John Naylor,e:john.naylor@2ndquadrant.com,2025,31,12,19,0,0,0,24
+Matheus Alcantara,e:mths.dev@pm.me,2025,30,12,18,0,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2025,30,6,25,0,0,0,0
+Aleksander Alekseev,e:aleksander@timescale.com,2025,29,16,12,1,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2025,28,10,12,10,1,0,0
+Robert Treat,e:rob@xzilla.net,2025,27,7,20,0,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2025,27,6,21,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2025,27,17,7,3,0,0,0
+Shlok Kyal,e:shlok.kyal.oss@gmail.com,2025,26,17,8,0,1,0,0
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2025,26,16,9,2,1,0,22
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2025,24,17,6,3,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2025,24,23,1,0,0,0,0
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2025,22,12,7,4,0,0,0
+Japin Li,e:japinli@hotmail.com,2025,21,12,8,1,0,0,0
+Junwang Zhao,e:zhjwpku@gmail.com,2025,18,5,13,2,1,0,0
+Anthonin Bonnefoy,e:anthonin.bonnefoy@datadoghq.com,2025,18,14,3,2,0,0,0
+Nisha Moond,e:nisha.moond412@gmail.com,2025,18,6,11,0,1,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2025,17,11,5,2,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2025,17,11,3,4,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2025,16,6,9,1,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2025,16,9,6,1,0,0,11
+Mihail Nikalayeu,e:mihailnikalayeu@gmail.com,2025,15,11,3,1,0,0,0
+Jim Jones,e:jim.jones@uni-muenster.de,2025,15,2,12,2,0,0,0
+Ilia Evdokimov,e:ilya.evdokimov@tantorlabs.ru,2025,15,9,6,0,0,0,0
+Alena Rybakina,e:lena.ribackina@yandex.ru,2025,15,5,11,0,0,0,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2025,13,6,4,1,1,1,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2025,13,1,11,1,0,0,0
+Arseniy Mukhin,e:arseniy.mukhin.dev@gmail.com,2025,13,7,5,1,0,0,0
+Greg Burd,e:greg@burd.me,2025,13,8,5,0,0,0,0
+Michael Banck,e:mbanck@debian.org,2025,12,6,5,0,0,1,0
+Etsuro Fujita,e:efujita@postgresql.org,2025,12,11,2,1,0,0,12
+Greg Sabino Mullane,e:greg@turnstep.com,2025,12,2,10,0,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2025,12,2,10,2,0,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2025,11,6,4,2,0,0,0
+wenhui qiu,e:qiuwenhuifx@gmail.com,2025,11,0,11,0,0,0,0
+Srinath Reddy Sadipiralla,e:srinath2133@gmail.com,2025,11,2,9,0,0,0,0
+Masahiro Ikeda,e:masahiro.ikeda@nttdata.com,2025,11,4,6,0,0,1,0
+Bryan Green,e:dbryan.green@gmail.com,2025,10,7,3,0,0,0,0
+Andreas Karlsson,e:andreas@proxel.se,2025,10,3,7,0,0,0,0
+David Geier,e:geidav.pg@gmail.com,2025,10,9,1,0,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2025,10,7,3,0,0,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2025,10,2,6,1,2,0,0
+Noboru Saito,e:noborusai@gmail.com,2025,9,7,0,2,0,0,0
+Antonin Houska,e:ah@cybertec.at,2025,9,4,4,2,0,0,0
+Alexandra Wang,e:alexandra.wang.oss@gmail.com,2025,9,1,8,0,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2025,9,1,8,0,0,0,0
+Robins Tharakan,e:tharakan@gmail.com,2025,9,2,0,7,0,0,0
+Mircea Cadariu,e:cadariu.mircea@gmail.com,2025,8,3,5,0,0,0,0
+Erik Wienhold,e:ewie@ewie.name,2025,8,7,2,0,0,0,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2025,8,4,2,1,1,0,0
+Florents Tselai,e:florents.tselai@gmail.com,2025,8,6,2,0,0,0,0
+ChangAo Chen,e:cca5507@qq.com,2025,7,6,2,1,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2025,7,4,3,0,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2025,7,1,1,4,0,1,0
+Steven Niu,e:niushiji@highgo.com,2025,7,2,4,1,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2025,7,2,5,1,0,0,0
+Jacob Brazeal,e:jacob.brazeal@gmail.com,2025,7,6,1,1,0,0,0
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2025,6,3,3,0,0,0,0
+Frédéric Yhuel,e:frederic.yhuel@dalibo.com,2025,6,4,1,2,0,0,0
+David E. Wheeler,e:david@justatheory.com,2025,6,1,5,0,0,0,0
+Julien Rouhaud,e:julien.rouhaud@free.fr,2025,6,4,2,0,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2025,6,3,2,1,0,0,0
+Ryo Kanbayashi,e:kanbayashi.dev@gmail.com,2025,6,6,0,0,0,0,0
+Joe Conway,e:mail@joeconway.com,2025,6,4,3,0,0,0,3
+Naga Appani,e:nagnrik@gmail.com,2025,5,4,1,0,0,0,0
+Man Zeng,e:zengman@halodbtech.com,2025,5,2,1,2,0,0,0
+Shubham Khanna,e:shubham.khanna@fujitsu.com,2025,5,5,0,0,0,0,0
+Victor Yegorov,e:vyegorov@gmail.com,2025,5,0,4,0,0,1,0
+Vitaly Davydov,e:v.davydov@postgrespro.ru,2025,5,4,1,0,0,0,0
+Yuhang Qiu,e:iamqyh@gmail.com,2025,5,1,3,1,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2025,5,1,0,4,0,0,0
+Stepan Neretin,e:sncfmgg@gmail.com,2025,5,1,4,0,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2025,5,2,2,2,0,0,5
+Zhang Mingli,e:avamingli@gmail.com,2025,5,3,2,0,0,0,0
+Nikhil Kumar Veldanda,e:veldanda.nikhilkumar17@gmail.com,2025,5,5,0,0,0,0,0
+Alexander Pyhalov,e:a.yhalov@postgrespro.ru,2025,5,4,1,0,0,0,0
+Bernd Helmle,e:mailings@oopsware.de,2025,5,4,0,1,0,0,0
+David Steele,e:david@pgmasters.net,2025,5,2,3,1,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2025,5,1,3,1,0,0,0
+Mahendra Singh Thalor,e:mahi6run@gmail.com,2025,5,5,0,0,0,0,0
+Sutou Kouhei,e:kou@clear-code.com,2025,5,3,2,0,0,0,0
+Daisuke Higuchi,e:higudai@amazon.com,2025,4,3,0,2,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2025,4,3,1,0,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2025,4,0,4,0,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2025,4,3,1,0,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2025,4,0,4,0,0,0,0
+Justin Pryzby,e:justin@telsasoft.com,2025,4,0,4,0,0,0,0
+Aidar Imamov,e:a.imamov@postgrespro.ru,2025,4,1,3,0,0,0,0
+Joseph Koshakow,e:koshy44@gmail.com,2025,4,0,4,0,0,0,0
+Viktor Holmberg,e:v@viktorh.net,2025,4,1,3,1,0,0,0
+Joel Jacobson,e:joel@compiler.org,2025,4,1,3,0,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2025,4,2,2,0,0,0,0
+Daniil Davydov,e:3danissimo@gmail.com,2025,4,4,0,0,0,0,0
+Fei Changhong,e:feichanghong@qq.com,2025,4,0,2,2,0,0,0
+Kevin K Biju,e:kevinkbiju@gmail.com,2025,4,2,1,2,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2025,4,1,1,1,1,0,0
+Marcos Pegoraro,e:marcos@f10.com.br,2025,4,2,1,1,0,0,0
+Rustam ALLAKOV,e:rustamallakov@gmail.com,2025,4,0,4,0,0,0,0
+Evgeniy Gorbanev,e:gorbanev.es@gmail.com,2025,4,1,0,3,0,0,0
+Dave Cramer,e:davecramer@gmail.com,2025,4,3,0,1,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2025,4,1,3,0,0,0,0
+Lukas Fittl,e:lukas@fittl.com,2025,4,3,1,0,0,0,0
+Benoit Lobréau,e:benoit.lobreau@dalibo.com,2025,4,1,2,0,1,0,0
+Suraj Kharage,e:suraj.kharage@enterprisedb.com,2025,4,2,1,1,0,0,0
+Dimitrios Apostolou,e:jimis@gmx.net,2025,3,1,0,2,0,0,0
+Yu Wang,e:wangyu_runtime@163.com,2025,3,0,3,0,0,0,0
+Rafia Sabih,e:rafia.sabih@enterprisedb.com,2025,3,2,1,0,0,0,0
+Yuefei Shi,e:shiyuefei1004@gmail.com,2025,3,0,3,0,0,0,0
+Sergey Tatarintsev,e:s.tatarintsev@postgrespro.ru,2025,3,1,0,2,0,0,0
+Kartyshov Ivan,e:i.kartyshov@postgrespro.ru,2025,3,3,0,0,0,0,0
+Alexander Kukushkin,e:cyberdemn@gmail.com,2025,3,1,2,1,0,0,0
+Jeff Janes,e:jeff.janes@gmail.com,2025,3,0,0,3,0,0,0
+Vik Fearing,e:vik.fearing@2ndquadrant.com,2025,3,0,3,0,0,0,0
+Sadhuprasad Patro,e:b.sadhu@gmail.com,2025,3,3,0,0,0,0,0
+Haiyang Li,e:mohen.lhy@alibaba-inc.com,2025,3,2,1,2,0,0,0
+Nitin Motiani,e:nitinmotiani@google.com,2025,3,1,2,0,0,0,0
+Oleg Tselebrovskiy,e:o.tselebrovskiy@postgrespro.ru,2025,3,3,0,0,0,0,0
+Jingtang Zhang,e:mrdrivingduck@gmail.com,2025,3,2,1,0,0,0,0
+Dmitry Kovalenko,e:d.kovalenko@postgrespro.ru,2025,3,2,0,2,0,0,0
+Andrew Jackson,e:andrewjackson947@gmail.com,2025,3,3,0,0,0,0,0
+Ivan Kush,e:ivan.kush@tantorlabs.com,2025,3,0,3,1,0,0,0
+Raghuveer Devulapalli,e:raghuveer.devulapalli@intel.com,2025,3,1,2,0,1,1,0
+Nikita Kalinin,e:n.kalinin@postgrespro.ru,2025,3,0,0,3,0,0,0
+Wolfgang Walther,e:walther@technowledgy.de,2025,3,0,1,2,0,0,0
+Dave Page,e:dpage@pgadmin.org,2025,3,1,1,1,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2025,3,0,2,1,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2025,3,2,0,1,0,0,0
+Anton A. Melnikov,e:aamelnikov@inbox.ru,2025,3,1,0,2,0,0,0
+Yu Liang,e:luy70@psu.edu,2025,3,0,0,3,0,0,0
+"e:""chiranmoy.bhattacharya@fujitsu.com""","e:""chiranmoy.bhattacharya@fujitsu.com""",2025,3,2,1,0,0,0,0
+Alex Friedman,e:alexf01@gmail.com,2025,3,3,0,0,0,0,0
+Umar Hayat,e:postgresql.wizard@gmail.com,2025,3,3,0,0,0,0,0
+Maciek Sakrejda,e:maciek@pganalyze.com,2025,3,0,2,1,1,0,0
+Jakob Egger,e:jakob@eggerapps.at,2025,3,0,3,0,0,0,0
+Vladlen Popolitov,e:v.popolitov@postgrespro.ru,2025,3,2,1,0,0,0,0
+Evan Si,e:evsi@amazon.com,2025,2,0,0,2,0,0,0
+Haowu Ge,e:gehaowu@bitmoe.com,2025,2,0,0,2,0,0,0
+Bernice Southey,e:bernice.southey@gmail.com,2025,2,1,0,2,0,0,0
+Zsolt Parragi,e:zsolt.parragi@cybertec.at,2025,2,2,0,0,0,0,0
+Ilyasov Ian,e:ianilyasov@outlook.com,2025,2,1,0,1,0,0,0
+Surya Poondla,e:s_poondla@apple.com,2025,2,0,1,1,0,0,0
+Stephane Tachoires,e:stephane.tachoires@gmail.com,2025,2,0,2,0,0,0,0
+"""suyu.cmj""",e:mengjuan.cmj@alibaba-inc.com,2025,2,0,0,2,0,0,0
+Dmitry Yurichev,e:dsy.075@yandex.ru,2025,2,0,1,1,0,0,0
+Ivan Bykov,e:i.bykov@modernsys.ru,2025,2,1,1,0,0,0,0
+Cary Huang,e:hcary328@gmail.com,2025,2,1,1,0,0,0,0
+Holger Hoffstätte,e:holger@applied-asynchrony.com,2025,2,2,0,0,0,0,0
+GaoZengqi,e:pgf00a@gmail.com,2025,2,0,0,2,0,0,0
+Josef Šimánek,e:josef.simanek@gmail.com,2025,2,0,2,0,0,0,0
+Karina Litskevich,e:litskevichkarina@gmail.com,2025,2,2,0,0,0,0,0
+Mats Kindahl,e:mats@timescale.com,2025,2,2,0,0,0,0,0
+Tristan Partin,e:tristan@neon.tech,2025,2,0,2,0,0,0,0
+John Hsu,e:johnhyvr@gmail.com,2025,2,2,0,0,0,0,0
+Justin Kwan,e:justinpkwan@outlook.com,2025,2,2,0,0,0,0,0
+Melih Mutlu,e:m.melihmutlu@gmail.com,2025,2,0,2,0,0,0,0
+Yuri Zamyatin,e:yuri@yrz.am,2025,2,0,0,2,0,0,0
+Mikhail Gribkov,e:youzhick@gmail.com,2025,2,2,0,0,0,0,0
+Pavel Luzanov,e:p.luzanov@postgrespro.ru,2025,2,0,1,1,0,0,0
+Keisuke Kuroda,e:keisuke.kuroda.3862@gmail.com,2025,2,0,2,0,0,0,0
+Zane Duffield,e:duffieldzane@gmail.com,2025,2,0,0,2,0,0,0
+Dmitry Mityugov,e:d.mityugov@postgrespro.ru,2025,2,1,0,1,1,0,0
+Sophie Alpert,e:pg@sophiebits.com,2025,2,2,0,2,0,0,0
+Dipesh Dhameliya,e:dipeshdhameliya125@gmail.com,2025,2,1,0,1,0,0,0
+Dominique Devienne,e:ddevienne@gmail.com,2025,2,0,0,2,0,0,0
+Natalya Aksman,e:natalya@timescale.com,2025,2,0,0,2,0,0,0
+Tim Wood,e:washwithcare@gmail.com,2025,2,0,0,2,0,0,0
+Dimitri Fontaine,e:dimitri@2ndquadrant.fr,2025,2,2,0,0,0,0,0
+Alexander Kuznetsov,e:kuznetsovam@altlinux.org,2025,2,2,0,0,0,0,0
+Patrick Stählin,e:me@packi.ch,2025,2,2,0,0,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2025,2,1,1,0,0,0,0
+Hannu Krosing,e:hannuk@google.com,2025,2,1,1,1,0,0,0
+Torsten Förtsch,e:tfoertsch123@gmail.com,2025,2,2,0,0,0,0,0
+Gunnar Morling,e:gunnar.morling@googlemail.com,2025,2,0,1,1,0,0,0
+Shihao Zhong,e:zhong950419@gmail.com,2025,2,1,0,1,0,0,0
+Soumyadeep Chakraborty,e:soumyadeep2007@gmail.com,2025,2,0,0,1,1,0,0
+Duncan Sands,e:duncan.sands@deepbluecap.com,2025,2,0,0,2,0,0,0
+TAKATSUKA Haruka,e:harukat@sraoss.co.jp,2025,2,1,1,1,0,0,0
+Alexander Kozhemyakin,e:a.kozhemyakin@postgrespro.ru,2025,2,0,0,2,0,0,0
+Chapman Flack,e:chap@anastigmatix.net,2025,2,0,1,2,0,0,0
+Vinod Sridharan,e:vsridh90@gmail.com,2025,2,2,0,1,0,0,0
+Yaroslav Saburov,e:y.saburov@gmail.com,2025,2,0,0,2,0,0,0
+Maksim Korotkov,e:m.korotkov@postgrespro.ru,2025,2,0,0,2,0,0,0
+David Rowley <drowleyml@gmail.com,n:david rowley drowleyml gmail com,2025,2,2,0,0,0,0,0
+Maksim Melnikov,e:m.melnikov@postgrespro.ru,2025,2,2,0,0,0,0,0
+Thom Brown,e:thom@linux.com,2025,2,1,0,0,1,0,0
+newtglobal postgresql_contributors,e:postgresql_contributors@newtglobalcorp.com,2025,2,0,1,0,1,0,0
+Triveni N,e:triveni.n@enterprisedb.com,2025,2,0,0,0,2,0,0
+José Villanova,e:jose.arthur@gmail.com,2025,2,0,2,0,0,0,0
+Navneet Kumar,e:thanit3111@gmail.com,2025,2,0,2,0,0,0,0
+Yurii Rashkovskii,e:yrashk@omnigres.com,2025,2,1,1,0,0,0,0
+Roman Zharkov,e:r.zharkov@postgrespro.ru,2025,2,1,0,1,0,0,0
+Alexander Borisov,e:lex.borisov@gmail.com,2025,2,1,1,0,0,0,0
+Nikolay Shaplov,e:dhyan@nataraj.su,2025,2,2,0,0,0,0,0
+Shinoda,n1:shinoda,2025,2,2,0,0,0,0,0
+Hunaid Sohail,e:hunaidpgml@gmail.com,2025,2,2,0,0,0,0,0
+Virender Singla,e:virender.cse@gmail.com,2025,2,0,0,2,0,0,0
+Greg Stark,e:stark@mit.edu,2025,2,0,2,0,0,0,0
+Sergey Belyashov,e:sergey.belyashov@gmail.com,2025,2,0,0,2,0,0,0
+Lukas Fitti,n:lukas fitti,2025,2,2,0,0,0,0,0
+Davinder Singh,e:davinder.singh@enterprisedb.com,2025,2,1,0,0,1,0,0
+Pradeep Kumar,e:spradeepkumar29@gmail.com,2025,1,0,1,0,0,0,0
+Jinhui Lai,e:jinhui.lai@qq.com,2025,1,0,0,1,0,0,0
+JiaoShuntian,e:jiaoshuntian@gmail.com,2025,1,1,0,0,0,0,0
+Marian MULLER REBEYROL,e:marian.muller@serli.com,2025,1,0,0,1,0,0,0
+Shixin Wang,e:wang-shi-xin@outlook.com,2025,1,0,1,0,0,0,0
+Zizhen Qiao,e:zizhen_qiao@163.com,2025,1,1,0,0,0,0,0
+Ignat Remizov,n:ignat remizov,2025,1,1,0,1,0,0,0
+Jasper Smit,e:jasper.smit@servicenow.com,2025,1,1,0,0,0,0,0
+Tenglong Gu,e:brucegu@amazon.com,2025,1,0,0,1,0,0,0
+Julien Tachoires,e:julien@tachoires.me,2025,1,1,0,0,0,0,0
+Mikael Gustavsson,e:mikael.gustavsson@smhi.se,2025,1,1,0,0,0,0,0
+Xingbin She,e:xingbin.she@qq.com,2025,1,1,0,0,0,0,0
+Artem Gavrilov,e:artem.gavrilov@percona.com,2025,1,0,1,0,0,0,0
+Zhijie Hou  <houzj.fnst@fujitsu.com,n:zhijie hou houzj fnst fujitsu com,2025,1,0,1,0,0,0,0
+tianbing,e:tian_bing_0531@163.com,2025,1,0,1,0,0,0,0
+Feilong Meng,e:feelingmeng@foxmail.com,2025,1,1,0,0,0,0,0
+Jeevan Chalke,e:jeevan.chalke@enterprisedb.com,2025,1,1,0,0,0,0,0
+Yilin Zhang,e:jiezhilove@126.com,2025,1,0,1,0,0,0,0
+Torsten Rupp,e:torsten.rupp@gmx.net,2025,1,0,0,1,0,0,0
+Chao Li <li.evan.chao@gmail.com,n:chao li li evan chao gmail com,2025,1,0,1,0,0,0,0
+Bryan Fox,e:bryfox@gmail.com,2025,1,0,0,1,0,0,0
+VASUKI M,e:vasukim1992002@gmail.com,2025,1,1,0,0,0,0,0
+Oleg Ivanov,e:o15611@gmail.com,2025,1,0,0,1,0,0,0
+Bob Kline,e:bkline@rksystems.com,2025,1,0,0,1,0,0,0
+Adam Warland,e:adam.warland@infor.com,2025,1,0,0,1,0,0,0
+Arne Roland,e:a.roland@index.de,2025,1,0,1,0,0,0,0
+Potapov Alexander,e:a.potapov@postgrespro.com,2025,1,1,0,0,0,0,0
+Coverity,n1:coverity,2025,1,0,0,1,0,0,0
+Birler,n1:birler,2025,1,0,0,1,0,0,0
+Altan Birler,e:altan.birler@tum.de,2025,1,0,0,1,0,0,0
+Pavlo Golub,e:pavlo.golub@gmail.com,2025,1,0,1,0,0,0,0
+Stéphane Schildknecht,e:sas.postgresql@gmail.com,2025,1,0,1,0,0,0,0
+Sergei Glukhov,e:s.glukhov@postgrespro.ru,2025,1,0,0,1,0,0,0
+Haruna Miwa,e:miwa@sraoss.co.jp,2025,1,1,0,0,0,0,0
+Neil Chen,e:carpenter.nail.cz@gmail.com,2025,1,0,1,0,0,0,0
+idea from David Rowley,n:idea from david rowley,2025,1,1,0,0,0,0,0
+Oleg Sibiryakov,e:o.sibiryakov@postgrespro.ru,2025,1,1,0,0,0,0,0
+Shinya Sugamoto,e:shinya34892@gmail.com,2025,1,1,0,0,0,0,0
+Kamil Monicz,e:kamil@monicz.dev,2025,1,0,0,1,0,0,0
+Rambabu V,n:rambabu v,2025,1,0,0,1,0,0,0
+e:<emorgunov@mail.ru>,e:<emorgunov@mail.ru>,2025,1,0,0,1,0,0,0
+Gilles Parc,e:gparc@free.fr,2025,1,0,0,1,0,0,0
+Manni Wood,e:manni.wood@enterprisedb.com,2025,1,1,0,0,0,0,0
+Nishant Sharma,e:nishant.sharma@enterprisedb.com,2025,1,1,0,0,0,0,0
+Vaibhav Dalvi,e:vaibhav.dalvi@enterprisedb.com,2025,1,0,1,0,0,0,0
+Aleksey Solovev,n:aleksey solovev,2025,1,0,0,1,0,0,0
+Tatsuya Kawata,e:kawatatatsuya0913@gmail.com,2025,1,1,0,0,0,0,0
+Rintaro Ikeda,e:ikedarintarof@oss.nttdata.com,2025,1,1,0,0,0,0,0
+Emmanuel Sibi,e:emmanuelsibi.mec@gmail.com,2025,1,0,0,1,0,1,0
+Kuntal Ghosh,e:kuntalghosh.2007@gmail.com,2025,1,0,1,1,0,0,0
+Gregory Smith,e:gregsmithpgsql@gmail.com,2025,1,0,0,1,0,0,0
+Andrei Klychkov,e:andrew.a.klychkov@gmail.com,2025,1,0,1,0,0,0,0
+Giovanni Fabris,e:giovanni.fabris@icon.it,2025,1,0,0,1,0,0,0
+Arthur Nascimento,e:tureba@gmail.com,2025,1,0,0,1,0,0,0
+Joshua Shanks,e:jjshanks@gmail.com,2025,1,1,0,0,0,0,0
+Ryan Bird,e:ryanzxg@gmail.com,2025,1,0,0,1,0,0,0
+Christian Ullrich,e:chris@chrullrich.net,2025,1,0,0,1,0,0,0
+Marcus Gartner,e:m.a.gartner@gmail.com,2025,1,1,0,0,0,0,0
+Lori Corbani,e:lori.corbani@jax.org,2025,1,0,0,1,0,0,0
+Lauri Siltanen,e:lauri.siltanen@gmail.com,2025,1,0,0,0,0,1,0
+Maxime Schoemans,e:maxime.schoemans@enterprisedb.com,2025,1,1,0,0,0,0,0
+Fabrice Chapuis,e:fabrice636861@gmail.com,2025,1,0,0,1,0,0,0
+Grem Snoort,e:grem.snoort@gmail.com,2025,1,1,0,0,0,0,0
+Dmitry Fomin,e:fomin.list@gmail.com,2025,1,0,0,1,0,0,0
+Emmanuel Touzery,e:emmanuel.touzery@plandela.si,2025,1,0,0,1,0,0,0
+sunil s,e:sunilfeb26@gmail.com,2025,1,1,0,0,0,0,0
+Casey Shobe,e:casey.allen.shobe@icloud.com,2025,1,0,0,1,0,0,0
+Andrew Bille,e:andrewbille@gmail.com,2025,1,0,0,1,0,0,0
+Vaibhav Jain,e:jainva@google.com,2025,1,0,0,1,0,0,0
+Ayush Vatsa,e:ayushvatsa1810@gmail.com,2025,1,1,0,0,0,0,0
+Renzo Dani,e:arons7@gmail.com,2025,1,1,0,0,0,0,0
+Ryo Matsumura,e:matsumura.ryo@fujitsu.com,2025,1,1,0,0,0,0,0
+Kasahara Tatsuhito,e:kasaharatt@oss.nttdata.com,2025,1,0,1,0,0,0,0
+Kristian Lejao,e:kristianlejao@gmail.com,2025,1,0,0,1,0,0,0
+Mario González,e:gonzalemario@gmail.com,2025,1,0,1,0,0,0,0
+Dmitry Igrishin,e:dmitigr@gmail.com,2025,1,0,0,1,0,0,0
+Matthijs van der Vleuten,e:postgresql@zr40.nl,2025,1,0,0,1,0,0,0
+Grigory Smolkin,e:g.smolkin@postgrespro.ru,2025,1,0,0,1,0,0,0
+Paul Ramsey,e:pramsey@cleverelephant.ca,2025,1,0,1,0,0,0,0
+Devrim Gündüz,e:devrim@gunduz.org,2025,1,0,0,1,0,0,0
+Chiranmoy Bhattacharya,e:chiranmoy.bhattacharya@fujitsu.com,2025,1,1,0,0,0,0,0
+Susmitha Devanga,e:devanga.susmitha@fujitsu.com,2025,1,1,0,0,0,0,0
+Ning Wu,e:ning94803@gmail.com,2025,1,1,0,0,0,0,0
+Kevin Oommen Anish,e:kevin.o@zohocorp.com,2025,1,1,0,0,0,0,0
+Oliver Ford,e:ojford@gmail.com,2025,1,1,0,0,0,0,0
+Krasiyan Andreev,e:krasiyan@gmail.com,2025,1,0,1,0,0,0,0
+Andrew Gierth,e:rhodiumtoad@postgresql.org,2025,1,0,1,0,0,0,0
+David Fetter,e:david@fetter.org,2025,1,0,1,0,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2025,1,1,0,0,0,0,0
+sunw.fnst,e:936739278@qq.com,2025,1,0,0,1,0,0,0
+Jonathan Gonzalez V.,e:jonathan.abdiel@gmail.com,2025,1,1,0,0,0,0,0
+Zheng Tao,e:taoz@highgo.com,2025,1,1,0,0,0,0,0
+Steve Lau,e:stevelauc@outlook.com,2025,1,1,0,0,0,0,0
+Oreo Yang,e:oreo.yang@hotmail.com,2025,1,1,0,0,0,0,0
+Mark Frost,e:frostmar@uk.ibm.com,2025,1,0,0,1,0,0,0
+Matt Long,e:matt@mattlong.org,2025,1,0,0,1,0,0,0
+Doruk Yilmaz,e:doruk@mixrank.com,2025,1,1,0,0,0,0,0
+BugForge,e:dllggyx@outlook.com,2025,1,0,0,1,0,0,0
+Madhukar Prasad,e:madhukarprasad@google.com,2025,1,1,0,0,0,0,0
+Runyuan He,e:runyuan@berkeley.edu,2025,1,0,0,1,0,0,0
+Pierrick,e:pierrick.chovelon@dalibo.com,2025,1,0,0,1,0,0,0
+Stephan Springl,e:springl-psql@bfw-online.de,2025,1,0,0,1,0,0,0
+Sergey Shinderuk,e:s.shinderuk@postgrespro.ru,2025,1,0,0,1,0,0,0
+Stephen Frost,e:sfrost@snowman.net,2025,1,0,1,0,0,0,0
+Antoine Violin,e:violin.antuan@gmail.com,2025,1,1,0,0,0,0,0
+Damien Clochard,e:damien@dalibo.info,2025,1,1,0,0,0,0,0
+Mikhail Kot,e:mikhail.kot@databricks.com,2025,1,1,0,0,0,0,0
+Karthik S,e:karthikselvaam@gmail.com,2025,1,1,0,0,0,0,0
+Ran Benita,e:ran@unusedvar.com,2025,1,1,0,0,0,0,0
+Steve Baldwin,e:steve.baldwin@gmail.com,2025,1,0,0,1,0,0,0
+Bernd Reiß,e:bd_reiss@gmx.at,2025,1,1,0,0,0,0,0
+Sergey Soloviev,e:sergey.soloviev@tantorlabs.ru,2025,1,0,0,1,0,0,0
+Shenhao Wang,e:wangsh.fnst@fujitsu.com,2025,1,0,0,1,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2025,1,0,1,0,0,0,0
+Mutaamba Maasha,e:maasha@gmail.com,2025,1,0,1,0,0,0,0
+Zechman,n1:zechman,2025,1,0,0,1,0,0,0
+Derek S,e:derek.s.zechman@snapon.com,2025,1,0,0,1,0,0,0
+Satyanarayana Narlapuram,e:satya.narlapuram@gmail.com,2025,1,1,0,0,0,0,0
+Erik Nordström,e:erik@timescale.com,2025,1,1,0,0,0,0,0
+Gavin Panella,e:gavinpanella@gmail.com,2025,1,0,0,1,0,0,0
+Pavel Seleznev,e:pavel.seleznev@gmail.com,2025,1,0,1,0,0,0,0
+Martin Rakhmanov,n:martin rakhmanov,2025,1,0,0,1,0,0,0
+Matthieu Denais,e:litezeraw@gmail.com,2025,1,0,0,1,0,0,0
+RyotaK,e:ryotak.mail@gmail.com,2025,1,0,0,1,0,0,0
+e:alexander.kjall@hafslund.no,e:alexander.kjall@hafslund.no,2025,1,0,0,1,0,0,0
+Hugo DUBOIS,e:hdubois@scaleway.com,2025,1,0,1,1,0,0,0
+Andrew,e:psy2000usa@yahoo.com,2025,1,0,0,1,0,0,0
+Ethan Mertz,e:ethan.mertz@gmail.com,2025,1,1,0,0,0,0,0
+Mert Alev,e:mert@futo.org,2025,1,0,0,1,0,0,0
+Charles Samborski,e:demurgos@demurgos.net,2025,1,0,0,1,0,0,0
+Ekaterina Sokolova,e:e.sokolova@postgrespro.ru,2025,1,0,0,1,0,0,0
+Andrey Rudometov,e:unlimitedhikari@gmail.com,2025,1,1,0,1,0,0,0
+Andrew Watkins,e:awatkins1966@gmail.com,2025,1,0,0,1,0,0,0
+Yaroslav Syrytsia,e:me@ys.lc,2025,1,0,0,1,0,0,0
+Daniele Varrazzo,e:daniele.varrazzo@gmail.com,2025,1,1,0,0,0,0,0
+Alexey Shishkin,e:alexey.shishkin@enterprisedb.com,2025,1,0,0,1,0,0,0
+P M,e:petermittere@gmail.com,2025,1,0,0,1,0,0,0
+Sergey Fukanchik,e:s.fukanchik@postgrespro.ru,2025,1,1,0,0,0,0,0
+jorsol,e:jorsol@gmail.com,2025,1,0,0,1,0,0,0
+Sungwoo Chang,e:swchangdev@gmail.com,2025,1,0,1,0,0,0,0
+MARK CALLAGHAN,e:mdcallag@gmail.com,2025,1,0,0,1,0,0,0
+"""Burd",n1:burd,2025,1,0,1,0,0,0,0
+Jim Nasby,e:jim.nasby@gmail.com,2025,1,0,1,0,0,0,0
+Evgeny Voropaev,e:evgeny.voropaev@tantorlabs.com,2025,1,1,0,0,0,0,0
+Walid Ibrahim,e:walidib@amazon.com,2025,1,0,0,1,0,0,0
+Ali Akbar,e:the.apaan@gmail.com,2025,1,1,0,0,0,0,0
+Maksim Milyutin,e:milyutinma@gmail.com,2025,1,1,0,0,0,0,0
+Quan Zongliang,e:quanzongliang@yeah.net,2025,1,1,0,0,0,0,0
+Maxim Boguk,e:maxim.boguk@gmail.com,2025,1,0,0,1,0,0,0
+Samuel Thibault,n:samuel thibault,2025,1,1,0,0,0,0,0
+Karavaev Alexey,e:maralist86@mail.ru,2025,1,0,0,1,0,0,0
+Javier Maestro,e:jjmaestro@ieee.org,2025,1,1,0,0,0,0,0
+Jianghua Yang,e:yjhjstz@gmail.com,2025,1,1,0,0,0,0,0
+Feike Steenbergen,e:feikesteenbergen@gmail.com,2025,1,0,0,1,0,0,0
+Ben Peachey Higdon,e:bpeacheyhigdon@gmail.com,2025,1,0,0,1,0,0,0
+Maximilian Chrzan,e:maximilian.chrzan@here.com,2025,1,0,0,1,0,0,0
+Daniel Westermann,e:daniel.westermann@dbi-services.com,2025,1,1,0,0,0,0,0
+John Hutchins,e:john.hutchins@wicourts.gov,2025,1,0,0,1,0,0,0
+Laurence Parry,e:greenreaper@hotmail.com,2025,1,0,0,1,0,0,0
+Max Madden,e:maxmmadden@gmail.com,2025,1,0,0,1,0,0,0
+Braulio Fdo Gonzalez,e:brauliofg@gmail.com,2025,1,0,0,1,0,0,0
+Dorjpalam Batbaatar,e:htgn.dbat.95@gmail.com,2025,1,0,0,1,0,0,0
+Daria Shanina,e:vilensipkdm@gmail.com,2025,1,1,0,1,0,0,0
+Fujii Masao <masao.fujii@gmail.com,n:fujii masao masao fujii gmail com,2025,1,1,0,0,0,0,0
+Alexey Makhmutov,e:a.makhmutov@postgrespro.ru,2025,1,1,0,0,0,0,0
+Chris Gooch,e:cgooch@bamfunds.com,2025,1,0,0,1,0,0,0
+Hari Krishna Sunder,e:hari.db.pg@gmail.com,2025,1,1,0,0,0,0,0
+Philippe Beaudoin,e:pbh.emaj@free.fr,2025,1,0,0,1,0,0,0
+Alec Cozens,e:acozens@pixelpower.com,2025,1,1,0,0,0,0,0
+Yonghao Lee,e:yonghao_lee@qq.com,2025,1,0,0,1,0,0,0
+Shaik Mohammad Mujeeb,e:mujeeb.sk.dev@gmail.com,2025,1,0,0,1,0,0,0
+Lakshmi Narayana Velayudam,e:dev.narayana.v@gmail.com,2025,1,0,0,1,0,0,0
+Tom Lane as per CI,n:tom lane as per ci,2025,1,0,0,1,0,0,0
+Emre Hasegeli,e:emre@hasegeli.com,2025,1,1,0,0,0,0,0
+Yasir,e:yasir.hussain.shah@gmail.com,2025,1,0,0,1,0,0,0
+Adam Guo,e:adamguo@amazon.com,2025,1,0,0,1,0,0,0
+Cédric Villemain,e:cedric.villemain+pgsql@abcsql.com,2025,1,1,0,0,0,0,0
+Matthew Gabeler-Lee,e:fastcat@gmail.com,2025,1,0,0,1,0,0,0
+Luca Vallisa,e:luca.vallisa@gmail.com,2025,1,0,0,1,0,0,0
+Egor Chindyaskin,e:kyzevan23@mail.ru,2025,1,0,0,1,0,0,0
+Sven Klemm,e:sven@timescale.com,2025,1,1,0,1,0,0,0
+Richard Neill,e:richard.neill@telos.digital,2025,1,0,0,1,0,0,0
+Renan Alves Fonseca,e:renanfonseca@gmail.com,2025,1,0,0,0,1,0,0
+Shawn McCoy,e:shawn.the.mccoy@gmail.com,2025,1,0,0,1,0,0,0
+Clemens Ruck,e:clemens.ruck@t-online.de,2025,1,0,0,1,0,0,0
+Arun Thirupathi,e:arunth@google.com,2025,1,0,0,1,0,0,0
+Richard Guo <guofenglinux@gmail.com,n:richard guo guofenglinux gmail com,2025,1,0,0,1,0,0,0
+Kaimeh,e:kkaimeh@gmail.com,2025,1,0,0,1,0,0,0
+Lele Gaifax,e:lele@metapensiero.it,2025,1,1,0,0,0,0,0
+Igor Korot,e:ikorot01@gmail.com,2025,1,0,0,1,0,0,0
+Daniel Elishakov,e:dan-eli@mail.ru,2025,1,0,0,1,0,0,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2025,1,0,0,1,0,0,0
+Zeyuan Hu,e:ferrishu3886@gmail.com,2025,1,0,0,1,0,0,0
+Yuya Watari,e:watari.yuya@gmail.com,2025,1,1,0,0,0,0,0
+Jan Behrens,n:jan behrens,2025,1,0,0,1,0,0,0
+Dmitrii Bondar,e:d.bondar@postgrespro.ru,2025,1,1,0,0,0,0,0
+Lilian Ontowhee,e:ontowhee@gmail.com,2025,1,0,1,0,0,0,0
+Rushabh Lathia,e:rushabh.lathia@gmail.com,2025,1,1,0,0,0,0,0
+Steve Chavez,e:steve@supabase.io,2025,1,1,0,0,0,0,0
+Paul Amonson,e:paul.d.amonson@intel.com,2025,1,1,0,0,0,0,0
+Matthew Sterrett,e:matthewsterrett2@gmail.com,2025,1,0,1,0,0,0,0
+George MacKerron,e:george@mackerron.co.uk,2025,1,0,1,0,0,0,0
+Abhishek Chanda,e:abhishek.becs@gmail.com,2025,1,1,0,0,0,0,0
+Bogdan Grigorenko,e:gri.bogdan.2020@gmail.com,2025,1,0,0,1,0,0,0
+Isaac Morland,e:isaac.morland@gmail.com,2025,1,0,1,0,0,0,0
+Lars Kanis,e:lars@greiz-reinsdorf.de,2025,1,1,0,0,0,0,0
+Todd Cook,e:cookt@blackduck.com,2025,1,0,0,0,1,0,0
+Grigory Kryachko,e:gskryachko@gmail.com,2025,1,1,0,0,0,0,0
+"e:""devanga.susmitha@fujitsu.com""","e:""devanga.susmitha@fujitsu.com""",2025,1,1,0,0,0,0,0
+"""Malladi",n1:malladi,2025,1,1,0,0,0,0,0
+"Rama""",e:ramamalladi@hotmail.com,2025,1,1,0,0,0,0,0
+Nikita,e:pm91.arapov@gmail.com,2025,1,0,0,1,0,0,0
+Imran Zaheer,e:imran.zhir@gmail.com,2025,1,1,0,0,0,0,0
+David Fiedler,e:david.fido.fiedler@gmail.com,2025,1,0,0,1,0,0,0
+Олег Самойлов,e:splarv@ya.ru,2025,1,0,0,1,0,0,0
+Will Storey,e:will@summercat.com,2025,1,0,0,0,0,1,0
+Gabriele Bartolini,e:gabriele.bartolini@enterprisedb.com,2025,1,0,1,0,0,0,0
+Marco Nenciarini,e:marco.nenciarini@enterprisedb.com,2025,1,0,1,0,0,0,0
+Niccolò Fei,e:niccolo.fei@enterprisedb.com,2025,1,0,1,0,0,0,0
+Sergey Dudoladov,n:sergey dudoladov,2025,1,0,1,0,0,0,0
+Yasuo Honda,e:yasuo.honda@gmail.com,2025,1,0,0,0,1,0,0
+Chengxi Sun,e:sunchengxi@highgo.com,2025,1,0,0,0,1,0,0
+Israel Barth Rubio,e:barthisrael@gmail.com,2025,1,1,0,0,0,0,0
+Yuki Seino,e:seinoyu@oss.nttdata.com,2025,1,1,0,0,0,0,0
+yang lei,e:ylshiyu@126.com,2025,1,0,0,1,0,0,0
+Timur Magomedov,e:t.magomedov@postgrespro.ru,2025,1,0,1,0,0,0,0
+Tobias Wendorff,e:tobias.wendorff@tu-dortmund.de,2025,1,0,0,1,0,0,0
+Christopher Inokuchi,e:cinokuchi@gmail.com,2025,1,0,0,1,0,0,0
+Nikita Malakhov,e:n.malakhov@postgrespro.ru,2025,1,1,0,0,0,0,0
+Kirill Zdornyy,e:kirill@dineserve.com,2025,1,0,0,1,0,0,0
+TODO,n1:todo,2025,1,0,1,0,0,0,0
+Niek,e:niek.brasa@hitachienergy.com,2025,1,0,0,1,0,0,0
+Ronald Cruz,e:cruz@rentec.com,2025,1,0,0,1,0,0,0
+Andrew Alsup,e:bluesbreaker@gmail.com,2025,1,1,0,0,0,0,0
+Gilles Darold,e:gilles@darold.net,2025,1,0,1,0,0,0,0
+Sagar Dilip Shedge,e:sagar.shedge92@gmail.com,2025,1,1,0,0,0,0,0
+e:<duffieldzane@gmail.com>,e:<duffieldzane@gmail.com>,2025,1,0,0,1,0,0,0
+Jiao Shuntian,e:312199339@qq.com,2025,1,1,0,0,0,0,0
+Maiquel Grassi,e:grassi@hotmail.com.br,2025,1,1,0,0,0,0,0
+Ibrar Ahmed,e:ibrar.ahmad@gmail.com,2025,1,1,0,0,0,0,0
+Naeem Akhter,e:akhternaeem@gmail.com,2025,1,0,1,0,0,0,0
+Hamid Akhtar,e:hamid.akhtar@gmail.com,2025,1,0,1,0,0,0,0
+Felix,e:afripowered@gmail.com,2025,1,0,0,1,0,0,0
+Kashif Zeeshan,e:kashi.zeeshan@gmail.com,2025,1,0,1,0,0,0,0
+Miłosz Chmura,e:mieszko4@gmail.com,2025,1,0,0,1,0,0,0
+孟令彬,e:m_lingbin@126.com,2025,1,0,0,1,0,0,0
+songjinzhou,e:tsinghualucky912@foxmail.com,2025,1,1,0,0,0,0,0
+Alexander Kuzmenkov,e:a.kuzmenkov@postgrespro.ru,2025,1,1,0,0,0,0,0
+Simon Riggs,e:simon.riggs@enterprisedb.com,2025,1,0,1,0,0,0,0
+Jonathan Katz,e:jkatz@postgresql.org,2025,1,0,1,0,0,0,0
+Hywel Carver,e:hywel@skillerwhale.com,2025,1,0,1,0,0,0,0
+Jaime Casanova,e:jcasanov@systemguards.com.ec,2025,1,0,1,0,0,0,0
+Michał Kłeczek,e:michal@kleczek.org,2025,1,0,1,0,0,0,0
+Andres Freund <andres@anarazel.de,n:andres freund andres anarazel de,2025,1,1,0,0,0,0,0
+Stephen Fewer,e:stephen_fewer@rapid7.com,2025,1,0,0,1,0,0,0
+Vinícius Abrahão,e:vinnix.bsd@gmail.com,2025,1,0,1,0,0,0,0
+e:charukiewicz@protonmail.com,e:charukiewicz@protonmail.com,2025,1,0,0,1,0,0,0
+Anton Voloshin,e:a.voloshin@postgrespro.ru,2025,1,1,0,0,0,0,0
+Michael,n1:michael,2025,1,0,1,0,0,0,0
+Xing Guo,e:higuoxing@gmail.com,2025,1,1,0,0,0,0,0
+Koichi Suzuki,e:koichi.suzuki@enterprisedb.com,2025,1,0,1,1,0,0,0
+e:anani191181515@gmail.com,e:anani191181515@gmail.com,2025,1,0,0,1,0,0,0
+Sam Gabrielsson,e:sam@movsom.se,2025,1,0,0,1,0,0,0
+James Coleman,e:jtc331@gmail.com,2025,1,0,0,1,0,0,0
+Evgeniy Gorbanyov,n:evgeniy gorbanyov,2025,1,0,0,1,0,0,0
+James Hunter,e:james.hunter.pg@gmail.com,2025,1,1,0,0,0,0,0
+Andrew Kane,e:andrew@ankane.org,2025,1,1,0,0,0,0,0
+Salvatore Dipietro,n:salvatore dipietro,2025,1,0,0,1,0,0,0
+Jason Smith,e:dqetool@126.com,2025,1,0,0,1,0,0,0
+Asphator,e:asphator@gmail.com,2025,1,0,0,1,0,0,0
+Emanuele Musella,n:emanuele musella,2025,1,1,0,0,0,0,0
+Maurizio Boriani,n:maurizio boriani,2025,1,1,0,0,0,0,0
+Yogesh Sharma,n:yogesh sharma,2025,1,0,1,0,0,0,0
+Yan Chengpen,n:yan chengpen,2025,1,0,0,1,0,0,0
+Tom Lane,e:tgl@sss.pgh.pa.us,2026,411,186,186,29,3,13,272
+Chao Li,e:1356863904@qq.com,2026,366,103,256,16,0,1,0
+Michael Paquier,e:michael.paquier@gmail.com,2026,265,147,114,4,0,1,373
+Fujii Masao,e:masao.fujii@oss.nttdata.com,2026,247,87,145,18,0,3,204
+Peter Eisentraut,e:peter.eisentraut@2ndquadrant.com,2026,233,192,25,13,0,4,307
+Andres Freund,e:andres@andres@anarazel.de,2026,199,59,114,24,0,20,72
+Heikki Linnakangas,e:heikki.linnakangas@iki.fi,2026,169,106,56,6,0,2,162
+Daniel Gustafsson,e:dgustafsson@postgresql.org,2026,151,66,85,3,0,2,123
+Nathan Bossart,e:bossartn@amazon.com,2026,133,103,26,7,0,0,141
+Alvaro Herrera,e:alvherre@2ndquadrant.com,2026,131,60,63,5,0,3,129
+Zsolt Parragi,e:zsolt.parragi@cybertec.at,2026,118,40,75,13,0,1,0
+Ayush Tiwari,e:ayushtiwari.slg01@gmail.com,2026,114,51,56,10,0,2,0
+Amit Kapila,e:akapila@postgresql.org,2026,105,16,85,4,1,1,78
+Robert Haas,e:robertmhaas@gmail.com,2026,103,69,22,13,0,2,76
+Richard Guo,e:rguo@postgresql.org,2026,102,83,18,2,0,0,92
+Noah Misch,e:noah@leadboat.com,2026,101,16,25,65,0,2,16
+Melanie Plageman,e:melanieplageman@gmail.com,2026,99,63,35,9,0,0,59
+Ashutosh Bapat,e:ashutosh.bapat@2ndquadrant.com,2026,92,33,58,1,0,3,0
+David Rowley,e:david.rowley@2ndquadrant.com,2026,85,47,33,3,0,4,78
+Masahiko Sawada,e:masahiko.sawada@2ndquadrant.com,2026,84,27,54,6,0,0,76
+Sami Imseih,e:simseih@amazon.com,2026,84,42,41,4,0,0,0
+Bertrand Drouvot,e:bdrouvot@amazon.com,2026,79,38,42,3,0,0,0
+Alexander Korotkov,e:a.korotkov@postgrespro.ru,2026,74,35,39,1,0,0,80
+Alexander Lakhin,e:exclusion@gmail.com,2026,72,5,6,64,0,3,0
+Andrew Dunstan,e:andrew.dunstan@2ndquadrant.com,2026,72,35,34,1,1,1,67
+Jeff Davis,e:pgsql@j-davis.com,2026,67,56,5,5,0,2,67
+jian he,e:jian.universality@gmail.com,2026,65,39,20,9,0,0,0
+Hayato Kuroda,e:kuroda.hayato@fujitsu.com,2026,64,18,45,3,0,0,0
+Xuneng Zhou,e:xunengzhou@gmail.com,2026,64,41,21,4,0,0,0
+Shihao Zhong,e:zhong950419@gmail.com,2026,63,38,22,7,0,0,0
+Amit Langote,e:langote_amit_f8@lab.ntt.co.jp,2026,62,46,16,1,0,0,62
+John Naylor,e:john.naylor@2ndquadrant.com,2026,62,24,29,4,0,9,42
+Tomas Vondra,e:tomas.vondra@2ndquadrant.com,2026,62,22,33,5,3,0,23
+Kirill Reshke,e:reshkekirill@gmail.com,2026,60,9,48,2,0,2,0
+Bharath Rupireddy,e:bharath.rupireddy@enterprisedb.com,2026,59,22,36,4,0,2,0
+Nazir Bilal Yavuz,e:byavuz81@gmail.com,2026,58,12,44,3,0,0,0
+Jelte Fennema-Nio,e:jelte.fennema@microsoft.com,2026,56,33,22,2,0,0,0
+Peter Geoghegan,e:pg@bowt.ie,2026,55,43,6,7,0,0,44
+Andrey Borodin,e:amborodin86@gmail.com,2026,55,10,44,3,0,0,0
+Jacob Champion,e:pchampion@vmware.com,2026,53,35,17,2,0,0,36
+Peter Smith,e:peter.b.smith@fujitsu.com,2026,52,30,20,6,0,0,0
+Lukas Fittl,e:lukas@fittl.com,2026,46,20,27,2,0,1,0
+Satyanarayana Narlapuram,e:satya.narlapuram@gmail.com,2026,45,28,14,11,0,0,0
+Greg Burd,e:greg@burd.me,2026,44,2,37,3,4,0,0
+Tender Wang,e:tndrwang@gmail.com,2026,43,10,23,8,0,5,0
+Hou Zhijie,e:houzj.fnst@cn.fujitsu.com,2026,43,18,23,1,0,1,0
+Vignesh C,e:vignesh21@gmail.com,2026,43,24,18,0,0,1,0
+Matheus Alcantara,e:mths.dev@pm.me,2026,42,11,31,0,0,0,0
+Corey Huinker,e:corey.huinker@gmail.com,2026,42,25,17,0,0,0,0
+Bruce Momjian,e:bruce@momjian.us,2026,41,40,1,1,0,0,53
+shveta malik,e:shveta.malik@gmail.com,2026,40,1,40,0,0,0,0
+Matthias van de Meent,e:boekewurm@gmail.com,2026,39,12,27,0,0,0,0
+Tristan Partin,e:tristan@neon.tech,2026,37,19,17,1,0,0,0
+Ewan Young,e:kdbase.hack@gmail.com,2026,37,18,18,4,0,1,0
+Aleksander Alekseev,e:aleksander@timescale.com,2026,33,25,6,2,0,0,0
+Andreas Karlsson,e:andreas@proxel.se,2026,33,13,19,1,0,0,0
+solai v,e:solai.cdac@gmail.com,2026,32,0,17,0,15,0,0
+Antonin Houska,e:ah@cybertec.at,2026,30,17,12,2,0,0,0
+Paul A. Jungwirth,e:pj@illuminatedcomputing.com,2026,29,20,10,0,0,0,0
+Thomas Munro,e:thomas.munro@enterprisedb.com,2026,27,16,9,1,0,1,18
+Etsuro Fujita,e:efujita@postgresql.org,2026,26,17,9,1,0,1,23
+Man Zeng,e:zengman@halodbtech.com,2026,26,11,8,8,0,0,0
+Japin Li,e:japinli@hotmail.com,2026,25,3,22,0,0,0,0
+Junwang Zhao,e:zhjwpku@gmail.com,2026,25,2,22,2,0,1,0
+Yugo Nagata,e:nagata@sraoss.co.jp,2026,25,10,14,1,0,0,0
+Shinya Kato,e:shinya11.kato@oss.nttdata.com,2026,25,16,8,2,0,0,0
+Euler Taveira,e:euler@timbira.com.br,2026,25,9,16,0,0,0,0
+Dean Rasheed,e:dean.a.rasheed@gmail.com,2026,23,9,14,0,0,2,15
+Kyotaro Horiguchi,e:horikyoga.ntt@gmail.com,2026,23,4,14,4,0,1,0
+Rui Zhao,e:zhaorui126@gmail.com,2026,22,6,16,1,0,0,0
+Thom Brown,e:thom@linux.com,2026,22,4,4,15,0,1,0
+Jakub Wartak,e:jakub.wartak@tomtom.com,2026,20,3,14,1,1,1,0
+Jim Jones,e:jim.jones@uni-muenster.de,2026,20,11,9,0,0,0,0
+wenhui qiu,e:qiuwenhuifx@gmail.com,2026,20,1,19,0,0,0,0
+ChangAo Chen,e:cca5507@qq.com,2026,20,12,7,4,0,0,0
+Andrey Rachitskiy,e:pl0h0yp1@gmail.com,2026,19,13,6,1,0,0,0
+Srinath Reddy Sadipiralla,e:srinath2133@gmail.com,2026,19,3,16,1,0,0,0
+Nisha Moond,e:nisha.moond412@gmail.com,2026,18,7,11,2,0,0,0
+Laurenz Albe,e:laurenz.albe@cybertec.at,2026,18,7,9,2,0,0,0
+Amul Sul,e:amul.sul@enterprisedb.com,2026,17,7,9,1,0,1,0
+Baji Shaik,e:baji.pgdev@gmail.com,2026,16,14,1,1,0,0,0
+Tatsuya Kawata,e:kawatatatsuya0913@gmail.com,2026,16,8,8,0,0,0,0
+Mihail Nikalayeu,e:mihailnikalayeu@gmail.com,2026,16,12,3,1,0,0,0
+Robert Treat,e:rob@xzilla.net,2026,16,3,13,1,0,0,0
+Nikolay Samokhvalov,e:samokhvalov@gmail.com,2026,15,3,2,14,0,0,0
+David G. Johnston,e:david.g.johnston@gmail.com,2026,15,3,12,0,0,0,0
+Surya Poondla,e:s_poondla@apple.com,2026,14,0,14,0,0,1,0
+Anthonin Bonnefoy,e:anthonin.bonnefoy@datadoghq.com,2026,14,10,4,0,0,0,0
+Henson Choi,e:assam258@gmail.com,2026,13,6,7,0,0,0,0
+Shlok Kyal,e:shlok.kyal.oss@gmail.com,2026,13,4,10,0,0,0,0
+Haibo Yan,e:tristan.yim@gmail.com,2026,13,0,13,0,0,0,0
+Xint Code,n:xint code,2026,13,0,0,13,0,0,0
+David Geier,e:geidav.pg@gmail.com,2026,13,7,10,0,0,0,0
+Manuel Reyes Bravo,e:manuelreyesbravo@gmail.com,2026,12,5,7,0,0,0,0
+Dilip Kumar,e:dilip.kumar@enterprisedb.com,2026,12,4,8,0,0,0,0
+Bryan Green,e:dbryan.green@gmail.com,2026,10,7,2,1,0,0,0
+Soumya S Murali,e:soumyamurali.work@gmail.com,2026,10,1,9,0,0,0,0
+Justin Pryzby,e:justin@telsasoft.com,2026,9,0,1,7,0,1,0
+Chengpeng Yan,e:chengpeng_yan@outlook.com,2026,9,3,6,1,0,0,0
+Jonathan Gonzalez V.,e:jonathan.abdiel@gmail.com,2026,9,5,4,1,0,0,0
+Mahendra Singh Thalor,e:mahi6run@gmail.com,2026,9,8,1,0,0,0,0
+Alexandra Wang,e:alexandra.wang.oss@gmail.com,2026,9,1,8,0,0,0,0
+Pierre Forstmann,e:pierre.forstmann@gmail.com,2026,8,1,7,0,0,0,0
+Joel Jacobson,e:joel@compiler.org,2026,8,5,2,2,0,0,0
+Tatsuo Ishii,e:ishii@sraoss.co.jp,2026,8,1,7,0,0,0,4
+Dagfinn Ilmari Mannsåker,e:ilmari@ilmari.org,2026,8,3,3,1,0,1,0
+li carol,e:carol.li2025@outlook.com,2026,8,0,7,1,0,0,0
+Andrei Lepikhov,e:a.lepikhov@postgrespro.ru,2026,7,4,3,3,0,0,0
+David Steele,e:david@pgmasters.net,2026,7,5,2,0,0,0,0
+Jan Nidzwetzki,e:jan@planetscale.com,2026,7,3,3,1,0,0,0
+Sehrope Sarkuni,e:sehrope@jackdb.com,2026,7,4,1,2,0,0,0
+Ilia Evdokimov,e:ilya.evdokimov@tantorlabs.ru,2026,7,6,1,0,0,0,0
+Quan Zongliang,e:quanzongliang@yeah.net,2026,7,0,7,0,0,0,0
+Neil Chen,e:carpenter.nail.cz@gmail.com,2026,7,0,7,0,0,0,0
+Joe Conway,e:mail@joeconway.com,2026,7,6,0,1,0,0,4
+Lakshmi N,e:lakshmin.jhs@gmail.com,2026,7,7,0,2,0,0,0
+Yaroslav Saburov,e:y.saburov@gmail.com,2026,6,0,0,6,0,0,0
+Yuelin Wang,e:3020001251@tju.edu.cn,2026,6,1,0,6,0,0,0
+Ian Barwick,e:ian@2ndquadrant.com,2026,6,4,2,0,0,0,0
+Christoph Berg,e:christoph.berg@credativ.de,2026,6,2,3,1,0,0,0
+Yilin Zhang,e:jiezhilove@126.com,2026,6,0,5,0,0,1,0
+Xiaopeng Wang,e:wxp_728@163.com,2026,6,0,6,0,0,0,0
+Daniil Davydov,e:3danissimo@gmail.com,2026,6,6,0,0,0,0,0
+Greg Sabino Mullane,e:greg@turnstep.com,2026,6,1,5,0,0,0,0
+Viktor Holmberg,e:v@viktorh.net,2026,6,2,4,0,0,0,0
+Nitin Motiani,e:nitinmotiani@google.com,2026,5,5,1,0,0,0,0
+Ajin Cherian,e:itsajin@gmail.com,2026,5,0,4,1,0,0,0
+Noriyoshi Shinoda,e:noriyoshi.shinoda@hpe.com,2026,5,4,1,1,0,0,0
+Steven Niu,e:niushiji@highgo.com,2026,5,1,4,0,0,0,0
+Michael Malis,e:michaelmalis2@gmail.com,2026,5,0,0,5,0,0,0
+Grigorev Jurij,e:ju.grigorev@ftdata.ru,2026,5,4,1,0,0,0,0
+Osama Abdul Qader,e:osamaabdulqader.cs@gmail.com,2026,5,1,1,3,0,0,0
+Ke,e:kehan5800@gmail.com,2026,5,0,0,5,0,0,0
+Yura Sokolov,e:y.sokolov@postgrespro.ru,2026,5,3,0,2,0,0,0
+Fabrízio de Royes Mello,e:fabriziomello@gmail.com,2026,5,0,5,1,0,0,0
+Marcos Pegoraro,e:marcos@f10.com.br,2026,5,1,1,2,0,1,0
+Alexander Pyhalov,e:a.yhalov@postgrespro.ru,2026,5,2,3,0,0,0,0
+Miłosz Bieniek,e:bieniek.milosz0@gmail.com,2026,5,1,4,0,0,0,0
+Erik Rijkers,e:er@xs4all.nl,2026,5,1,1,2,1,0,0
+Hcamael,e:baiyjrh@gmail.com,2026,5,0,0,5,0,0,0
+Hüseyin Demir,e:huseyin.d3r@gmail.com,2026,5,2,2,1,0,0,0
+Pavel Stehule,e:pavel.stehule@gmail.com,2026,5,2,2,1,0,0,0
+Pavel Borisov,e:pashkin.elfe@gmail.com,2026,5,1,3,1,0,0,0
+Jianghua Yang,e:yjhjstz@gmail.com,2026,5,4,0,1,0,0,0
+Mircea Cadariu,e:cadariu.mircea@gmail.com,2026,5,1,4,0,0,1,0
+Sho Ito,e:i.sho.0628@gmail.com,2026,4,2,2,0,0,0,0
+Mark Dilger,e:hornschnorter@gmail.com,2026,4,1,2,1,0,0,0
+Radim Marek,e:radim@boringsql.com,2026,4,1,0,3,0,0,0
+Ashutosh Sharma,e:ashu.coek88@gmail.com,2026,4,0,4,0,0,0,0
+Vlad Lesin,e:vladlesin@gmail.com,2026,4,4,0,0,0,0,0
+Nikhil Kumar Veldanda,e:veldanda.nikhilkumar17@gmail.com,2026,4,2,2,0,0,0,0
+Qifan Liu,e:imchifan@163.com,2026,4,0,0,4,0,0,0
+Rithvika Devisetti,e:devisettirithvika@gmail.com,2026,4,1,3,0,0,0,0
+Imran Zaheer,e:imran.zhir@gmail.com,2026,4,3,1,1,0,0,0
+Rafia Sabih,e:rafia.sabih@enterprisedb.com,2026,4,1,3,0,0,0,0
+Jacob Brazeal,e:jacob.brazeal@gmail.com,2026,4,0,1,3,0,1,0
+Claude Code,n:claude code,2026,4,0,0,4,0,0,0
+Zhenwei Shang,e:a934172442@gmail.com,2026,4,0,4,0,0,0,0
+Claude,n1:claude,2026,4,0,0,4,0,0,0
+王跃林,e:violin0613@tju.edu.cn,2026,4,0,0,4,0,0,0
+Nikita Kalinin,e:n.kalinin@postgrespro.ru,2026,4,0,0,4,0,0,0
+Yuchen Li,e:liyuchen_xyz@163.com,2026,4,0,4,0,0,0,0
+Michael Banck,e:mbanck@debian.org,2026,4,1,3,0,0,0,0
+Manni Wood,e:manni.wood@enterprisedb.com,2026,4,1,1,0,2,0,0
+Viktor Leis,e:leis@in.tum.de,2026,3,0,0,3,0,0,0
+Alperen Keles,e:alpkeles99@gmail.com,2026,3,0,0,3,0,0,0
+Ilya Staroverov,e:i.staroverov@ftdata.ru,2026,3,3,0,1,0,0,0
+Paul Kim,e:mok03127@gmail.com,2026,3,2,1,0,0,0,0
+Sergei Kornilov,e:sk@zsrv.org,2026,3,0,1,2,0,0,0
+Jingtang Zhang,e:mrdrivingduck@gmail.com,2026,3,2,0,2,0,0,0
+Aditya Gollamudi,e:adigollamudi@gmail.com,2026,3,2,1,0,0,0,0
+Kiran Kaki,e:itskkpg@gmail.com,2026,3,1,2,0,0,0,0
+Karina Litskevich,e:litskevichkarina@gmail.com,2026,3,2,0,1,0,0,0
+Zheng Wang,e:hackerzheng666@gmail.com,2026,3,0,0,3,0,0,0
+Rahila Syed,e:rahilasyed.90@gmail.com,2026,3,1,2,1,0,0,0
+Zexin Li,e:lizi.openmind@gmail.com,2026,3,3,0,0,0,0,0
+Anton Voloshin,e:a.voloshin@postgrespro.ru,2026,3,2,0,2,0,0,0
+Mark Atwood,e:mark@reviewcommit.com,2026,3,3,0,0,0,0,0
+Ben Morris in collaboration,n:ben morris in collaboration,2026,3,0,0,3,0,0,0
+Anthropic Research,n:anthropic research,2026,3,0,0,3,0,0,0
+Yu Kunpeng,e:yu443940816@live.com,2026,3,0,0,3,0,0,0
+Amy Burnett,n:amy burnett,2026,3,0,0,3,0,0,0
+Zheng Yu,e:zheng@depthfirst.com,2026,3,0,0,3,0,0,0
+Maciek Sakrejda,e:maciek@pganalyze.com,2026,3,1,2,0,0,0,0
+Aya Iwata,e:iwata.aya@jp.fujitsu.com,2026,3,1,1,1,0,0,0
+DaeMyung Kang,e:charsyam@gmail.com,2026,3,3,0,0,0,0,0
+David E. Wheeler,e:david@justatheory.com,2026,3,2,1,0,0,0,0
+Nitin Jadhav,e:nitinjadhavpostgres@gmail.com,2026,3,3,0,0,0,0,0
+Ranier Vilela,e:ranier.vf@gmail.com,2026,3,1,0,2,0,0,0
+Mohamed Ali,e:moali.pg@gmail.com,2026,3,2,0,1,0,0,0
+Alexander Kuzmenkov,e:a.kuzmenkov@postgrespro.ru,2026,3,1,0,2,0,0,0
+Andrey Chernyy,e:andrey.cherny@tantorlabs.com,2026,3,3,0,0,0,0,0
+Alex Young,e:alex000young@gmail.com,2026,3,0,0,3,0,0,0
+Dmitry Koval,e:d.koval@postgrespro.ru,2026,3,0,2,1,0,0,0
+Alex Guo,e:guo.alex.hengchen@gmail.com,2026,3,0,3,0,0,0,0
+VASUKI M,e:vasukim1992002@gmail.com,2026,3,1,1,0,0,1,0
+Akshay Joshi,e:akshay.joshi@enterprisedb.com,2026,3,2,0,1,0,0,0
+Mario González,e:gonzalemario@gmail.com,2026,3,3,0,0,0,0,0
+Oleg Tselebrovskiy,e:o.tselebrovskiy@postgrespro.ru,2026,3,1,1,2,0,1,0
+Florents Tselai,e:florents.tselai@gmail.com,2026,3,2,1,0,0,0,0
+Ryo Matsumura,e:matsumura.ryo@fujitsu.com,2026,3,1,1,1,0,0,0
+Dewei Dai,e:daidewei1970@163.com,2026,3,1,2,0,0,0,0
+Prashant Chinnam,e:crprashant@hotmail.com,2026,2,0,2,0,0,0,0
+Gaurav Singh,e:gaurav.singh@yugabyte.com,2026,2,0,0,2,0,0,0
+Jeevan Chalke,e:jeevan.chalke@enterprisedb.com,2026,2,2,0,0,0,0,0
+Harrison Booth,e:harrisontbooth@gmail.com,2026,2,2,0,0,0,0,0
+TrendAI Zero Day Initiative,n:trendai zero day initiative,2026,2,0,0,2,0,0,0
+Takeshi Ideriha,e:iderihatakeshi@gmail.com,2026,2,1,0,1,0,0,0
+Marko Grujic,e:markoog@gmail.com,2026,2,2,0,1,0,0,0
+Donghang Lin,e:donghanglin@gmail.com,2026,2,0,1,0,0,1,0
+Evan Si,e:evsi@amazon.com,2026,2,1,0,1,0,0,0
+Chee Wooson,e:chee.wooson@gmail.com,2026,2,2,0,0,0,0,0
+Alexander Kozhemyakin,e:a.kozhemyakin@postgrespro.ru,2026,2,0,0,2,0,0,0
+Daria Lepikhova,e:daria.n.lepikhova@gmail.com,2026,2,2,0,0,0,0,0
+João Marcelo Detomini,e:joao.detomini@enterprisedb.com,2026,2,0,2,0,0,0,0
+Vaibhav Dalvi,e:vaibhav.dalvi@enterprisedb.com,2026,2,1,1,0,0,0,0
+Sergei Patiakin,e:sergei.patiakin@enterprisedb.com,2026,2,2,0,1,0,0,0
+Anthropic OSS program,n:anthropic oss program,2026,2,1,0,2,0,0,0
+Junwen AN,e:feasiblechart@gmail.com,2026,2,0,0,2,0,0,0
+Andrew Krylosov,e:krylosov.andrew@gmail.com,2026,2,0,2,0,0,0,0
+Himanshu Upadhyaya,e:upadhyaya.himanshu@gmail.com,2026,2,0,2,0,0,0,0
+Yuhang Qiu,e:iamqyh@gmail.com,2026,2,0,2,0,0,0,0
+Nikita Malakhov,e:n.malakhov@postgrespro.ru,2026,2,1,1,0,0,0,0
+Chaitanya Choudhary,e:chaitanyyachoudhary@gmail.com,2026,2,2,0,1,0,0,0
+Yuefei Shi,e:shiyuefei1004@gmail.com,2026,2,0,2,0,0,0,0
+Koshino Taiki,e:koshino@sraoss.co.jp,2026,2,2,0,0,0,0,0
+Yanjie Zhao,n:yanjie zhao,2026,2,0,0,2,0,0,0
+Yiyang Liu,n:yiyang liu,2026,2,0,0,2,0,0,0
+Konstantin Knizhnik,e:k.knizhnik@postgrespro.ru,2026,2,1,0,1,0,0,0
+Jochen Bandhauer,e:jochen.bandhauer@gmx.net,2026,2,1,0,1,0,0,0
+Nikhil Sontakke,e:nikhils@2ndquadrant.com,2026,2,2,0,0,0,0,0
+Zizhuan Liu,e:44973863@qq.com,2026,2,0,2,0,0,0,0
+ylwangtju,e:ylwangtju@qq.com,2026,2,0,0,2,0,0,0
+Team Dhiutsa,n:team dhiutsa,2026,2,0,0,2,0,0,0
+Eric Ridge,e:eebbrr@gmail.com,2026,2,0,0,2,0,0,0
+Niall Newman,e:nn@turacolabs.com,2026,2,2,0,0,0,0,0
+Stepan Neretin,e:sncfmgg@gmail.com,2026,2,1,0,0,1,0,0
+Ants Aasma,e:ants.aasma@cybertec.at,2026,2,1,0,0,1,0,0
+Chauhan Dhruv,e:chauhandhruv351@gmail.com,2026,2,2,0,1,0,0,0
+Vladlen Popolitov,e:v.popolitov@postgrespro.ru,2026,2,1,1,0,0,0,0
+JoongHyuk Shin,e:sjh910805@gmail.com,2026,2,1,1,0,0,0,0
+kenny,e:kennychen851228@gmail.com,2026,2,2,0,0,0,0,0
+Guoqing Yang,e:yanggq1988@126.com,2026,2,0,2,0,0,0,0
+Tatsuro Yamada,e:tatsuro.yamada.tf@nttcom.co.jp,2026,2,2,0,0,0,0,0
+Florin Irion,e:florin.irion@enterprisedb.com,2026,2,1,1,0,0,0,0
+Erik Wienhold,e:ewie@ewie.name,2026,2,1,1,0,0,0,0
+Bill Kim,e:billkimjh@gmail.com,2026,2,1,0,1,0,0,0
+Yingying Chen,e:cyy9255@gmail.com,2026,2,1,1,0,0,0,0
+Chi Zhang,e:798604270@qq.com,2026,2,0,0,2,0,0,0
+Tobias Bussmann,e:t.bussmann@gmx.net,2026,2,0,0,2,0,0,0
+Maksim Melnikov,e:m.melnikov@postgrespro.ru,2026,2,2,0,0,0,0,0
+Arseniy Mukhin,e:arseniy.mukhin.dev@gmail.com,2026,2,0,2,0,0,0,0
+Sven Klemm,e:sven@timescale.com,2026,2,1,0,1,0,0,0
+Pavel Kohout,e:pavel.kohout@aisle.com,2026,2,1,0,2,0,0,0
+Vergissmeinnicht,e:vergissmeinnichtzh@gmail.com,2026,2,0,0,2,0,0,0
+Alexey Makhmutov,e:a.makhmutov@postgrespro.ru,2026,2,1,0,1,0,0,0
+Nishant Sharma,e:nishant.sharma@enterprisedb.com,2026,2,1,1,0,0,0,0
+Zhang Mingli,e:avamingli@gmail.com,2026,2,0,1,1,0,0,0
+jie wang,e:jugierwang@gmail.com,2026,2,0,1,1,0,0,0
+Fredrik Widlert,e:fredrik.widlert@digpro.se,2026,2,0,0,2,0,0,0
+Evan Montgomery-Recht,e:montge@mianetworks.net,2026,2,0,0,2,0,1,0
+Dmitry Dolgov,e:9erthalion6@gmail.com,2026,2,0,2,0,0,0,0
+Tiancheng Ge,e:getiancheng_2012@163.com,2026,2,0,2,0,0,0,0
+Vitaly Davydov,e:v.davydov@postgrespro.ru,2026,2,0,2,0,0,0,0
+Dharin Shah,e:dharinshah95@gmail.com,2026,2,1,1,0,0,0,0
+Dmitriy Kuzmin,e:kuzmin.db4@gmail.com,2026,2,0,0,2,0,0,0
+Gyan Sreejith,e:gyan.sreejith@gmail.com,2026,2,2,0,0,0,0,0
+Zhang Hu,e:kongbaik228@gmail.com,2026,2,1,1,0,0,0,0
+Daniel Verite,e:daniel@manitou-mail.org,2026,2,1,1,0,0,0,0
+Alexander Borisov,e:lex.borisov@gmail.com,2026,2,0,2,0,0,0,0
+Cary Huang,e:hcary328@gmail.com,2026,2,0,2,0,0,0,0
+Ajay Pal,e:ajay.pal.k@gmail.com,2026,2,0,2,0,0,0,0
+Ayoub Kazar,e:ma_kazar@esi.dz,2026,2,0,2,0,0,0,0
+Mark Wong,e:markwkm@gmail.com,2026,2,0,1,0,1,0,0
+Oleg Tkachenko,e:oatkachenko@gmail.com,2026,2,1,0,1,0,2,0
+Wang Peng,e:215722532@qq.com,2026,2,1,1,0,0,0,0
+Aditya Kamath,e:aditya.kamath1@ibm.com,2026,2,1,0,1,0,0,0
+songjinzhou,e:tsinghualucky912@foxmail.com,2026,2,0,2,0,0,0,0
+Daniel Firer as part of zeroday.cloud,n:daniel firer as part of zeroday cloud,2026,2,0,0,2,0,0,0
+Paul Gerste,n:paul gerste,2026,2,0,0,2,0,0,0
+Moritz Sanft,n:moritz sanft,2026,2,0,0,2,0,0,0
+Saicharanreddy Chinthareddy,e:saicharh@amazon.com,2026,1,0,0,1,0,0,0
+Ann C,e:anncalla@163.com,2026,1,0,0,1,0,0,0
+Taras Kloba,e:taras.kloba@gmail.com,2026,1,1,0,0,0,0,0
+Sajeeb Lohani working,n:sajeeb lohani working,2026,1,0,0,1,0,0,0
+Matemática A3K,e:matematica.a3k@gmail.com,2026,1,0,0,1,0,0,0
+Shay Rojansky,e:roji@roji.org,2026,1,0,0,1,0,0,0
+♂π≌26218,e:1991230470@qq.com,2026,1,0,0,1,0,0,0
+Markos Fountoulakis,e:markos@planetscale.com,2026,1,1,0,0,0,0,0
+CyberNative AI,e:ceo@cybernative.ai,2026,1,0,0,1,0,0,0
+Ma Xueting,e:ma@sraoss.co.jp,2026,1,1,0,0,0,0,0
+George MacKerron,e:george@mackerron.co.uk,2026,1,0,0,1,0,0,0
+kedar anavardekar,e:kedar.anavardekar@gmail.com,2026,1,0,1,0,0,0,0
+Gowtham Reddy,e:gowthamdoma18@gmail.com,2026,1,1,0,0,0,0,0
+放空,e:jj-zhang25@mails.tsinghua.edu.cn,2026,1,0,0,1,0,0,0
+Dongpo Liu,e:poe.liu@pm.me,2026,1,1,0,0,0,0,0
+Naeem Akhter,e:akhternaeem@gmail.com,2026,1,1,0,0,0,0,0
+Naga Appani,e:nagnrik@gmail.com,2026,1,0,1,0,0,0,0
+Lionel Hamayon,e:lionel.hamayon@evolution-digitale.fr,2026,1,0,0,0,1,0,0
+Arseny Sher,e:a.sher@postgrespro.ru,2026,1,0,0,1,0,0,0
+Bingshuai Li,e:lucian1412@outlook.com,2026,1,1,0,0,0,0,0
+Bohyun Lee,e:bohyun.lee@databricks.com,2026,1,0,1,0,0,0,0
+Chinmay Kanchi,e:cgkanchi@gmail.com,2026,1,0,0,1,0,0,0
+Xiangxin Zeng,e:xiangxin_zeng@qq.com,2026,1,1,0,0,0,0,0
+William Bernbaum,e:wbernbaum@dwdev.com,2026,1,1,0,0,0,0,0
+Anatoliy Kraev,e:anatoliy.kraev@tantorlabs.ru,2026,1,1,0,0,0,0,0
+Kacper Kuras,n:kacper kuras,2026,1,0,0,1,0,0,0
+Vladimir Savin,e:vladimir@encord.com,2026,1,0,0,1,0,0,0
+Iliia Khaprov,e:i.khaprov@gmail.com,2026,1,0,0,1,0,0,0
+Haruna Miwa,e:miwa@sraoss.co.jp,2026,1,1,0,0,0,0,0
+Koshi Shibagaki,e:shibagaki.koshi@fujitsu.com,2026,1,1,0,0,0,0,0
+Ludvig Janiuk,e:ludvig.janiuk@proton.me,2026,1,0,0,1,0,0,0
+Lele Gaifax,e:lele@metapensiero.it,2026,1,1,0,0,0,0,0
+Mario Karuza,e:mkaruza.pg@icloud.com,2026,1,1,0,0,0,0,0
+Kevin Rocker,e:me@kevinrocker.com,2026,1,1,0,0,0,0,0
+Mostafa,e:mostafa.nabil.nafie@gmail.com,2026,1,1,0,0,0,0,0
+Shallow,e:theshallow27@gmail.com,2026,1,0,0,1,0,0,0
+Narek Galstyan,e:narek.galstyan@enterprisedb.com,2026,1,1,0,0,0,0,0
+Dirkjan Bussink,e:d.bussink@gmail.com,2026,1,1,0,0,0,0,0
+Ross Burton,e:ross@burtonini.com,2026,1,0,1,1,0,0,0
+Yonghwa Lee,e:underdog@theori.io,2026,1,0,0,1,0,0,0
+Oli Sennhauser,e:oli.sennhauser@fromdual.com,2026,1,0,0,1,0,0,0
+Maxime Schoemans,e:maxime.schoemans@enterprisedb.com,2026,1,1,0,0,0,0,0
+Merlin Moncure,e:mmoncure@gmail.com,2026,1,0,1,1,0,0,0
+Vignesh C <vignesh21@gmail.com,n:vignesh c vignesh gmail com,2026,1,1,0,0,0,0,0
+Alex Shapalov,e:shapalov@gmail.com,2026,1,0,0,1,0,0,0
+Sivaprasad,e:sivaprasad.postgres@gmail.com,2026,1,0,1,0,0,0,0
+Pavel Kopylov,e:pkopylov@cloudlinux.com,2026,1,1,0,1,0,0,0
+Michael Schönitzer,e:michael@schoenitzer.de,2026,1,0,0,1,0,0,0
+Patrick Reynolds,e:piki@planetscale.com,2026,1,1,0,0,0,0,0
+Suyang Zhong,e:syzhong16@gmail.com,2026,1,0,0,1,0,0,0
+Adam Lee,e:adam8157@gmail.com,2026,1,1,0,0,0,0,0
+Rogers Wang,e:rogers.ww@qq.com,2026,1,0,0,1,0,0,0
+Masahiko Sawada sawada.mshk@gmail.com,n:masahiko sawada sawada mshk gmail com,2026,1,0,0,1,0,0,0
+Xuneng Zhou xunengzhou@gmail.com,n:xuneng zhou xunengzhou gmail com,2026,1,1,0,0,0,0,0
+Alexander Korotkov aekorotkov@gmail.com,n:alexander korotkov aekorotkov gmail com,2026,1,0,1,0,0,0,0
+Zhou Digoal,e:digoal@126.com,2026,1,0,0,1,0,0,0
+Vismay Tiwari,e:vismay.t@gmail.com,2026,1,1,0,0,0,0,0
+Annie,e:10215501441@stu.ecnu.edu.cn,2026,1,0,0,1,0,0,0
+Jobin Augustine,e:jobinau@gmail.com,2026,1,0,0,1,0,0,0
+Marina Polyakova,e:m.polyakova@postgrespro.ru,2026,1,0,1,1,0,0,0
+Sirisha Chamarthi,e:sirichamarthi22@gmail.com,2026,1,1,0,0,0,0,0
+Ilya Portnov,e:i.portnov@compassplus.com,2026,1,0,0,1,0,0,0
+Orestis Markou,e:orestis@orestis.gr,2026,1,0,0,1,0,0,0
+Muhammad Taha Naveed,e:m.taha.naveed27@gmail.com,2026,1,1,0,0,0,0,0
+Lev Nikolaev,e:lev.nikolaev@tantorlabs.com,2026,1,0,0,1,0,0,0
+Garry Polley,n:garry polley,2026,1,1,0,1,0,0,0
+Gladyshev Ilya,e:ilya.gladyshev@linux.dev,2026,1,1,0,0,0,0,0
+e:phamnguyenducduong@gmail.com,e:phamnguyenducduong@gmail.com,2026,1,0,0,1,0,0,0
+Kuan-Ting Kuo,e:m0935388420@gmail.com,2026,1,0,0,1,0,0,0
+Xingwang Xiang,e:v3rdant.xiang@gmail.com,2026,1,0,0,1,0,0,0
+Solaimurugan Vellaipandiyan,e:drsolaimurugan.v@gmail.com,2026,1,0,1,0,0,0,0
+Brian Carpenter | Deep Fork Cyber,e:b@deepforkcyber.com,2026,1,0,0,1,0,0,0
+Anh Khoa,e:blkhoa2004@gmail.com,2026,1,0,0,1,0,0,0
+Tyler Smart,e:tyler@smarts.io,2026,1,0,0,1,0,0,0
+Ilia Kashintsev,e:ilia.kashintsev@gmail.com,2026,1,0,0,1,0,0,0
+Daniel Bauman,e:danielbaniel@gmail.com,2026,1,1,0,0,0,0,0
+Pretham,e:prezza672@gmail.com,2026,1,0,1,0,0,0,0
+Ante Krešić,e:ante@tigerdata.com,2026,1,1,0,0,0,0,0
+Adam Brusselback,e:adambrusselback@gmail.com,2026,1,0,1,0,0,0,0
+Enrique Sánchez,e:enriqueesanchz@gmail.com,2026,1,0,1,0,0,0,0
+Lucas Velgus,e:velgusgus599@gmail.com,2026,1,0,0,1,0,0,0
+Filip Janus,e:fjanus@redhat.com,2026,1,0,0,1,0,0,0
+Daniel Bakker,e:daniel@jackds.nl,2026,1,0,0,1,0,0,0
+Shishir Sharma,e:ansh01072001@gmail.com,2026,1,0,0,1,0,0,0
+Jingzhou Fu,e:fuboat@outlook.com,2026,1,0,0,1,0,0,0
+Vladimir Tokarev,e:vladimirelitokarev@gmail.com,2026,1,0,0,1,0,0,0
+OpenAI Security Research Team,n:openai security research team,2026,1,1,0,0,0,0,0
+p4p3r,e:kbfanta@naver.com,2026,1,0,0,1,0,0,0
+Tulya Project,n:tulya project,2026,1,0,0,1,0,0,0
+Bitecope Technologies Private Ltd,n:bitecope technologies private ltd,2026,1,0,0,1,0,0,0
+Mehmet D. INCE,e:mehmet@mehmetince.net,2026,1,0,0,1,0,0,0
+Sajeeb Lohani,n:sajeeb lohani,2026,1,0,0,1,0,0,0
+Francesco Verardi,e:frevadiscor89@gmail.com,2026,1,0,0,1,0,0,0
+Yuhang Wu,e:yuhang@depthfirst.com,2026,1,0,0,1,0,0,0
+Zhenpeng Lin,n:zhenpeng lin,2026,1,0,0,1,0,0,0
+Amjad Shahzad,e:amjadshahzad2000@gmail.com,2026,1,0,0,1,0,0,0
+Tan Zhen of AntAISecurityLab,e:tanzhen.antai@outlook.com,2026,1,0,0,1,0,0,0
+Tomer Fichman,e:tomer@irregular.com,2026,1,0,0,1,0,0,0
+Rick de Jager,e:rick@v12.sh,2026,1,0,0,1,0,0,0
+Heewon Song,e:asteria121@78researchlab.com,2026,1,0,0,1,0,0,0
+Sylvie Mayer,e:smayer@cloudflare.com,2026,1,0,0,1,0,0,0
+Hillai Ben Sasson,e:hillai.bensasson@wiz.io,2026,1,0,0,1,0,0,0
+Gleb Kashkin,e:g.kashkin@postgrespro.ru,2026,1,1,1,0,0,0,0
+David Karapetyan,e:dkarapetyan@gmail.com,2026,1,1,0,0,0,0,0
+Alberto Piai,e:alberto.piai@gmail.com,2026,1,1,0,0,0,0,0
+Sarath Kumar,e:sarath@iitmpravartak.net,2026,1,0,0,1,0,0,0
+Yushu Chen,e:gentcys@gmail.com,2026,1,0,1,0,0,0,0
+Nick Ivanov,e:nick.ivanov@enterprisedb.com,2026,1,0,0,1,0,0,0
+Хамидуллин Рустам,e:r.khamidullin@postgrespro.ru,2026,1,1,0,1,0,0,0
+Dan Stefura,e:dstefura@bluecatnetworks.com,2026,1,0,0,1,0,0,0
+Buildfarm member porpoise,n:buildfarm member porpoise,2026,1,0,0,1,0,0,0
+Marco Nenciarini,e:marco.nenciarini@enterprisedb.com,2026,1,1,0,0,0,0,0
+Matt Suiche,e:matt@tolmo.com,2026,1,1,0,0,0,0,0
+Yuanchao Zhang,e:145zhangyc@gmail.com,2026,1,0,1,0,0,0,0
+Fabrice Chapuis,e:fabrice636861@gmail.com,2026,1,0,0,1,0,0,0
+Richard Neill,e:richard.neill@telos.digital,2026,1,0,0,1,0,0,0
+Phil,n1:phil,2026,1,0,0,1,0,0,0
+Keith Paskett,e:keith.paskett@logansw.com,2026,1,0,0,1,0,0,0
+Greg Lamberson,e:greg@lamco.io,2026,1,0,1,0,0,0,0
+Scott Ray,e:scott@scottray.io,2026,1,0,1,0,0,0,0
+Alex Masterov,e:amasterov@gmail.com,2026,1,0,0,1,0,0,0
+Pierre Senellart,e:pierre@senellart.com,2026,1,0,0,1,0,0,0
+Christophe Pettus,e:xof@thebuild.com,2026,1,0,0,1,0,0,0
+Maaz Syed Adeeb,e:maaz.adeeb@gmail.com,2026,1,0,0,1,0,0,0
+Semih Doğan,e:semih702do@gmail.com,2026,1,1,0,0,0,0,0
+oxsignal,e:awo@kakao.com,2026,1,0,0,1,0,0,0
+Andreas Lind,e:andreaslindpetersen@gmail.com,2026,1,1,0,0,0,0,0
+Arne Roland,e:a.roland@index.de,2026,1,1,0,0,0,0,0
+Nikita Glukhov,e:n.gluhov@postgrespro.ru,2026,1,1,0,0,0,0,0
+Teodor Sigaev,e:teodor@sigaev.ru,2026,1,1,0,0,0,0,0
+Oleg Bartunov,e:obartunov@postgrespro.ru,2026,1,1,0,0,0,0,0
+Anton A. Melnikov,e:aamelnikov@inbox.ru,2026,1,1,0,0,0,0,0
+Andrew Alsup,e:bluesbreaker@gmail.com,2026,1,0,1,0,0,0,0
+Zhihong Yu,e:zyu@yugabyte.com,2026,1,0,1,0,0,0,0
+Jonas Boberg,e:bobergj@gmail.com,2026,1,0,0,1,0,0,0
+Lars Kanis,e:lars@greiz-reinsdorf.de,2026,1,0,0,1,0,0,0
+Bowen Shi,e:zxwsbg12138@gmail.com,2026,1,0,0,1,0,0,0
+Adam Pickering,e:adamkpickering@gmail.com,2026,1,0,0,1,0,0,0
+TAKATSUKA Haruka,e:harukat@sraoss.co.jp,2026,1,0,0,1,0,0,0
+Kirill Gavrilov,e:diphantxm@gmail.com,2026,1,1,0,0,0,0,0
+Maxym Kharchenko,e:maxymkharchenko@gmail.com,2026,1,0,1,0,0,0,0
+Daniel Farkaš,e:daniel.farkas@datoris.com,2026,1,0,0,1,0,0,0
+Feng Wu,e:wufengwufengwufeng@gmail.com,2026,1,1,0,0,0,0,0
+Daria Shanina,e:vilensipkdm@gmail.com,2026,1,0,0,1,0,0,0
+Glauber Batista,e:glauberrbatista@gmail.com,2026,1,0,0,1,0,0,0
+iMSA,n1:imsa,2026,1,0,0,1,0,0,0
+Jehan-Guillaume de Rorthais,e:jgdr@dalibo.com,2026,1,1,0,0,0,0,0
+Xing Guo,e:higuoxing@gmail.com,2026,1,1,0,0,0,0,0
+Igi Izumi,e:igi@sraoss.co.jp,2026,1,0,0,1,0,0,0
+Andrzej Doros,e:adoros@starfishstorage.com,2026,1,0,0,1,0,0,0
+Hans Buschmann,e:buschmann@nidsa.net,2026,1,0,0,1,1,0,0
+zhanglihui,e:zlh21343@163.com,2026,1,0,0,1,0,0,0
+Mikhail Litsarev,e:m.litsarev@postgrespro.ru,2026,1,1,0,0,0,0,0
+Sergey Tatarintsev,e:s.tatarintsev@postgrespro.ru,2026,1,1,0,0,0,0,0
+Vishal Prasanna,e:vishal.g@zohocorp.com,2026,1,1,0,0,0,0,0
+Ning Sun,e:classicning@gmail.com,2026,1,1,0,0,0,0,0
+Sanjaya Waruna,e:sanjaya.waruna@gmail.com,2026,1,0,0,1,0,0,0
+Stolpovskikh Danil,e:d.stolpovskikh@ftdata.ru,2026,1,1,0,0,0,0,0
+Tingchuan Sun,e:suntingchuan1996@163.com,2026,1,0,1,0,0,0,0
+Masashi Kamura,e:kamura.masashi@fujitsu.com,2026,1,1,0,0,0,0,0
+Lakshmi G,e:lakshmigcdac@gmail.com,2026,1,0,1,0,0,0,0
+duplicates reported by Yugo Nagata,n:duplicates reported by yugo nagata,2026,1,0,0,1,0,0,0
+Diego Frias,e:mail@dzfrias.dev,2026,1,1,0,0,0,0,0
+hubert depesz lubaczewski,e:depesz@depesz.com,2026,1,0,0,1,0,0,0
+Sandeep Thakkar,e:sandeep.thakkar@enterprisedb.com,2026,1,0,0,1,0,0,0
+彭冲,e:chong.peng@enmotech.com,2026,1,0,0,1,0,0,0
+Lu Feng,e:fnlo1995@gmail.com,2026,1,0,1,0,0,0,0
+X-MAN,n1:x-man,2026,1,1,0,1,0,0,0
+Egor Chindyaskin,e:kyzevan23@mail.ru,2026,1,0,0,1,0,0,0
+Chong Peng,n:chong peng,2026,1,1,0,1,0,0,0
+Afrah Razzak,e:mypg.afrah@gmail.com,2026,1,1,0,0,0,0,0
+Varik Matevosyan,e:varikmatevosyan@gmail.com,2026,1,1,0,1,0,0,0
+a.kozhemyakin,n:a kozhemyakin,2026,1,0,0,1,0,0,0
+Martin Heistermann,e:martin.heistermann@unibe.ch,2026,1,0,0,1,0,0,0
+XlabAI Team of Tencent Xuanwu Lab,n:xlabai team of tencent xuanwu lab,2026,1,0,0,1,0,0,0
+Valery Gubanov,e:valerygubanov95@gmail.com,2026,1,0,0,1,0,0,0
+Jeroen Gui,e:jeroen.gui1@proton.me,2026,1,0,0,1,0,0,0
+Calif.io in collaboration,n:calif io in collaboration,2026,1,0,0,1,0,0,0
+Anthropic,n1:anthropic,2026,1,0,0,1,0,0,0
+Bruce Dang,e:bruce@calif.io,2026,1,0,0,1,0,0,0
+Jihe Wang,e:wangjihe.mail@gmail.com,2026,1,0,0,1,0,0,0
+Jakob Egger,e:jakob@eggerapps.at,2026,1,0,0,1,0,0,0
+Zhibai Song,e:songzhibai1234@gmail.com,2026,1,0,0,1,0,1,0
+Shruthi Gowda,e:gowdashru@gmail.com,2026,1,1,0,0,0,0,0
+Lukas Eder,e:lukas.eder@gmail.com,2026,1,0,0,1,0,0,0
+Julien Tachoires,e:julien@tachoires.me,2026,1,1,0,0,0,0,0
+Jack Bonatakis,e:jack@bonatak.is,2026,1,0,1,0,0,0,0
+Maksim Logvinenko,e:logvinenko-ms@yandex.ru,2026,1,1,0,0,0,0,0
+Siddharth Kothari,e:sidkot@google.com,2026,1,1,0,0,0,0,0
+Igor Stepansky,e:igor.stepansky@orca.security,2026,1,0,0,1,0,0,0
+François Jehl,e:francois.jehl@pigment.com,2026,1,0,0,1,0,0,0
+e:shammat@gmx.net,e:shammat@gmx.net,2026,1,0,0,1,0,0,0
+e:<mimidatabase@gmail.com>,e:<mimidatabase@gmail.com>,2026,1,0,0,1,0,0,0
+Hu Xunqi,e:huxunqi.08@gmail.com,2026,1,0,1,0,0,0,0
+Chuanwen Hu,e:463945512@qq.com,2026,1,1,0,0,0,0,0
+Dapeng Wang,e:wangdp20191008@gmail.com,2026,1,0,1,0,0,0,0
+Sandro Santilli,e:strk@kbt.io,2026,1,0,0,1,0,0,0
+Shinoda,n1:shinoda,2026,1,1,0,1,0,0,0
+Cándido Antonio Martínez Descalzo,e:candido@ninehq.com,2026,1,0,0,1,0,0,0
+Palak Chaturvedi,e:chaturvedipalak1911@gmail.com,2026,1,1,0,0,0,0,0
+RekGRpth,e:rekgrpth@gmail.com,2026,1,0,0,1,0,0,0
+Dmytro Astapov,e:dastapov@gmail.com,2026,1,1,0,0,0,0,0
+Andrey Silitskiy,e:a.silitskiy@postgrespro.ru,2026,1,1,0,0,0,0,0
+Takamichi Osumi,e:osumi.takamichi@fujitsu.com,2026,1,0,1,0,0,0,0
+Ronan Dunklau,e:ronan.dunklau@aiven.io,2026,1,0,1,0,0,0,0
+Daniel Gustafsson <daniel@yesql.seA,n:daniel gustafsson daniel yesql sea,2026,1,1,0,0,0,0,0
+Matthew Sterrett,e:matthewsterrett2@gmail.com,2026,1,1,0,0,0,0,0
+Andrew Kim,e:andrew.kim@intel.com,2026,1,1,0,0,0,0,0
+Buildfarm,n1:buildfarm,2026,1,0,0,1,0,0,0
+Magnus Hagander,e:magnus@hagander.net,2026,1,1,0,0,0,0,0
+Haoyan Wang,e:wanghaoyan20@163.com,2026,1,0,1,0,0,0,0
+vaibhave postgres,e:postgresvaibhave@gmail.com,2026,1,1,0,0,0,0,0
+Yasuo Honda,e:yasuo.honda@gmail.com,2026,1,1,0,0,0,0,0
+Dimitre Radoulov,e:cichomitiko@gmail.com,2026,1,0,0,1,0,0,0
+Mutaamba Maasha,e:maasha@gmail.com,2026,1,0,1,0,0,0,0
+Gurjeet Singh,e:gurjeet@singh.im,2026,1,0,1,0,0,0,0
+David Christensen,e:david.christensen@crunchydata.com,2026,1,1,0,0,0,0,0
+Robert Pang,e:robertpang@google.com,2026,1,1,0,0,0,0,0
+Sergey Prokhorenko,e:sergeyprokhorenko@yahoo.com.au,2026,1,0,0,0,0,1,0
+Илья Чердаков,e:i.cherdakov.pg@gmail.com,2026,1,0,1,0,0,0,0
+Chengxi Sun,e:sunchengxi@highgo.com,2026,1,0,1,0,0,0,0
+Yamaguchi Atsuo,e:acrobatcoder@gmail.com,2026,1,1,0,0,0,0,0
+Hang Ammmkilo,e:ammmkilo@163.com,2026,1,0,0,1,0,0,0
+Artur Zakirov,e:zaartur@gmail.com,2026,1,1,0,0,0,0,0
+Davin Shearer,e:davin@apache.org,2026,1,0,1,0,0,0,0
+Sergey Koposov,e:sergey.koposov@ed.ac.uk,2026,1,0,0,1,0,0,0
+Ruben Ruiz,e:ruben.ruizcuadrado@gmail.com,2026,1,0,0,1,0,0,0
+e:dorian.752@live.fr,e:dorian.752@live.fr,2026,1,0,0,1,0,0,0
+Todd Lang,e:todd.lang@d2l.com,2026,1,0,0,1,0,0,0
+Niccolò Fei,e:niccolo.fei@enterprisedb.com,2026,1,0,1,0,0,0,0
+Yi Ding,e:dingyi_yale@163.com,2026,1,0,1,0,0,0,0
+e:fairyfar@msn.com,e:fairyfar@msn.com,2026,1,1,0,0,0,0,0
+Neil Conway,e:neil.conway@gmail.com,2026,1,0,1,0,0,0,0
+Maxim Orlov,e:orlovmg@gmail.com,2026,1,1,0,0,0,0,0
+Vinod Sridharan,e:vsridh90@gmail.com,2026,1,1,0,0,0,0,0
+Jinbinge,e:jinbinge@126.com,2026,1,0,1,0,0,0,0
+Dian Fay,e:di@nmfay.com,2026,1,0,1,0,0,0,0
+Alexandre Felipe,e:o.alexandre.felipe@gmail.com,2026,1,0,0,1,0,0,0
+Yang Yuanzhuo,e:1197620467@qq.com,2026,1,0,1,0,0,0,0
+Sahitya Chandra,e:sahityajb@gmail.com,2026,1,1,0,0,0,0,0
+Paul Bunn,e:paul.bunn@icloud.com,2026,1,1,0,0,0,0,0
+George Tarasov,e:george.v.tarasov@gmail.com,2026,1,0,0,1,0,0,0
+PALAYRET Jacques,e:jacques.palayret@meteo.fr,2026,1,0,0,1,0,0,0
+Yonghao Lee,e:yonghao_lee@qq.com,2026,1,0,0,1,0,0,0
+Andrew Jackson,e:andrewjackson947@gmail.com,2026,1,1,0,0,0,0,0
+Atsushi Torikoshi,e:torikoshia@oss.nttdata.com,2026,1,0,1,0,0,0,0
+Shengbin Zhao,e:zshengbin91@gmail.com,2026,1,0,1,0,0,0,0
+zhangqiang,e:zhang_qiang81@163.com,2026,1,0,1,0,0,0,0
+Олег Самойлов,e:splarv@ya.ru,2026,1,0,0,1,0,0,0
+Swirl Smog Dowry,e:swirl-smog-dowry@duck.com,2026,1,0,0,1,0,0,0
+Tushar Ahuja,e:tushar.ahuja@enterprisedb.com,2026,1,0,1,0,0,0,0
+ji xu,e:thanksgreed@gmail.com,2026,1,0,1,0,0,0,0
+Henrik TJ,e:henrik@0x48.dk,2026,1,1,0,0,0,0,0
+Srirama Kucherlapati,e:sriram.rk@in.ibm.com,2026,1,1,0,0,0,0,0
+Xiangyu Liang,e:liangxiangyu_2013@163.com,2026,1,0,1,0,0,0,0
+Sergey Shinderuk,e:s.shinderuk@postgrespro.ru,2026,1,0,0,1,0,0,0
+Lucio Chiessi,e:lucio.chiessi@trustly.com,2026,1,0,0,1,0,0,0
+SATŌ Kentarō,e:ranvis@gmail.com,2026,1,0,0,1,0,0,0
+Marko Tiikkaja,e:marko@joh.to,2026,1,1,0,0,0,0,0
+Nicolas Adenis-Lamarre,e:nicolas.adenis.lamarre@gmail.com,2026,1,0,0,0,0,1,0
+Gilles Darold,e:gilles@darold.net,2026,1,1,0,0,0,0,0
+liu xiaohui,e:liuxh.zj.cn@gmail.com,2026,1,0,1,0,0,0,0
+Andy Fan,e:zhihui.fan1213@gmail.com,2026,1,1,0,0,0,0,0
+Altan Birler,e:altan.birler@tum.de,2026,1,0,0,1,0,0,0
+Tan Yang,e:332696245@qq.com,2026,1,0,1,0,0,0,0
+Team Xint Code as part of zeroday.cloud,n:team xint code as part of zeroday cloud,2026,1,0,0,1,0,0,0
+David Bidoc,e:dcbidoc@gmail.com,2026,1,1,0,0,0,0,0
+Guillaume Lelarge,e:guillaume@lelarge.info,2026,1,0,1,0,0,0,0
+Tianchen Zhang,e:zhang_tian_chen@163.com,2026,1,1,0,0,0,0,0
+yanliang lei,e:msdnchina@163.com,2026,1,0,0,1,0,0,0
+Meng Zhang,e:mza117jc@gmail.com,2026,1,1,0,0,0,0,0
+Daniel Woelfel,e:dwwoelfel@gmail.com,2026,1,0,0,1,0,0,0
+Joseph Koshakow,e:koshy44@gmail.com,2026,1,1,0,0,0,0,0
+Todd Liebenschutz-Jones,e:todd.liebenschutz-jones@starlingbank.com,2026,1,1,0,0,0,0,0
+Pierre Ducroquet,e:p.psql@pinaraf.info,2026,1,0,1,0,0,0,0
+Nikolay Shaplov,e:dhyan@nataraj.su,2026,1,1,0,0,0,0,0
+Timur Magomedov,e:t.magomedov@postgrespro.ru,2026,1,0,1,0,0,0,0
+Bihua Wang,e:wangbihua.cn@gmail.com,2026,1,0,0,1,0,0,0
+liujinyang,e:21043272@qq.com,2026,1,1,0,0,0,0,0
+Roman Khapov,e:rkhapov@yandex-team.ru,2026,1,0,1,0,0,0,0
+albert tan,e:alterttan1223@gmail.com,2026,1,0,0,1,0,0,0
+Paveł Tyślacki,e:pavel.tyslacki@gmail.com,2026,1,0,0,1,0,0,0
+myzhen,e:zhenmingyang@yeah.net,2026,1,1,0,0,0,0,0
+zhibin wang,e:killerwzb@gmail.com,2026,1,0,1,0,0,0,0
+Zhiyuan Su,e:suzhiyuan_pg@126.com,2026,1,1,0,0,0,0,0
+Alyona Vinter,e:dlaaren8@gmail.com,2026,1,1,0,0,0,0,0
+Ilyasov Ian,e:ianilyasov@outlook.com,2026,1,0,1,0,0,0,0
+Andrey Rudometov,e:unlimitedhikari@gmail.com,2026,1,0,1,0,0,0,0
+Niyas Sait,e:niyas.sait@linaro.org,2026,1,1,0,0,0,0,0
+Dave Cramer,e:davecramer@gmail.com,2026,1,1,0,0,0,0,0
+Xueyu Gao,e:gaoxueyu_hope@163.com,2026,1,0,0,1,0,0,0
+Zepeng Zhang,e:redraiment@gmail.com,2026,1,0,0,1,0,0,0
+Ruikai Peng,e:ruikai@pwno.io,2026,1,0,1,0,0,0,0
+sunil s,e:sunilfeb26@gmail.com,2026,1,1,0,0,0,0,0
+kelan,e:ke_lan1@qq.com,2026,1,1,0,0,0,0,0
+shiyu qin,e:qinshy510@gmail.com,2026,1,1,0,0,0,0,0
+zourenli,e:398740848@qq.com,2026,1,1,0,0,0,0,0
+Daisuke Higuchi,e:higudai@amazon.com,2026,1,1,0,0,0,0,0
+Rohit Prasad,e:rohit.prasad@arm.com,2026,1,0,1,0,0,0,0

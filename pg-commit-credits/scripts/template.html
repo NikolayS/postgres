@@ -1,0 +1,899 @@
+<title>Postgres Credit Ledger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column (~1040px) of numbered findings; each finding = headline sentence + one chart or table. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#111620; --ink-2:#4a5262; --ink-3:#7a8293;
+  --rule:#dfe3ea; --grid:#e9ecf1; --track:#eceff4;
+  --accent:#1f5fa8;
+  --nik:#2a78d6; --ab:#eb6834; --other:#a7aebb; --other-2:#c9ced8;
+  --hl-nik:#e6f0fc; --hl-ab:#fdece4; --kw:#1baf7a; --hl-kw:#e2f5ed;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
+  --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
+  --nik:#3987e5; --ab:#d95926; --other:#5d6574; --other-2:#3f4652;
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; --kw:#199e70; --hl-kw:#16302a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
+  --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
+  --nik:#3987e5; --ab:#d95926; --other:#5d6574; --other-2:#3f4652;
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; --kw:#199e70; --hl-kw:#16302a; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 64px;display:grid;gap:56px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.05;font-weight:700}
+h2{font-size:clamp(21px,2.6vw,27px);line-height:1.2;font-weight:700}
+h3{font-size:17px;font-weight:600}
+p{margin:0;max-width:68ch}
+.mono,code{font-family:var(--f-mono);font-size:.88em}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.muted{color:var(--ink-2)}
+.num{font-variant-numeric:tabular-nums}
+header{display:grid;gap:14px;border-bottom:1px solid var(--rule);padding-bottom:28px}
+header .lede{font-size:17px;color:var(--ink-2)}
+.who{display:inline-flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}
+.sw.nik{background:var(--nik)}.sw.ab{background:var(--ab)}.sw.oth{background:var(--other)}
+section{display:grid;gap:18px;min-width:0}
+section > *, .wrap > *{min-width:0}
+section > .head{display:grid;gap:6px}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:20px}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:720px){.kpis{grid-template-columns:1fr}}
+.kpi{display:grid;gap:14px}
+.kpi .name{display:flex;align-items:center;gap:8px;font-family:var(--f-display);font-size:19px;font-weight:700}
+.kpi .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.kpi .big{font-family:var(--f-display);font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .lab{font-size:12.5px;color:var(--ink-2);line-height:1.35;margin-top:6px}
+/* line chart */
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{fill:var(--ink-3);font-family:var(--f-mono);font-size:11px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:150px;z-index:2}
+.tip b{font-family:var(--f-mono);font-weight:500}
+.tip .r{display:flex;justify-content:space-between;gap:12px;align-items:center}
+/* bar lists */
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.two{grid-template-columns:1fr}}
+.bars{display:grid;gap:3px}
+.bar{display:grid;grid-template-columns:2.2em minmax(0,11.5em) minmax(0,1fr) 3.2em;align-items:center;gap:8px;padding:3px 6px;border-radius:5px;font-size:13.5px}
+.bar .rk{font-family:var(--f-mono);font-size:12px;color:var(--ink-3);text-align:right}
+.bar .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .tr{height:12px;position:relative}
+.bar .fl{position:absolute;left:0;top:0;bottom:0;background:var(--other-2);border-radius:0 4px 4px 0}
+.bar .v{font-family:var(--f-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+.bar.c .nm::after,.ctag{content:"C";display:inline-block;margin-left:6px;font-size:10px;line-height:14px;padding:0 4px;border-radius:3px;border:1px solid var(--rule);font-family:var(--f-mono);color:var(--ink-3);vertical-align:1px}
+.two > .card{align-content:start}
+.bar.nik{background:var(--hl-nik)}.bar.nik .fl{background:var(--nik)}.bar.nik .nm{font-weight:600}
+.bar.ab{background:var(--hl-ab)}.bar.ab .fl{background:var(--ab)}.bar.ab .nm{font-weight:600}
+.bars.wide .bar{grid-template-columns:0 minmax(0,17em) minmax(0,1fr) 3.2em}.bars.wide .rk{visibility:hidden}
+mark.m-kw{background:var(--hl-kw);box-shadow:inset 0 -2px 0 var(--kw)}
+.bar.kw,.dbr.kw{background:var(--hl-kw)}.bar.kw .fl,.dbr.kw .d.b,.dbr.kw .ln{background:var(--kw)}.bar.kw .nm,.dbr.kw .nm{font-weight:600}.sw.kw{background:var(--kw)}
+mark.m-kw,mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:600}mark.m-nik{background:var(--hl-nik);box-shadow:inset 0 -2px 0 var(--nik)}mark.m-ab{background:var(--hl-ab);box-shadow:inset 0 -2px 0 var(--ab)}
+.gap{text-align:center;color:var(--ink-3);font-family:var(--f-mono);font-size:12px;letter-spacing:.3em;padding:2px 0}
+/* dumbbell */
+.db{display:grid;gap:2px}
+.dbr{display:grid;grid-template-columns:2em minmax(0,12em) minmax(0,1fr) 6.5em;align-items:center;gap:10px;padding:4px 6px;border-radius:5px;font-size:13.5px}
+.dbr .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dbr .tr{position:relative;height:16px}
+.dbr .ln{position:absolute;top:7px;height:2px;background:var(--other-2)}
+.dbr .d{position:absolute;top:3px;width:10px;height:10px;border-radius:50%;margin-left:-5px;box-shadow:0 0 0 2px var(--panel)}
+.dbr .d.a{background:var(--panel);border:2px solid var(--other);width:10px;height:10px;box-sizing:border-box}
+.dbr .d.b{background:var(--ink-2)}
+.dbr .v{font-family:var(--f-mono);font-size:12px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.dbr.nik{background:var(--hl-nik)}.dbr.nik .d.b{background:var(--nik)}.dbr.nik .ln{background:var(--nik)}.dbr.nik .nm{font-weight:600}
+.dbr.ab{background:var(--hl-ab)}.dbr.ab .d.b{background:var(--ab)}.dbr.ab .ln{background:var(--ab)}.dbr.ab .nm{font-weight:600}
+.dbr .rk{font-family:var(--f-mono);font-size:12px;color:var(--ink-3);text-align:right}
+@media (max-width:600px){
+  .dbr{grid-template-columns:2em minmax(0,1fr) auto;row-gap:2px}
+  .dbr .tr{grid-column:2 / 4;grid-row:2}
+  .db .axisrow{display:block;padding:0 6px 0 calc(6px + 2em + 10px)}
+  .db .axisrow > span:not(.axis){display:none}
+  .db .axisrow .axis{display:block}
+}
+.axisrow{display:grid;grid-template-columns:2em minmax(0,12em) minmax(0,1fr) 6.5em;gap:10px;padding:0 6px;font-size:13.5px}
+.axis{position:relative;height:16px;font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
+.axis span{position:absolute;transform:translateX(-50%)}
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--panel);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td .mono{white-space:nowrap}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-2);margin:1px 3px 1px 0;white-space:nowrap}
+.pill.author{border-color:var(--ink-2);color:var(--ink)}
+.rolebar{display:flex;height:10px;border-radius:3px;overflow:hidden;gap:2px;min-width:120px}
+.rolebar i{display:block;height:100%}
+.r-a{background:var(--ink)}.r-v{background:var(--ink-3)}.r-r{background:var(--other-2)}.r-o{background:var(--track)}
+.keyrow{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
+.keyrow span{display:inline-flex;gap:6px;align-items:center}
+.keyrow i{width:10px;height:10px;border-radius:2px;display:inline-block}
+details summary{cursor:pointer;color:var(--accent);font-weight:500}
+details summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes{display:grid;gap:8px;font-size:13.5px;color:var(--ink-2)}
+.notes li{margin-bottom:6px}
+.callout{border-left:3px solid var(--rule);padding-left:14px;color:var(--ink-2)}
+a{color:var(--accent)}
+</style>
+<style>
+.kpi4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.kpi4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{display:grid;gap:6px;align-content:start}
+.tile .big{font-family:var(--f-display);font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.tile .lab{font-size:13px;color:var(--ink-2);line-height:1.4}
+.delta{font-family:var(--f-mono);font-size:12px;color:var(--ink-2)}
+.cols{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;align-items:end;height:200px;padding-top:18px}
+.col{display:grid;grid-template-rows:auto 1fr;height:100%;align-items:end;justify-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.col .cv{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
+.col .cb{width:70%;max-width:56px;background:var(--accent);border-radius:4px 4px 0 0;align-self:end}
+.col.partial .cb{background:repeating-linear-gradient(135deg,var(--accent) 0 5px,color-mix(in srgb,var(--accent) 55%,var(--panel)) 5px 9px)}
+.colx{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;border-top:1px solid var(--rule);padding-top:6px;font-family:var(--f-mono);font-size:11.5px;color:var(--ink-3);text-align:center}
+.vs th:nth-child(2),.vs td:nth-child(2){background:var(--hl-nik)}
+.vs th:nth-child(3),.vs td:nth-child(3){background:var(--hl-ab)}
+.vs td.lead{font-weight:700}
+.rec{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.rc{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.rc .k{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.rc .b{font-family:var(--f-display);font-size:26px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.rc .s{font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.rc.nik{border-top:3px solid var(--nik)}.rc.ab{border-top:3px solid var(--ab)}
+.hm{display:grid;grid-template-columns:2.6em repeat(24,minmax(0,1fr));gap:2px;font-family:var(--f-mono);font-size:10px;color:var(--ink-3)}
+.hm i{display:block;aspect-ratio:1;border-radius:2px;background:var(--accent)}
+.saga{display:grid;gap:0;border-left:2px solid var(--nik);margin-left:6px}
+.saga div{position:relative;padding:6px 0 10px 18px;font-size:13.5px}
+.saga div::before{content:"";position:absolute;left:-6px;top:11px;width:10px;height:10px;border-radius:50%;background:var(--nik);box-shadow:0 0 0 2px var(--panel)}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tab{display:inline-flex;align-items:center;gap:8px;font:inherit;font-weight:600;padding:8px 14px;border-radius:999px;border:1px solid var(--rule);background:var(--panel);color:var(--ink);cursor:pointer}
+.tab .mono{color:var(--ink-3);font-weight:400}
+.tab[aria-selected="true"].nik{background:var(--hl-nik);border-color:var(--nik)}
+.tab[aria-selected="true"].ab{background:var(--hl-ab);border-color:var(--ab)}
+.tab[aria-selected="true"].kw{background:var(--hl-kw);border-color:var(--kw)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.part{border-top:2px solid var(--ink);padding-top:22px}
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">PostgreSQL master · credits in commit messages · data through __ASOF__</div>
+  <h1>Who gets credited in PostgreSQL commits</h1>
+  <p class="lede">Every commit to <code>master</code> lists who wrote, reviewed, reported or tested the change. This page counts those credits for every contributor from 2019 to 2026, shows who is growing fastest in 2026, and then looks closer at Nikolay Samokhvalov and Andrey Borodin.</p>
+  <p class="lede" style="font-size:14.5px">Throughout the page, <mark class="m-nik">Nikolay</mark> is marked in blue, <mark class="m-ab">Andrey</mark> in orange and <mark class="m-kw">Kirk Wolak</mark> in green. Anyone outside a top list is added at the bottom after a gap. People with no credits in a list's period are left out of it.</p>
+</header>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">2026 so far, Jan 1 – __ASOF_SHORT__, vs the same dates in 2025</div>
+    <h2 id="ovH"></h2>
+  </div>
+  <div class="kpi4" id="ov"></div>
+  <div class="card" style="display:grid;gap:8px">
+    <h3>People credited per year</h3>
+    <p class="muted" style="font-size:13px">Distinct people named in at least one commit. The striped 2026 bar covers only Jan 1 to __ASOF_SHORT__.</p>
+    <div class="cols" id="pcols"></div><div class="colx" id="pcolx"></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The leaders in 2026</div>
+    <h2>Tom Lane is still credited the most, and Chao Li is second. Committers hold 16 of the top 20 places.</h2>
+    <p class="muted">Credited commits from Jan 1 to __ASOF_SHORT__, 2026. Committers get credit for their own commits, so the right list leaves them out. <span class="ctag">C</span> marks a committer.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Everyone</h3><div class="bars" id="all26"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>People who aren't committers</h3><div class="bars" id="nc26"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Growth</div>
+    <h2>Chao Li grew the most, gaining 292 credited commits. Zsolt Parragi and Ayush Tiwari went from almost nothing to more than 100.</h2>
+    <p class="muted">The 15 biggest gains, comparing Jan 1 – __ASOF_SHORT__ of each year, ranked by gain among everyone credited in 2026. The hollow dot is 2025 and the filled dot is 2026.</p>
+  </div>
+  <div class="card"><div id="growth"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Reviewing and reporting</div>
+    <h2>Chao Li also leads in reviews. Noah Misch and Alexander Lakhin report the most bugs.</h2>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Reviewed-by, 2026 so far</h3><div class="bars" id="rev26"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Reported-by, 2026 so far</h3><div class="bars" id="rep26"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Five-year view</div>
+    <h2>Across 2022–2026, the most-credited people who aren't committers</h2>
+    <p class="muted">Out of 1,280 people credited in this period.</p>
+  </div>
+  <div class="card" style="display:grid;gap:12px"><div class="bars" id="nc5"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">AI in the commit log</div>
+    <h2 id="aiH"></h2>
+    <p class="muted" id="aiSub"></p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:10px">
+      <h3>Commits that mention AI tools, 2026 by month</h3>
+      <div class="cols" id="aiMon" style="grid-template-columns:repeat(10,minmax(0,1fr));height:170px"></div><div class="colx" id="aiMonX" style="grid-template-columns:repeat(10,minmax(0,1fr))"></div>
+    </div>
+    <div class="card" style="display:grid;gap:12px">
+      <h3>How AI was involved</h3>
+      <div class="bars wide" id="aiCats"></div>
+      <p class="muted" style="font-size:12.5px">Each commit is counted once, in the first group that fits, in the order shown.</p>
+    </div>
+  </div>
+  <div class="tbl"><table id="aiTools"></table></div>
+  <details class="card"><summary id="aiListSum">All AI-related commits</summary><div class="tbl" style="margin-top:12px;border:0"><table id="aiList"></table></div></details>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Companies</div>
+    <h2>Most credits can't be tied to a company. Among those that can, Fujitsu, Postgres Pro and EDB are steady, and Percona jumped in 2026.</h2>
+    <p class="muted" id="coSub"></p>
+  </div>
+  <div class="tbl"><table id="co"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Who commits whose work</div>
+    <h2>Contributors who aren't committers usually reach master through one or two committers. Amit Kapila's logical replication group is the densest cluster.</h2>
+    <p class="muted">The 30 strongest pairs in 2022–2026. Each line joins a contributor (left) to the committer who committed their credited work (right). Thicker lines mean more commits. Nikolay's and Andrey's strongest pairs are added in their colors.</p>
+  </div>
+  <div class="card"><div class="chart" id="net"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Newcomers</div>
+    <h2 id="retH"></h2>
+    <p class="muted">A newcomer is someone credited for the first time since 2019. Each row follows the people first credited that year.</p>
+  </div>
+  <div class="tbl"><table id="ret"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Release cycles</div>
+    <h2 id="relH"></h2>
+    <p class="muted">Each cycle runs from one "Stamp HEAD as N devel" commit to the next. Bug fixes committed to master during a cycle count for that cycle, even when they also fix older releases. PG20 is still in progress.</p>
+  </div>
+  <div class="tbl"><table id="rel"></table></div>
+</section>
+
+<section class="part" style="border-top-width:1px">
+  <div class="head">
+    <div class="eyebrow">Records and rhythms</div>
+    <h2>Bug archaeology, streaks, night owls and other stories hiding in the log</h2>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Bug archaeology</div>
+    <h2 id="bugH"></h2>
+    <p class="muted" id="bugSub"></p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>How old the bug was when it was fixed</h3>
+    <div class="cols" id="bugCols" style="height:190px"></div><div class="colx" id="bugX" style="font-size:10.5px"></div></div>
+  <div class="tbl"><table id="bugOld"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The credit-line era</div>
+    <h2 id="trH"></h2>
+    <p class="muted">Names listed in each kind of credit line per year. Some of the growth is a change in habit: credits that used to be written as free text are now written as structured lines.</p>
+  </div>
+  <div class="tbl"><table id="tr"></table></div>
+  <div class="rec" id="trRec"></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Backpatching</div>
+    <h2 id="bpH"></h2>
+    <p class="muted">Commits since 2019 with a <code>Backpatch-through:</code> line. Not every committer uses this line, so many backpatched fixes aren't counted.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:8px"><h3>Oldest branch each fix went back to</h3><div class="cols" id="bpCols" style="height:180px"></div><div class="colx" id="bpX" style="font-size:10.5px"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Who reports the bugs that get backpatched, 2022–2026</h3><div class="bars" id="bpRep"></div><p class="muted" style="font-size:12px">Hover for how many of those fixes went back to PG13 or older.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Streaks</div>
+    <h2 id="stH"></h2>
+    <p class="muted" id="stSub"></p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>Every day Tom Lane committed, 2001–2026</h3><div style="overflow-x:auto"><div id="tomCal" style="min-width:600px"></div></div><p class="muted" id="tomCap" style="font-size:12px"></p></div>
+  <div class="card" style="display:grid;gap:12px"><h3>Longest run of consecutive commit days</h3><div class="bars" id="stBars"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Commit clock</div>
+    <h2 id="ckH"></h2>
+    <p class="muted">Committers' local time when they committed, 2022–2026. Time zones come from each committer's machine, so travel adds some noise.</p>
+  </div>
+  <div class="card" style="display:grid;gap:8px"><h3>All commits by weekday and hour</h3><div style="overflow-x:auto"><div class="hm" id="heat" style="min-width:520px"></div></div></div>
+  <div class="tbl"><table id="ck"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Career ladder</div>
+    <h2 id="ldH"></h2>
+    <p class="muted">People credited for the first time between mid-2019 and 2026 who aren't committers, grouped by the role of their first credit.</p>
+  </div>
+  <div class="tbl"><table id="ld"></table></div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>From first credit to committer</h3><div class="bars" id="ldBit"></div><p class="muted" style="font-size:12px">Days from first credit to first commit, for people who started committing in 2020 or later. * Already credited before 2019, when this data starts, so the real wait was longer.</p></div>
+    <div class="card" style="display:grid;gap:10px"><h3 id="clubH"></h3><p class="muted" style="font-size:12.5px">Credited as author, reviewer, reporter, tester and suggester, all since 2019.</p><p id="club" style="font-size:13.5px;line-height:1.7"></p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Big days</div>
+    <h2 id="bdH"></h2>
+    <p class="muted">Records for people who aren't committers, since 2019.</p>
+  </div>
+  <div class="rec" id="bd"></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Duos</div>
+    <h2 id="duoH"></h2>
+    <p class="muted">Pairs of people both credited as author on the same commit, since 2019.</p>
+  </div>
+  <div class="card"><div class="bars wide" id="duo"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Where discussions start</div>
+    <h2 id="thH"></h2>
+    <p class="muted">The host in each <code>Discussion:</code> link's message-id shows who sent the first email in the thread, for commits in 2026. Some message-ids carry a personal mail-client name such as <code>nathan</code>.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Thread-starter hosts, 2026</h3><div class="bars" id="thDom"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Commits with no Discussion link, 2026</h3><div class="bars" id="thNo"></div><p class="muted" style="font-size:12px">Share of each committer's 2026 commits, for committers with 60 or more commits.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Wordiness</div>
+    <h2 id="wdH"></h2>
+    <p class="muted">Median words per commit message since 2019, not counting credit lines. Committers with 150 or more commits.</p>
+  </div>
+  <div class="card"><div class="bars" id="wd"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Trivia</div>
+    <h2>Commits with words in their hashes, and who commits on holidays</h2>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:10px"><h3>Hashes that spell something</h3><div class="tbl" style="border:0"><table id="van"></table></div></div>
+    <div class="card" style="display:grid;gap:10px"><h3>Christmas Day commits</h3><p class="muted" id="xmasP" style="font-size:13px"></p><div class="bars" id="xmas"></div></div>
+  </div>
+</section>
+
+<section class="part">
+  <div class="head">
+    <div class="eyebrow">A closer look</div>
+    <h2>Nikolay Samokhvalov and Andrey Borodin</h2>
+    <p class="muted" id="vsLede"></p>
+  </div>
+  <div class="tbl"><table class="vs" id="vs"></table></div>
+</section>
+
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Records</div>
+    <h2>First credits, long silences and busiest months</h2>
+    <p class="muted">From each person's commit-message credits across all years.</p>
+  </div>
+  <div class="two"><div class="rec" id="recNik"></div><div class="rec" id="recAb"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The RI fast-path saga</div>
+    <h2 id="sagaH"></h2>
+    <p class="muted">Every commit by Amit Langote that credits Nikolay. Most fix the new RI fast-path for foreign-key checks in PG19.</p>
+  </div>
+  <div class="card"><div class="saga" id="saga"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Who commits your work</div>
+    <h2>Amit Langote committed 7 of Nikolay's commits. Andrey's work is spread across more committers, led by Michael Paquier.</h2>
+    <p class="muted">Credited commits in 2022–2026, grouped by the committer.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3><span class="who"><i class="sw nik"></i>Nikolay</span></h3><div class="bars" id="cmNik"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3><span class="who"><i class="sw ab"></i>Andrey</span></h3><div class="bars" id="cmAb"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Where in the code</div>
+    <h2>Nikolay's commits touch <code>backend/utils</code> (the RI triggers live there) and the docs most. Andrey's center on <code>backend/access</code>, where the index and heap code lives.</h2>
+    <p class="muted">Number of credited commits that change each area, across all years. Headers and tests aren't counted. Hover a bar to see lines changed.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3><span class="who"><i class="sw nik"></i>Nikolay</span></h3><div class="bars" id="codeNik"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3><span class="who"><i class="sw ab"></i>Andrey</span></h3><div class="bars" id="codeAb"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">By release cycle</div>
+    <h2 id="relUsH"></h2>
+    <p class="muted">Credited commits per development cycle, and rank among people who aren't committers in that cycle.</p>
+  </div>
+  <div class="tbl"><table class="vs" id="relUs"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Over 25 years</div>
+    <h2>Andrey has been credited every year since 2016. Nikolay has two separate periods, 2007–2010 and 2020 onward.</h2>
+    <p class="muted">Commits per year whose message names the person in any role, including credits written as free text. 2026 runs only to __ASOF_LONG__.</p>
+  </div>
+  <div class="card">
+    <div class="legend" style="margin-bottom:10px"><span><i class="sw ab"></i>Andrey Borodin</span><span><i class="sw nik"></i>Nikolay Samokhvalov</span><span><i class="sw kw"></i>Kirk Wolak</span></div>
+    <div class="chart" id="line"></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Roles over 25 years</div>
+    <h2>Andrey is mostly a reviewer, Nikolay mostly a reporter, Kirk mostly a reviewer.</h2>
+    <p class="muted">A commit can credit one person for several roles, so role totals can exceed commit counts.</p>
+  </div>
+  <div class="tbl"><table id="roles"></table></div>
+  <div class="keyrow"><span><i class="r-a"></i>Author</span><span><i class="r-v"></i>Reviewer</span><span><i class="r-r"></i>Reporter</span><span><i class="r-o" style="outline:1px solid var(--rule)"></i>Suggested / tested</span></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Ledger</div>
+    <h2>Every commit that credits Nikolay, Andrey or Kirk</h2>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Choose a person">
+    <button role="tab" id="tab-nik" class="tab nik" aria-selected="true" data-k="nik"><i class="sw nik"></i>Nikolay <span class="mono" id="cnt-nik"></span></button>
+    <button role="tab" id="tab-ab" class="tab ab" aria-selected="false" data-k="ab"><i class="sw ab"></i>Andrey <span class="mono" id="cnt-ab"></span></button>
+    <button role="tab" id="tab-kw" class="tab kw" aria-selected="false" data-k="kw"><i class="sw kw"></i>Kirk <span class="mono" id="cnt-kw"></span></button>
+  </div>
+  <p class="muted" id="ledgerNote"></p>
+  <div class="tbl" style="max-height:640px;overflow:auto"><table id="ledger"></table></div>
+</section>
+
+<section class="notes">
+  <div class="eyebrow">How this was counted</div>
+  <ul>
+    <li><b>Source.</b> PostgreSQL <code>master</code>, through __ASOF__. That is 54,611 commits since Oct 2001.</li>
+    <li><b>Rankings and overview.</b> These come from parsing <code>Author</code>, <code>Co-authored-by</code>, <code>Reviewed-by</code>, <code>Reported-by</code>, <code>Tested-by</code> and <code>Suggested-by</code> lines in commits since 2019. When a commit has no <code>Author:</code> line, the committer is counted as the author. Name variants are merged by shared email and by ignoring middle initials. Credits written as free text aren't counted here.</li>
+    <li><b>Individual timelines.</b> The 25-year charts, the roles table and the ledger come from searching commit messages for each name, so free-text credits like "Patch by X, reviewed by Y" are included. A line with only a name is counted as authorship, which was the convention before about 2015. Because of this, timeline totals can be slightly higher than ranking totals; for example, Nikolay has 25 commits for 2022–2026 in the timeline but 24 in the rankings.</li>
+    <li><b>Growth.</b> Compares Jan 1–__ASOF_SHORT__, 2026 with the same dates in 2025. The share of commits that use these credit lines rose from 82% to 88%, which slightly inflates 2026 growth for everyone.</li>
+    <li><b>Committer.</b> Anyone who committed to master during 2022–2026 (32 people).</li>
+    <li><b>Scripts and data.</b> Every number on this page can be rebuilt with <code>pg-commit-credits/run.sh</code> on the <code>claude/great-lovelace-gf5t4g</code> branch of <code>NikolayS/postgres</code>.</li>
+  </ul>
+</section>
+</div>
+
+<script>
+const D = __DATA__;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = n => n.toLocaleString('en-US');
+const hlc = n => /Samokhvalov/.test(n) ? 'nik' : /Borodin/.test(n) ? 'ab' : /Wolak/.test(n) ? 'kw' : '';
+const mk = s => { const c = hlc(s); return c ? `<mark class="m-${c}">${s}</mark>` : s; };
+const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
+
+// Overview
+(function(){
+  const c=D.commitsYTD, p=D.people, r=D.rolesYTD;
+  $('ovH').textContent = `${fmt(p['2026'])} people have been credited so far in 2026, up ${pct(p['2025'],p['2026']).slice(1)} on the same period of 2025. Commits are up ${pct(c['2025'],c['2026']).slice(1)}.`;
+  const t=(big,lab,d)=>`<div class="card tile"><div class="big">${big}</div><div class="lab">${lab}</div><div class="delta">${d}</div></div>`;
+  $('ov').innerHTML =
+    t(fmt(c['2026']),'commits to master',`2025: ${fmt(c['2025'])} · ${pct(c['2025'],c['2026'])}`)+
+    t(fmt(p['2026']),'distinct people credited',`2025: ${fmt(p['2025'])} · ${pct(p['2025'],p['2026'])}`)+
+    t(fmt(r['2026'].review),'Reviewed-by credits',`2025: ${fmt(r['2025'].review)} · ${pct(r['2025'].review,r['2026'].review)}`)+
+    t(fmt(r['2026'].report),'Reported-by credits',`2025: ${fmt(r['2025'].report)} · ${pct(r['2025'].report,r['2026'].report)}`);
+  const ys=Object.keys(D.peopleYear), mx=Math.max(...Object.values(D.peopleYear));
+  $('pcols').innerHTML=ys.map(y=>`<div class="col ${y==='2026'?'partial':''}" title="${y}: ${D.peopleYear[y]} people${y==='2026'?' (to __ASOF_SHORT__)':''}"><span class="cv">${D.peopleYear[y]}</span><span class="cb" style="height:${D.peopleYear[y]/mx*100}%"></span></div>`).join('');
+  $('pcolx').innerHTML=ys.map(y=>`<span>${y}${y==='2026'?'*':''}</span>`).join('');
+})();
+
+// Bar lists (top N only, no highlights)
+function bars(id, rows, n){
+  rows=rows.filter(r=>(r.rank&&r.rank<=n)||hlc(r.name)).sort((a,b)=>(a.rank||1e9)-(b.rank||1e9));
+  const max=Math.max(...rows.map(r=>r.v));
+  let prev=0;
+  $(id).innerHTML=rows.map(r=>{const g=(r.rank||1e9)>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank||1e9;return g+`<div class="bar ${r.c?'c':''} ${hlc(r.name)}" title="${esc(r.name)}: ${r.rank?r.v:'no credits in this period'}${r.prev!=null&&r.rank?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank||'–'}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${r.rank?Math.max(1.5,r.v/max*100):0}%"></span></span><span class="v">${r.rank?r.v:'none'}</span></div>`}).join('');
+}
+bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); bars('rep26',D.rep26,20); bars('nc5',D.topNC5y,20);
+
+// Dumbbell
+(function(){
+  const max=400, p=v=>v/max*100;
+  let prev=0;
+  let h=D.growth.slice().sort((a,b)=>(a.rank||1e9)-(b.rank||1e9)).map(r=>{const g=(r.rank||1e9)>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank||1e9;
+    return g+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a}), ${r.rank?'#'+r.rank+' by gain':'no credits in either year'}"><span class="rk">${r.rank||'–'}</span><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`}).join('');
+  h+=`<div class="axisrow"><span></span><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
+  $('growth').innerHTML=`<div class="db">${h}</div>`;
+})();
+
+// Nikolay vs Andrey: same metrics side by side
+(function(){
+  const N=D.ranks.nik, A=D.ranks.ab, Y=D.years;
+  const tot=k=>Object.values(Y[k]).reduce((a,b)=>a+b,0);
+  const rk=x=>x[0]?`#${x[0]} <span class="muted" style="font-size:12px">of ${fmt(x[1])}</span>`:'–';
+  const rows=[
+    ['Commits credited, 2001–2026', tot('nik'), tot('ab'), 'hi'],
+    ['Active years', '2007–2010, 2020–2026', '2016–2026', null],
+    ['Credited commits, 2026 so far', N.v26, A.v26, 'hi'],
+    ['Same period of 2025', N.v25, A.v25, 'hi'],
+    ['Growth rate', '×'+(N.v26/N.v25).toFixed(2), '×'+(A.v26/A.v25).toFixed(2), 'nik'],
+    ['2026 rank, everyone', rk(N.y26), rk(A.y26), 'ab'],
+    ['2026 rank, non-committers', rk(N.y26nc), rk(A.y26nc), 'ab'],
+    ['2026 rank, Reviewed-by', rk(N.rev), rk(A.rev), 'ab'],
+    ['2026 rank, Reported-by', rk(N.rep), rk(A.rep), 'nik'],
+    ['2022–2026 rank, non-committers', rk(N.y5nc), rk(A.y5nc), 'ab'],
+    ['2026 credits by role', `${N.roles26.report||0} reporter · ${N.roles26.author||0} author · ${N.roles26.review||0} reviewer`, `${A.roles26.review||0} reviewer · ${A.roles26.author||0} author · ${A.roles26.report||0} reporter`, null],
+  ];
+  $('vs').innerHTML='<thead><tr><th>Metric</th><th><span class="who"><i class="sw nik"></i>Nikolay</span></th><th><span class="who"><i class="sw ab"></i>Andrey</span></th></tr></thead><tbody>'+
+    rows.map(([m,a,b,w])=>{const la = w==='nik' || (w==='hi' && a>b), lb = w==='ab' || (w==='hi' && b>a);
+      return `<tr><td>${m}</td><td class="${la?'lead':''}">${a}</td><td class="${lb?'lead':''}">${b}</td></tr>`}).join('')+'</tbody>';
+  $('vsLede').innerHTML=`Andrey is much more active. In 2026 he is credited on ${(A.v26/N.v26).toFixed(1)}× as many commits, mostly as a reviewer, and he ranks ahead of Nikolay on every overall measure. Nikolay is ahead on two measures: reporting bugs (#${N.rep[0]} of all reporters in 2026) and growth rate (×${(N.v26/N.v25).toFixed(2)} vs ×${(A.v26/A.v25).toFixed(2)}). Bold marks whichever of the two leads on each line.`;
+})();
+
+// Line chart
+(function(){
+  const years = []; for (let y=2005;y<=2026;y++) years.push(y);
+  const S = [['ab','Andrey Borodin'],['nik','Nikolay Samokhvalov'],['kw','Kirk Wolak']];
+  const W=980,H=300,m={l:34,r:150,t:12,b:26};
+  const x = y => m.l + (y-2005)/(2026-2005)*(W-m.l-m.r);
+  const ymax=60, yy = v => H-m.b - v/ymax*(H-m.t-m.b);
+  let g='';
+  for (let v=0; v<=ymax; v+=10){ g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${yy(v)}" y2="${yy(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l-8}" y="${yy(v)+4}" text-anchor="end">${v}</text>`; }
+  for (let y=2005;y<=2026;y++) if (y%5===0 || y===2026) g+=`<text x="${x(y)}" y="${H-6}" text-anchor="middle">${y}</text>`;
+  let lines='', labs=[];
+  S.forEach(([k,n])=>{
+    const pts = years.map(y=>[x(y), yy(D.years[k][y]||0)]);
+    lines += `<polyline fill="none" stroke="var(--${k})" stroke-width="2" stroke-linejoin="round" points="${pts.map(p=>p.join(',')).join(' ')}"/>`;
+    const last = D.years[k]['2026']||0;
+    lines += `<circle cx="${x(2026)}" cy="${yy(last)}" r="4.5" fill="var(--${k})" stroke="var(--panel)" stroke-width="2"/>`;
+    labs.push([k,n,last,yy(last)]);
+  });
+  labs.sort((a,b)=>b[3]-a[3]); for (let i=1;i<labs.length;i++) if (labs[i-1][3]-labs[i][3]<16) labs[i][3]=labs[i-1][3]-16;  // stack upward from the baseline
+  labs.forEach(([k,n,v,ly])=>{ lines += `<text x="${x(2026)+10}" y="${ly+4}" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px">${n.split(' ')[1]} <tspan style="fill:var(--ink-3);font-family:var(--f-mono)">${v}</tspan></text>`; });
+  const el=$('line');
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Commits per year crediting each person, 2005 to 2026">${g}<line id="xh" y1="${m.t}" y2="${H-m.b}" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>${lines}<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+  const svg=el.querySelector('svg'), tip=el.querySelector('.tip'), xh=el.querySelector('#xh');
+  svg.addEventListener('pointermove', ev => {
+    const r=svg.getBoundingClientRect(), sx=(ev.clientX-r.left)/r.width*W;
+    const y=Math.max(2005,Math.min(2026,Math.round(2005+(sx-m.l)/(W-m.l-m.r)*21)));
+    xh.setAttribute('x1',x(y)); xh.setAttribute('x2',x(y)); xh.setAttribute('opacity',1);
+    tip.innerHTML=`<div style="font-family:var(--f-mono);margin-bottom:4px">${y}${y===2026?' (to __ASOF_SHORT__)':''}</div>`+S.map(([k,n])=>`<div class="r"><span class="who" style="font-weight:400"><i class="sw ${k}"></i>${n}</span><b>${D.years[k][y]||0}</b></div>`).join('');
+    tip.hidden=false;
+    const px=x(y)/W*r.width; tip.style.left=Math.min(px+12, r.width-tip.offsetWidth-4)+'px'; tip.style.top='8px';
+  });
+  svg.addEventListener('pointerleave',()=>{tip.hidden=true;xh.setAttribute('opacity',0)});
+})();
+
+// Roles table
+(function(){
+  const P=[['nik','Nikolay Samokhvalov'],['ab','Andrey Borodin'],['kw','Kirk Wolak']];
+  const tot=k=>Object.values(D.years[k]).reduce((a,b)=>a+b,0);
+  const yrs=k=>{const ks=Object.keys(D.years[k]).map(Number);return Math.min(...ks)+'–'+Math.max(...ks)};
+  const max=Math.max(...P.map(([k])=>Object.values(D.roles[k]).reduce((a,b)=>a+b,0)));
+  let h=`<thead><tr><th>Person</th><th class="n">Commits</th><th>Years</th><th class="n">Author</th><th class="n">Reviewer</th><th class="n">Reporter</th><th class="n">Other</th><th style="min-width:160px">Mix</th><th class="n">Committers</th></tr></thead><tbody>`;
+  P.forEach(([k,n])=>{const r=D.roles[k],a=r.author||0,v=r.review||0,p=r.report||0,o=(r.suggest||0)+(r.test||0);
+    const w=x=>(x/max*100)+'%';
+    h+=`<tr><td><span class="who"><i class="sw ${k}"></i>${n}</span></td><td class="n"><b>${tot(k)}</b></td><td class="mono">${yrs(k)}</td><td class="n">${a}</td><td class="n">${v}</td><td class="n">${p}</td><td class="n">${o}</td><td><div class="rolebar" style="width:100%" title="${a} author, ${v} reviewer, ${p} reporter, ${o} other"><i class="r-a" style="width:${w(a)}"></i><i class="r-v" style="width:${w(v)}"></i><i class="r-r" style="width:${w(p)}"></i><i class="r-o" style="width:${w(o)}"></i></div></td><td class="n">${D.ncommitters[k]}</td></tr>`;});
+  $('roles').innerHTML=h+'</tbody>';
+})();
+
+// Tables
+function pills(rs){return rs.map(r=>`<span class="pill ${r}">${({author:'author',review:'reviewer',report:'reporter',suggest:'suggested',test:'tested'})[r]||r}</span>`).join('')}
+(function(){
+  const L={nik:D.nikList,ab:D.abList,kw:D.kwList};
+  const R=D.roles, cnt=k=>L[k].length;
+  const top=k=>Object.entries(L[k].reduce((m,r)=>(m[r.cn]=(m[r.cn]||0)+1,m),{})).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n,c])=>`${n} (${c})`).join(', ');
+  const roles=k=>{const r=R[k];return `${r.review||0} as reviewer, ${r.author||0} as author, ${r.report||0} as reporter`};
+  const yrs=k=>{const ys=L[k].map(r=>r.d.slice(0,4)).sort();return ys[0]+'–'+ys[ys.length-1]};
+  const note={
+    nik:`${cnt('nik')} commits, ${yrs('nik')}: ${roles('nik')}. Most of the 2026 reports are PG19 bugs, especially in the new RI fast-path (batched FK checks). Most often committed by ${top('nik')}.`,
+    ab:`${cnt('ab')} commits, ${yrs('ab')}: ${roles('ab')}. Most often committed by ${top('ab')}.`,
+    kw:`${cnt('kw')} commits, ${yrs('kw')}: ${roles('kw')}. None since March 2024. In 2022–2026 he ranks #${D.ranks.kw.y5nc[0]} of ${fmt(D.ranks.kw.y5nc[1])} people who aren't committers.`};
+  const show=k=>{
+    document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.k===k)));
+    $('ledgerNote').textContent=note[k];
+    $('ledger').innerHTML='<thead><tr><th>Date</th><th>Commit</th><th>Subject</th><th>Committer</th><th>Role</th></tr></thead><tbody>'+L[k].map(r=>`<tr><td class="mono num" style="white-space:nowrap">${r.d}</td><td class="mono">${r.h}</td><td>${esc(r.s.replace(/^\|.*?\|\s*/,'').replace(/^-email limit-\|\s*/,''))}</td><td style="white-space:nowrap">${esc(r.cn)}</td><td>${pills(r.roles)}</td></tr>`).join('')+'</tbody>';
+  };
+  ['nik','ab','kw'].forEach(k=>{$('cnt-'+k).textContent=cnt(k);$('tab-'+k).addEventListener('click',()=>show(k));});
+  show('nik');
+})();
+
+// ---------- extras
+const X = D.X;
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const clean = n => String(n).replace(/^[en]1?:/,'');
+function simpleBars(id, rows, cls){
+  const max=Math.max(...rows.map(r=>r.n));
+  let prev=0;
+  $(id).innerHTML=rows.map((r,i)=>{const rk=typeof r.rk==='number'?r.rk:i+1, g=(typeof r.rk==='number'&&rk>prev+1&&prev)?'<div class="gap">· · ·</div>':'';prev=rk;return g+`<div class="bar ${cls||hlc(r.name)}" title="${esc(r.tip||(r.name+': '+r.n))}"><span class="rk">${r.rk??i+1}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.n/max*100)}%"></span></span><span class="v">${r.n}</span></div>`}).join('');
+}
+
+// AI
+(function(){
+  const A=X.ai, n=A.list.length, ms=Object.entries(A.months), first=A.first;
+  const peak=ms.reduce((a,b)=>b[1]>a[1]?b:a);
+  $('aiH').textContent=`AI tools are named in ${n} commits, all of them in 2026. None mention AI before February.`;
+  $('aiSub').innerHTML=`The first one, on ${first}, credits <b>Xint Code</b>, a security scanner, for a buffer overflow in pgcrypto. The count peaked in ${MON[+peak[0].slice(5)-1]} at ${peak[1]} commits. So far in 2026, ${A.aiReportCommits26} of the ${fmt(A.reportCommits26)} commits that credit a bug reporter credit an AI tool or a person working with one (${(A.aiReportCommits26/A.reportCommits26*100).toFixed(1)}%). Noah Misch committed ${A.committers[0][1]} of the ${n}.`;
+  const mx=Math.max(...ms.map(m=>m[1]));
+  $('aiMon').innerHTML=ms.map(([m,v])=>`<div class="col" title="${MON[+m.slice(5)-1]} 2026: ${v}"><span class="cv">${v}</span><span class="cb" style="height:${v/mx*100}%;${v?'':'height:2px'}"></span></div>`).join('');
+  $('aiMonX').innerHTML=ms.map(([m])=>`<span>${MON[+m.slice(5)-1]}</span>`).join('');
+  simpleBars('aiCats', Object.entries(A.cats).map(([k,v],i)=>({name:k,n:v,rk:''})));
+  const ys=['2019','2020','2021','2022','2023','2024','2025','2026'];
+  $('aiTools').innerHTML='<thead><tr><th>Commits mentioning…</th>'+ys.map(y=>`<th class="n">${y}${y==='2026'?'*':''}</th>`).join('')+'</tr></thead><tbody>'+
+    ['AI / LLM','Fuzzers','Static analysis','Sanitizers / valgrind'].map(k=>`<tr><td>${k}</td>${ys.map(y=>`<td class="n" ${k==='AI / LLM'&&A.tools[k][y]?'style="font-weight:700"':''}>${A.tools[k][y]||0}</td>`).join('')}</tr>`).join('')+
+    `<tr><td colspan="9" class="muted" style="font-size:12px">* 2026 runs to __ASOF_SHORT__. Fuzzers: SQLsmith, SQLancer and others. Static analysis: Coverity, cppcheck and others. Matched anywhere in the commit message.</td></tr></tbody>`;
+  $('aiListSum').textContent=`Show all ${n} commits that mention AI`;
+  $('aiList').innerHTML='<thead><tr><th>Date</th><th>Subject</th><th>How AI was involved</th><th>From the commit message</th><th>Committer</th></tr></thead><tbody>'+
+    A.list.map(r=>`<tr><td class="mono num">${r.d}</td><td>${esc(r.s)}<div class="mono muted" style="font-size:11px">${r.h}</div></td><td style="min-width:140px">${esc(r.cat)}</td><td class="muted" style="min-width:220px">${esc(r.q)}</td><td style="white-space:nowrap">${esc(r.cn)}</td></tr>`).join('')+'</tbody>';
+})();
+
+// Companies
+(function(){
+  const C=X.companies, ys=Object.keys(C.totals);
+  const cov=C.coverage;
+  $('coSub').innerHTML=`Credits are matched to a company by email domain, and a person counts for a company in a year only when its domain is the address they used most. Most contributors use personal or postgresql.org addresses, so only ${Math.min(...Object.values(cov))}–${Math.max(...Object.values(cov))}% of credits can be matched in any year. Every company is undercounted, and a domain doesn't prove employment. Rows are sorted by 2022–2026 total.`;
+  const mx=Math.max(...C.order.flatMap(c=>Object.values(C.years[c])));
+  $('co').innerHTML='<thead><tr><th>Company</th>'+ys.map(y=>`<th class="n">${y}${y==='2026'?'*':''}</th>`).join('')+'<th>Trend</th><th>Most credited, 2022–2026</th></tr></thead><tbody>'+
+    C.order.map(c=>{const v=ys.map(y=>C.years[c][y]);const W=110,H=26,x=i=>4+i/(v.length-1)*(W-8),y=n=>H-3-n/Math.max(...v,1)*(H-6);
+      const sp=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${v.map((n,i)=>x(i)+','+y(n)).join(' ')}"/><circle cx="${x(v.length-1)}" cy="${y(v[v.length-1])}" r="2.5" fill="var(--accent)"/></svg>`;
+      return `<tr><td style="white-space:nowrap"><b>${esc(c)}</b></td>${v.map(n=>`<td class="n" style="background:color-mix(in srgb,var(--accent) ${Math.round(n/mx*35)}%,transparent)">${n||'·'}</td>`).join('')}<td>${sp}</td><td class="muted" style="font-size:12.5px">${C.people[c].map(clean).map(esc).map(mk).join(', ')}</td></tr>`}).join('')+
+    `<tr><td colspan="${ys.length+3}" class="muted" style="font-size:12px">* 2026 runs to __ASOF_SHORT__. Cells count commits that credit at least one person from the company. Shading scales with the count.</td></tr></tbody>`;
+})();
+
+// Network (bipartite)
+(function(){
+  const P=X.network.pairs.slice(0,30).concat([['Andrey Borodin',X.network.ab[0]],['Nikolay Samokhvalov',X.network.nik[0]]].map(([a,c])=>({a,b:c.name,n:c.n,hl:hlc(a)})));
+  const L=[...new Set(P.map(p=>p.a))], R=[...new Set(P.map(p=>p.b))];
+  const tot=(arr,key)=>Object.fromEntries(arr.map(n=>[n,P.filter(p=>p[key]===n&&(key==='a'||!p.hl||P.every(q=>q.b!==n||q.hl))).reduce((s,p)=>s+p.n,0)]));
+  const tl=tot(L,'a'), tr=tot(R,'b');
+  L.sort((a,b)=>tl[b]-tl[a]); R.sort((a,b)=>tr[b]-tr[a]);
+  const W=900, row=24, H=Math.max(L.length,R.length)*row+20, HB=H+16, lx=200, rx=W-200;
+  const yl=i=>14+i*(H-28)/Math.max(L.length-1,1), yr=i=>14+i*(H-28)/Math.max(R.length-1,1);
+  const max=Math.max(...P.map(p=>p.n));
+  let s='';
+  P.forEach(p=>{const a=yl(L.indexOf(p.a)), b=yr(R.indexOf(p.b));
+    s+=`<path d="M${lx},${a} C${(lx+rx)/2},${a} ${(lx+rx)/2},${b} ${rx},${b}" fill="none" stroke="${p.hl?`var(--${p.hl})`:'var(--accent)'}" stroke-opacity="${p.hl?.9:.35}" stroke-width="${Math.max(p.hl?2.5:1,1+p.n/max*9)}"><title>${esc(p.a)} → ${esc(p.b)}: ${p.n} commits</title></path>`;});
+  L.forEach((n,i)=>s+=`<circle cx="${lx}" cy="${yl(i)}" r="${hlc(n)?5:4}" fill="${hlc(n)?`var(--${hlc(n)})`:'var(--ink-2)'}"/><text x="${lx-10}" y="${yl(i)+4}" text-anchor="end" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px;font-weight:${hlc(n)?700:400}">${esc(n)} <tspan style="fill:var(--ink-3);font-family:var(--f-mono);font-size:11px">${tl[n]}</tspan></text>`);
+  R.forEach((n,i)=>s+=`<circle cx="${rx}" cy="${yr(i)}" r="5" fill="var(--ink)"/><text x="${rx+10}" y="${yr(i)+4}" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px;font-weight:600">${esc(n)} <tspan style="fill:var(--ink-3);font-family:var(--f-mono);font-size:11px;font-weight:400">${tr[n]}</tspan></text>`);
+  $('net').innerHTML=`<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${HB}" style="min-width:640px" role="img" aria-label="Contributor to committer pairs">${s}<text x="${lx}" y="${HB-2}" text-anchor="middle" style="font-size:10.5px">contributors</text><text x="${rx}" y="${HB-2}" text-anchor="middle" style="font-size:10.5px">committers</text></svg></div>`;
+})();
+
+// Retention
+(function(){
+  const C=X.retention.cohorts;
+  const avg=Math.round(C.reduce((s,c)=>s+c.next/c.n,0)/C.length*100);
+  $('retH').textContent=`Most first-time contributors aren't credited again. On average only ${avg}% are credited the following year. 2026 has already brought ${X.retention.new26} newcomers, the most since at least 2019.`;
+  const bar=(v,col)=>`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:10px;background:var(--track);border-radius:3px;min-width:60px"><div style="width:${v}%;height:100%;background:${col};border-radius:3px"></div></div><span class="mono" style="font-size:12px;width:3em;text-align:right">${v}%</span></div>`;
+  $('ret').innerHTML='<thead><tr><th>First credited</th><th class="n">Newcomers</th><th style="min-width:180px">Credited again the next year</th><th style="min-width:180px">Credited again in any later year</th></tr></thead><tbody>'+
+    C.map(c=>`<tr><td class="mono">${c.y}</td><td class="n">${c.n}</td><td>${bar(Math.round(c.next/c.n*100),'var(--accent)')}</td><td>${bar(Math.round(c.later/c.n*100),'var(--ink-3)')}</td></tr>`).join('')+
+    `<tr><td class="mono">2026</td><td class="n">${X.retention.new26}</td><td class="muted" colspan="2">Too early to tell</td></tr>`+
+    `<tr><td colspan="4" class="muted" style="font-size:12px">For the 2025 group, the following year is 2026, which runs only to __ASOF_SHORT__, so its figures are still low. Earlier groups have had more years to come back.</td></tr></tbody>`;
+})();
+
+// Releases (general)
+(function(){
+  const R=X.releases;
+  const a=R.find(r=>r.v===16), b=R.find(r=>r.v===19);
+  $('relH').textContent=`PG19 credited ${b.people} people, about twice as many as PG16 (${a.people}). PG20 has already credited ${R[R.length-1].people} with the cycle still in progress.`;
+  $('rel').innerHTML='<thead><tr><th>Cycle</th><th>Dates</th><th class="n">Commits</th><th class="n">People credited</th><th>Most credited non-committers</th></tr></thead><tbody>'+
+    R.map(r=>`<tr><td><b>PG${r.v}</b></td><td class="mono" style="white-space:nowrap;font-size:12px">${r.start} → ${r.end||'now'}</td><td class="n">${fmt(r.commits)}</td><td class="n"><b>${r.people}</b></td><td style="font-size:13px">${r.top.slice(0,3).map(t=>`${mk(esc(t.name))} <span class="mono muted" style="font-size:11px">${t.n}</span>`).join(' · ')}</td></tr>`).join('')+'</tbody>';
+})();
+
+// Closer look: committers, code, releases for us
+simpleBars('cmNik', X.network.nik, 'nik'); simpleBars('cmAb', X.network.ab.slice(0,12), 'ab');
+simpleBars('codeNik', X.codemap.nik.map(r=>({name:r.area,n:r.n,tip:`${r.area}: ${r.n} commits, ${fmt(r.lines)} lines changed`})), 'nik');
+simpleBars('codeAb', X.codemap.ab.map(r=>({name:r.area,n:r.n,tip:`${r.area}: ${r.n} commits, ${fmt(r.lines)} lines changed`})), 'ab');
+(function(){
+  const R=X.releases;
+  const bn=R.reduce((a,b)=>b.nik>a.nik?b:a), ba=R.reduce((a,b)=>b.ab>a.ab?b:a);
+  const r20=R[R.length-1];
+  $('relUsH').textContent=`Nikolay's best cycle is PG${bn.v} (${bn.nik} commits). Andrey's is PG${ba.v} (${ba.ab}), and PG${r20.v} already ranks him #${r20.abRank} with the cycle still in progress.`;
+  const rk=x=>x?`#${x}`:'–';
+  $('relUs').innerHTML='<thead><tr><th>Cycle</th><th>Nikolay</th><th>Andrey</th></tr></thead><tbody>'+
+    R.map(r=>`<tr><td><b>PG${r.v}</b>${r.end?'':' <span class="muted" style="font-size:12px">(in progress)</span>'}</td><td>${r.nik} <span class="muted" style="font-size:12px">${rk(r.nikRank)}</span></td><td>${r.ab} <span class="muted" style="font-size:12px">${rk(r.abRank)}</span></td></tr>`).join('')+'</tbody>';
+})();
+
+// ---------- records and rhythms
+const F = D.F;
+const pc=(a,b)=>Math.round(a/b*100);
+function cols(id, xid, items, fmtv){
+  const mx=Math.max(...items.map(i=>i.n));
+  $(id).style.gridTemplateColumns=$(xid).style.gridTemplateColumns=`repeat(${items.length},minmax(0,1fr))`;
+  $(id).innerHTML=items.map(i=>`<div class="col" title="${esc(i.label)}: ${i.n}"><span class="cv">${fmtv?fmtv(i.n):i.n}</span><span class="cb" style="height:${Math.max(1,i.n/mx*100)}%"></span></div>`).join('');
+  $(xid).innerHTML=items.map(i=>`<span>${esc(i.label)}</span>`).join('');
+}
+const yrs=d=>(d/365.25).toFixed(1);
+function card(k,b,s,cls){return `<div class="rc ${cls||''}"><div class="k">${k}</div><div class="b">${b}</div><div class="s">${s}</div></div>`}
+
+// bugs
+(function(){
+  const B=F.bugs, o=B.oldest[0];
+  const old5=B.hist.slice(-2).reduce((s,x)=>s+x.n,0), wk=B.hist[0].n;
+  $('bugH').textContent=`When a fix names the commit that caused the bug, the bug is typically ${Math.round(B.median)} days old. ${B.hist[B.hist.length-1].n} were more than 10 years old.`;
+  $('bugSub').innerHTML=`${B.n} fixes since 2019 say which commit introduced the problem, in phrases like "oversight in commit …" or "thinko in commit …". ${wk} were caught within a week, and ${old5} had been hiding for 5 years or more. These are only the fixes that name a culprit, and some committers write that more often than others.`;
+  cols('bugCols','bugX',B.hist);
+  $('bugOld').innerHTML='<thead><tr><th class="n">Age</th><th>Fixed</th><th>Fix</th><th>Introduced by</th><th>Committer</th></tr></thead><tbody>'+
+    B.oldest.slice(0,10).map(b=>`<tr><td class="n"><b>${yrs(b.age)}</b> <span class="muted" style="font-size:12px">yrs</span></td><td class="mono num" style="white-space:nowrap">${b.d}</td><td>${esc(b.s)}<div class="mono muted" style="font-size:11px">${b.h}</div></td><td class="muted" style="font-size:12.5px">${esc(b.is_)}<div class="mono" style="font-size:11px">${b.ih} · ${b.introduced}</div></td><td style="white-space:nowrap">${esc(b.cn)}</td></tr>`).join('')+'</tbody>';
+})();
+
+// trailers
+(function(){
+  const T=F.trailers.years, ys=Object.keys(T['Reviewed-by']);
+  const r=T['Reviewed-by'], c=T['Co-authored-by'];
+  $('trH').textContent=`Reviewed-by names went from ${fmt(r['2019'])} in 2019 to ${fmt(r['2026'])} in 2026 so far. Co-authored-by barely existed before 2025.`;
+  $('tr').innerHTML='<thead><tr><th>Credit line</th>'+ys.map(y=>`<th class="n">${y}${y==='2026'?'*':''}</th>`).join('')+'<th>Trend</th></tr></thead><tbody>'+
+    ['Author','Reviewed-by','Reported-by','Co-authored-by','Suggested-by','Tested-by'].map(k=>{const v=ys.map(y=>T[k][y]);const W=110,H=26,x=i=>4+i/(v.length-1)*(W-8),yv=n=>H-3-n/Math.max(...v,1)*(H-6);
+      return `<tr><td><code>${k}</code></td>${v.map(n=>`<td class="n">${fmt(n)}</td>`).join('')}<td><svg width="${W}" height="${H}" aria-hidden="true"><polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${v.map((n,i)=>x(i)+','+yv(n)).join(' ')}"/></svg></td></tr>`}).join('')+
+    `<tr><td colspan="10" class="muted" style="font-size:12px">* 2026 runs to __ASOF_SHORT__.</td></tr></tbody>`;
+  const m=F.trailers.maxrev;
+  $('trRec').innerHTML=card('Most reviewers on one commit', m.n, `${esc(m.s)} · ${esc(m.cn)}, ${m.d} · <span class="mono">${m.h}</span>`)+
+    card('Co-authored-by, 2024 → 2025', `${c['2024']} → ${c['2025']}`, 'The jump is mostly a change in how committers write credits, and it stays high in 2026.')+
+    card('Suggested-by, 2019 → 2026', `${T['Suggested-by']['2019']} → ${T['Suggested-by']['2026']}`, 'Giving credit for the idea, not just the patch, is now routine.');
+})();
+
+// backpatch
+(function(){
+  const P=F.backpatch, top=P.targets.reduce((a,b)=>b.n>a.n?b:a);
+  $('bpH').textContent=`${fmt(P.n)} fixes since 2019 say how far back they were applied. The most common target is PG${top.v}, with ${top.n} fixes. Alexander Lakhin's reports led to the most backpatched fixes.`;
+  cols('bpCols','bpX',P.targets.map(t=>({label:t.v,n:t.n})));
+  simpleBars('bpRep',P.reporters.map(r=>({rk:r.rank,name:r.name,n:r.n,tip:`${r.name}: ${r.n} backpatched fixes, ${r.deep} reaching PG13 or older`})));
+})();
+
+// streaks + Tom Lane calendar
+(function(){
+  const S=F.streaks, T=S.tom, ts=T.streak;
+  $('stH').textContent=`Tom Lane has committed on ${fmt(T.days)} different days since October 2001, ${pc(T.days,T.span)}% of all days. His longest run is ${ts.streak} days in a row.`;
+  $('stSub').textContent=`That ${ts.streak}-day run lasted from ${ts.from_} to ${ts.to}. The next longest belongs to ${S.top[1].name}, at ${S.top[1].streak} days in ${S.top[1].from_.slice(0,4)}.`;
+  const set=new Set(T.dates), y0=2001, y1=+'__ASOF__'.slice(0,4), cw=2.4, rh=11, W=40+366*cw, H=(y1-y0+1)*rh+14;
+  let s='';
+  for(let y=y0;y<=y1;y++){const r=(y-y0)*rh;s+=`<text x="0" y="${r+9}" style="font-size:9.5px">${y}</text>`;
+    const d0=Date.UTC(y,0,1);
+    for(let i=0;i<366;i++){const dt=new Date(d0+i*864e5);if(dt.getUTCFullYear()!==y)break;const k=dt.toISOString().slice(0,10);
+      if(set.has(k)){const inS=k>=ts.from_&&k<=ts.to;s+=`<rect x="${40+i*cw}" y="${r+1}" width="${cw-0.4}" height="${rh-2}" fill="${inS?'var(--ab)':'var(--accent)'}"/>`;}}}
+  ['Jan','Apr','Jul','Oct'].forEach((m,i)=>s+=`<text x="${40+[0,90,181,273][i]*cw}" y="${H-2}" style="font-size:9.5px">${m}</text>`);
+  $('tomCal').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Days Tom Lane committed, 2001 to now">${s}</svg>`;
+  $('tomCap').textContent=`Each mark is a day with at least one commit. The ${ts.streak}-day streak is shown in orange.`;
+  simpleBars('stBars',S.top.slice(0,10).map(x=>({name:x.name,n:x.streak,tip:`${x.name}: ${x.streak} days, ${x.from_} → ${x.to}. Active on ${fmt(x.days)} days in total.`})));
+})();
+
+// clock
+(function(){
+  const C=F.clock, cs=C.committers;
+  const night=[...cs].sort((a,b)=>b.night-a.night)[0], wkd=[...cs].sort((a,b)=>b.weekend-a.weekend).slice(0,3);
+  $('ckH').textContent=`Most commits land in office hours, peaking at ${C.peakHour}:00. Only ${C.weekendShare}% land on weekends. ${night.name} is the night owl, with ${night.night}% of commits between midnight and 6 am. ${wkd.slice(0,-1).map(x=>x.name).join(', ')} and ${wkd[wkd.length-1].name} commit about a quarter of their work on weekends.`;
+  const mx=Math.max(...C.heat.flat()), dn=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let h='<span></span>'+[...Array(24).keys()].map(i=>`<span style="text-align:center">${i%3===0?i:''}</span>`).join('');
+  C.heat.forEach((r,d)=>{h+=`<span>${dn[d]}</span>`+r.map((v,i)=>`<i title="${dn[d]} ${i}:00 — ${v} commits" style="opacity:${(0.06+0.94*v/mx).toFixed(2)}"></i>`).join('')});
+  $('heat').innerHTML=h;
+  const spark=a=>{const W=120,H=22,m=Math.max(...a,1);return `<svg width="${W}" height="${H}" aria-hidden="true">${a.map((v,i)=>`<rect x="${i*5}" y="${H-v/m*(H-2)}" width="4" height="${v/m*(H-2)}" fill="var(--accent)"/>`).join('')}</svg>`};
+  $('ck').innerHTML='<thead><tr><th>Committer</th><th class="n">Commits</th><th class="n">Midnight–6 am</th><th class="n">Weekend</th><th class="n">Busiest hour</th><th>Hours 0–23</th></tr></thead><tbody>'+
+    cs.slice(0,22).map(x=>`<tr><td>${esc(x.name)}</td><td class="n">${fmt(x.n)}</td><td class="n" ${x.night>=10?'style="font-weight:700"':''}>${x.night}%</td><td class="n" ${x.weekend>=20?'style="font-weight:700"':''}>${x.weekend}%</td><td class="n">${x.peak}:00</td><td>${spark(x.hours)}</td></tr>`).join('')+'</tbody>';
+})();
+
+// ladder
+(function(){
+  const L=F.ladder, R=L.roles;
+  $('ldH').textContent=`${pc(L.once,L.people)}% of the ${fmt(L.people)} people credited since 2019 appear exactly once. Of those who start by reviewing, ${pc(R.review.author,R.review.n)}% later author a patch. Of those who start by reporting a bug, only ${pc(R.report.author,R.report.n)}% do.`;
+  const nm={report:'Reporter',review:'Reviewer',author:'Author'};
+  const cell=(a,n)=>`<td class="n">${pc(a||0,n)}% <span class="muted" style="font-size:11.5px">${a||0}</span></td>`;
+  $('ld').innerHTML='<thead><tr><th>First credited as</th><th class="n">People</th><th class="n">Never credited again</th><th class="n">Later authored</th><th class="n">Later reviewed</th><th class="n">Later reported</th></tr></thead><tbody>'+
+    ['report','review','author'].map(k=>{const r=R[k];return `<tr><td><b>${nm[k]}</b></td><td class="n">${r.n}</td>${cell(r.once,r.n)}${cell(r.author,r.n)}${cell(r.review,r.n)}${cell(r.report,r.n)}</tr>`}).join('')+'</tbody>';
+  simpleBars('ldBit',L.newCommitters.map(x=>({name:x.name+(x.firstCredit<'2019-07-01'?' *':''),n:x.days,tip:`${x.name}: first credit in this data ${x.firstCredit}, first commit ${x.firstCommit}`})));
+  $('clubH').textContent=`The all-five-roles club: ${L.club.length} people`;
+  $('club').innerHTML=L.club.map(esc).map(mk).join(' · ');
+})();
+
+// big days
+(function(){
+  const B=F.busy, d=B.days, s=B.streaks[0];
+  const same=d.filter(x=>x.n===d[0].n);
+  $('bdH').textContent=`The busiest single day for a non-committer is ${d[0].n} credited commits. ${same.slice(0,-1).map(x=>x.name).join(', ')} and ${same[same.length-1].name} all hit it during the PG19 feature-freeze rush in April 2026.`;
+  $('bd').innerHTML=d.slice(0,6).map(x=>card(`${x.d}`,`${x.n} commits`,`${esc(x.name)} in one day`)).join('')+
+    card('Longest daily streak',`${s.n} days`,`${esc(s.name)}, ${s.from_} → ${s.to}`)+
+    card('Runner-up streak',`${B.streaks[1].n} days`,`${esc(B.streaks[1].name)}, ${B.streaks[1].from_} → ${B.streaks[1].to}`);
+})();
+
+// duos
+(function(){
+  const U=F.duos;
+  $('duoH').textContent=`${U[0].a} and ${U[0].b} are the most frequent co-authors, with ${U[0].n} commits together. Andres Freund appears in three of the top pairs.`;
+  simpleBars('duo',U.slice(0,12).map(x=>({name:`${x.a} + ${x.b}`,n:x.n,rk:''})));
+})();
+
+// threads
+(function(){
+  const T=F.threads, g=T.domains[0];
+  $('thH').textContent=`${pc(g.n,T.links)}% of 2026 discussion threads start from a Gmail address. ${pc(T.nolink,T.commits)}% of 2026 commits link no discussion at all, mostly from two committers.`;
+  simpleBars('thDom',T.domains.map(x=>({name:x.d,n:x.n})));
+  simpleBars('thNo',T.nolinkBy.slice(0,8).map(x=>({name:x.name,n:x.pct,tip:`${x.name}: ${x.none} of ${x.n} commits have no Discussion link`})));
+  $('thNo').querySelectorAll('.v').forEach(e=>e.textContent+='%');
+})();
+
+// words
+(function(){
+  const W=F.words, b=W.by, L=W.longest;
+  $('wdH').textContent=`The median commit message is ${Math.round(W.median)} words. ${b[0].name} writes the longest, at ${Math.round(b[0].med)}, and ${b[b.length-1].name} the shortest, at ${Math.round(b[b.length-1].med)}. The longest single message is ${fmt(L.n)} words: "${L.s}" by ${L.cn}.`;
+  simpleBars('wd',b.map(x=>({name:x.name,n:Math.round(x.med),tip:`${x.name}: median ${x.med} words over ${x.n} commits`})));
+})();
+
+// trivia
+(function(){
+  const C=F.cards;
+  $('van').innerHTML='<tbody>'+C.vanity.slice(0,10).map(v=>`<tr><td class="mono"><b>${v.H.slice(0,4)}</b>${v.H.slice(4,10)}</td><td>${esc(v.s)}<div class="muted" style="font-size:11.5px">${esc(v.cn)}, ${v.d}</div></td></tr>`).join('')+'</tbody>';
+  $('xmasP').textContent=`${C.xmasCommits} commits on December 25 and ${C.nyCommits} on January 1 since 2001. Bars show how many different Christmases each committer has worked.`;
+  simpleBars('xmas',C.xmas.map(x=>({name:x.name,n:x.years,tip:`${x.name}: commits on ${x.years} Christmas Days`})));
+})();
+
+// closer look: records + saga
+(function(){
+  const P=F.people;
+  function recs(p,cls){
+    const r=[card('First credit',p.first.d.slice(0,4),`${esc(p.first.s)} · committed by ${esc(p.first.cn)}`,cls),
+      card('Latest credit',p.last.d,`${esc(p.last.s)} · ${esc(p.last.cn)}`,cls),
+      card('Longest silence',`${fmt(p.gap.days)} days`,`${p.gap.from_} → ${p.gap.to}`,cls),
+      card('Busiest 30 days',`${p.window.n} credits`,`starting ${p.window.start}`,cls),
+      card('Deepest backpatch',p.bpDeep?`PG${p.bpDeep}`:'–',`${p.bpCount} credited fixes carry a Backpatch-through line`,cls),
+      card('Most often credited alongside',esc(p.co[0].name),`${p.co[0].n} shared commits. Next: `+p.co.slice(1,4).map(c=>`${esc(c.name)} ${c.n}`).join(' · '),cls)];
+    if(p.oldestBug) r.push(card('Oldest bug fixed',`${yrs(p.oldestBug.age)} years`,`${esc(p.oldestBug.s)} (introduced ${p.oldestBug.introduced})`,cls));
+    const br=cls==='nik'?F.backpatch.nikRank:F.backpatch.abRank, bn=cls==='nik'?F.backpatch.nik:F.backpatch.ab;
+    if(br) r.push(card('Reporter of backpatched fixes',`#${br}`,`of ${F.backpatch.nReporters} people, 2022–2026 (${bn} fixes)`,cls));
+    r.push(card('Committed on a Saturday',`${p.saturday} of ${p.n}`,`${pc(p.saturday,p.n)}%, vs ${P.satShare}% of all commits`,cls));
+    return r.join('');
+  }
+  $('recNik').innerHTML=recs(P.nik,'nik'); $('recAb').innerHTML=recs(P.ab,'ab');
+  const S=P.nik.saga;
+  $('sagaH').textContent=`${S.length} commits by Amit Langote between ${S[0].d} and ${S[S.length-1].d} credit Nikolay, ${S.filter(x=>x.bp==='19').length} of them backpatched to PG19.`;
+  $('saga').innerHTML=S.map(x=>`<div><span class="mono muted" style="font-size:12px">${x.d} · ${x.h}${x.bp?` · back to PG${x.bp}`:''}</span><br>${esc(x.s)}</div>`).join('');
+})();
+</script>
