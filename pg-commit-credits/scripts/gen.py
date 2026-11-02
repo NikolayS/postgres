@@ -25,11 +25,11 @@ def top(c,n,excl=False,extra=()):
     res=[dict(rank=i+1,name=nm(k),v=v,c=k in committers,id=k) for i,(k,v) in enumerate(l) if i<n or k in extra]
     return res
 ex=[ids['nik'],ids['ab']]
-out['top26']=[dict(x,prev=c25[x['id']]) for x in top(c26,15,False,ex)]
+out['top26']=[dict(x,prev=c25[x['id']]) for x in top(c26,20,False,ex)]
 out['topNC26']=[dict(x,prev=c25[x['id']]) for x in top(c26,20,True,ex)]
 out['topNC5y']=top(c5,20,True,ex)
 rep=cnt(2026,2026,True,roles={'report'}); rv=cnt(2026,2026,True,roles={'review'})
-out['rep26']=top(rep,12,False,ex); out['rev26']=top(rv,20,False,ex)
+out['rep26']=top(rep,20,False,ex); out['rev26']=top(rv,20,False,ex)
 g=sorted(c26,key=lambda k:c26[k]-c25[k],reverse=True)
 out['growth']=[dict(name=nm(k),a=c25[k],b=c26[k],c=k in committers) for k in g[:15]]
 el=[k for k in c26 if c26[k]>=15]; rr=sorted(el,key=lambda k:c26[k]/max(c25[k],3),reverse=True)

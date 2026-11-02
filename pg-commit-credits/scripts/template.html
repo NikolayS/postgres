@@ -167,7 +167,7 @@ a{color:var(--accent)}
 <section>
   <div class="head">
     <div class="eyebrow">The leaders in 2026</div>
-    <h2>Tom Lane is still credited the most, and Chao Li is second. Committers hold 12 of the top 15 places.</h2>
+    <h2>Tom Lane is still credited the most, and Chao Li is second. Committers hold 16 of the top 20 places.</h2>
     <p class="muted">Credited commits from Jan 1 to __ASOF_SHORT__, 2026. Committers get credit for their own commits, so the right list leaves them out. <span class="ctag">C</span> marks a committer.</p>
   </div>
   <div class="two">
@@ -536,7 +536,7 @@ function bars(id, rows, n){
   const max=Math.max(...rows.map(r=>r.v));
   $(id).innerHTML=rows.map(r=>`<div class="bar ${r.c?'c':''}" title="${esc(r.name)}: ${r.v}${r.prev!=null?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.v/max*100)}%"></span></span><span class="v">${r.v}</span></div>`).join('');
 }
-bars('all26',D.top26,15); bars('nc26',D.topNC26,15); bars('rev26',D.rev26,12); bars('rep26',D.rep26,12); bars('nc5',D.topNC5y,20);
+bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); bars('rep26',D.rep26,20); bars('nc5',D.topNC5y,20);
 
 // Dumbbell
 (function(){
