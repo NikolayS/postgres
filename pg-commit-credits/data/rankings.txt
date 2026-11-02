@@ -1,0 +1,276 @@
+distinct credited people 2026: 580  2025ytd: 451
+
+TOP 40 in 2022-2026 (credited commits, any non-commit role)
+1 Tom Lane 2493 | 25ytd 467 26ytd 411
+2 Peter Eisentraut 1595 | 25ytd 282 26ytd 233
+3 Michael Paquier 1234 | 25ytd 193 26ytd 265
+4 Andres Freund 1158 | 25ytd 229 26ytd 199
+5 Alvaro Herrera 641 | 25ytd 101 26ytd 131
+6 Robert Haas 611 | 25ytd 82 26ytd 103
+7 Heikki Linnakangas 608 | 25ytd 75 26ytd 169
+8 Nathan Bossart 596 | 25ytd 143 26ytd 133
+9 Daniel Gustafsson 570 | 25ytd 108 26ytd 151
+10 Chao Li 554 | 25ytd 74 26ytd 366
+11 David Rowley 525 | 25ytd 100 26ytd 85
+12 Thomas Munro 491 | 25ytd 71 26ytd 27
+13 Fujii Masao 452 | 25ytd 108 26ytd 247
+14 Amit Kapila 438 | 25ytd 83 26ytd 105
+15 Jeff Davis 370 | 25ytd 89 26ytd 67
+16 Noah Misch 365 | 25ytd 92 26ytd 101
+17 Bertrand Drouvot 354 | 25ytd 93 26ytd 79
+18 Melanie Plageman 348 | 25ytd 79 26ytd 99
+19 Bruce Momjian 346 | 25ytd 55 26ytd 41
+20 Masahiko Sawada 328 | 25ytd 73 26ytd 84
+21 Richard Guo 320 | 25ytd 59 26ytd 102
+22 Alexander Korotkov 319 | 25ytd 42 26ytd 74
+23 Andrew Dunstan 310 | 25ytd 31 26ytd 72
+24 Tomas Vondra 303 | 25ytd 70 26ytd 62
+25 Alexander Lakhin 302 | 25ytd 39 26ytd 72
+26 Peter Geoghegan 295 | 25ytd 48 26ytd 55
+27 jian he 275 | 25ytd 86 26ytd 65
+28 John Naylor 260 | 25ytd 29 26ytd 62
+29 Peter Smith 260 | 25ytd 44 26ytd 52
+30 Kyotaro Horiguchi 228 | 25ytd 17 26ytd 23
+31 Bharath Rupireddy 217 | 25ytd 3 26ytd 59
+32 Ashutosh Bapat 212 | 25ytd 40 26ytd 92
+33 Vignesh C 211 | 25ytd 60 26ytd 43
+34 Jacob Champion 206 | 25ytd 62 26ytd 53
+35 Justin Pryzby 204 | 25ytd 2 26ytd 9
+36 Hou Zhijie 203 | 25ytd 36 26ytd 43
+37 Hayato Kuroda 200 | 25ytd 63 26ytd 64
+38 Amit Langote 195 | 25ytd 25 26ytd 62
+39 Nazir Bilal Yavuz 169 | 25ytd 50 26ytd 58
+40 Dean Rasheed 169 | 25ytd 51 26ytd 23
+
+TOP 30 2026 YTD
+1 Tom Lane 411 (25ytd 467 ) committer
+2 Chao Li 366 (25ytd 74 ) 
+3 Michael Paquier 265 (25ytd 193 ) committer
+4 Fujii Masao 247 (25ytd 108 ) committer
+5 Peter Eisentraut 233 (25ytd 282 ) committer
+6 Andres Freund 199 (25ytd 229 ) committer
+7 Heikki Linnakangas 169 (25ytd 75 ) committer
+8 Daniel Gustafsson 151 (25ytd 108 ) committer
+9 Nathan Bossart 133 (25ytd 143 ) committer
+10 Alvaro Herrera 131 (25ytd 101 ) committer
+11 Zsolt Parragi 118 (25ytd 1 ) 
+12 Ayush Tiwari 114 (25ytd 0 ) 
+13 Amit Kapila 105 (25ytd 83 ) committer
+14 Robert Haas 103 (25ytd 82 ) committer
+15 Richard Guo 102 (25ytd 59 ) committer
+16 Noah Misch 101 (25ytd 92 ) committer
+17 Melanie Plageman 99 (25ytd 79 ) committer
+18 Ashutosh Bapat 92 (25ytd 40 ) 
+19 David Rowley 85 (25ytd 100 ) committer
+20 Masahiko Sawada 84 (25ytd 73 ) committer
+21 Sami Imseih 84 (25ytd 47 ) 
+22 Bertrand Drouvot 79 (25ytd 93 ) 
+23 Alexander Korotkov 74 (25ytd 42 ) committer
+24 Alexander Lakhin 72 (25ytd 39 ) 
+25 Andrew Dunstan 72 (25ytd 31 ) committer
+26 Jeff Davis 67 (25ytd 89 ) committer
+27 jian he 65 (25ytd 86 ) 
+28 Hayato Kuroda 64 (25ytd 63 ) 
+29 Xuneng Zhou 64 (25ytd 14 ) 
+30 Shihao Zhong 63 (25ytd 2 ) 
+
+GROWTH abs (26ytd-25ytd)
+Chao Li 74 -> 366 +292 
+Fujii Masao 108 -> 247 +139 committer
+Zsolt Parragi 1 -> 118 +117 
+Ayush Tiwari 0 -> 114 +114 
+Heikki Linnakangas 75 -> 169 +94 committer
+Michael Paquier 193 -> 265 +72 committer
+Shihao Zhong 2 -> 63 +61 
+Bharath Rupireddy 3 -> 59 +56 
+Ashutosh Bapat 40 -> 92 +52 
+Xuneng Zhou 14 -> 64 +50 
+Satyanarayana Narlapuram 1 -> 45 +44 
+Richard Guo 59 -> 102 +43 committer
+Daniel Gustafsson 108 -> 151 +43 committer
+Lukas Fittl 4 -> 46 +42 
+Andrew Dunstan 31 -> 72 +41 committer
+Amit Langote 25 -> 62 +37 committer
+Sami Imseih 47 -> 84 +37 
+Ewan Young 0 -> 37 +37 
+Tristan Partin 1 -> 37 +36 
+Alexander Lakhin 39 -> 72 +33 
+John Naylor 29 -> 62 +33 committer
+solai v 0 -> 32 +32 
+Alexander Korotkov 42 -> 74 +32 committer
+Greg Burd 13 -> 44 +31 
+Alvaro Herrera 101 -> 131 +30 committer
+Jelte Fennema-Nio 29 -> 56 +27 
+Man Zeng 1 -> 26 +25 
+Andreas Karlsson 9 -> 33 +24 
+Andrey Borodin 32 -> 55 +23 
+Amit Kapila 83 -> 105 +22 committer
+
+n committers 32
+samokhvalov e:samokhvalov@gmail.com Nikolay Samokhvalov 5y 24 (116, 1312) (86, 1280) | 26ytd 15 (85, 580) (57, 549) | 25ytd 4 (130, 451) | full2025 4
+    2019 0 {}
+    2020 1 {'author': 1, 'report': 1}
+    2021 1 {'review': 1}
+    2022 0 {}
+    2023 2 {'author': 1, 'report': 1}
+    2024 3 {'review': 3}
+    2025 4 {'review': 3, 'author': 1}
+    2026 15 {'report': 14, 'author': 3, 'review': 2}
+borodin e:amborodin86@gmail.com Andrey Borodin 5y 127 (45, 1312) (18, 1280) | 26ytd 55 (39, 580) (16, 549) | 25ytd 32 (39, 451) | full2025 35
+    2019 10 {'author': 6, 'review': 3, 'report': 2, 'suggest': 1}
+    2020 8 {'author': 4, 'report': 2, 'review': 3}
+    2021 8 {'review': 3, 'author': 5}
+    2022 3 {'report': 1, 'review': 1, 'author': 1}
+    2023 7 {'review': 6, 'author': 1}
+    2024 27 {'review': 17, 'author': 10}
+    2025 35 {'review': 24, 'author': 10, 'suggest': 1, 'report': 2}
+    2026 55 {'author': 10, 'review': 44, 'report': 3}
+wolak n:kirk wolak Kirk Wolak 5y 3 (394, 1312) (362, 1280) | 26ytd 0 (None, 580) (None, 549) | 25ytd 0 (None, 451) | full2025 0
+    2019 0 {}
+    2020 0 {}
+    2021 0 {}
+    2022 0 {}
+    2023 2 {'review': 1, 'author': 1}
+    2024 1 {'review': 1}
+    2025 0 {}
+    2026 0 {}
+kukushkin e:cyberdemn@gmail.com Alexander Kukushkin 5y 7 (228, 1312) (196, 1280) | 26ytd 0 (None, 580) (None, 549) | 25ytd 2 (221, 451) | full2025 3
+    2019 3 {'author': 2, 'report': 1}
+    2020 0 {}
+    2021 0 {}
+    2022 1 {'review': 1}
+    2023 0 {}
+    2024 3 {'author': 3}
+    2025 3 {'report': 1, 'review': 2, 'author': 1}
+    2026 0 {}
+
+TOP 25 non-committers 2026 YTD
+1 Chao Li 366 (25ytd 74 ) {'review': 256, 'author': 103, 'report': 16, 'suggest': 1}
+2 Zsolt Parragi 118 (25ytd 1 ) {'author': 40, 'report': 13, 'review': 75, 'suggest': 1}
+3 Ayush Tiwari 114 (25ytd 0 ) {'author': 51, 'report': 10, 'suggest': 2, 'review': 56}
+4 Ashutosh Bapat 92 (25ytd 40 ) {'review': 58, 'author': 33, 'report': 1, 'suggest': 3}
+5 Sami Imseih 84 (25ytd 47 ) {'author': 42, 'review': 41, 'report': 4}
+6 Bertrand Drouvot 79 (25ytd 93 ) {'review': 42, 'author': 38, 'report': 3}
+7 Alexander Lakhin 72 (25ytd 39 ) {'report': 64, 'review': 6, 'author': 5, 'suggest': 3}
+8 jian he 65 (25ytd 86 ) {'author': 39, 'report': 9, 'review': 20}
+9 Hayato Kuroda 64 (25ytd 63 ) {'review': 45, 'author': 18, 'report': 3}
+10 Xuneng Zhou 64 (25ytd 14 ) {'report': 4, 'review': 21, 'author': 41}
+11 Shihao Zhong 63 (25ytd 2 ) {'review': 22, 'author': 38, 'report': 7}
+12 Kirill Reshke 60 (25ytd 40 ) {'suggest': 2, 'author': 9, 'review': 48, 'report': 2}
+13 Bharath Rupireddy 59 (25ytd 3 ) {'author': 22, 'review': 36, 'report': 4, 'suggest': 2}
+14 Nazir Bilal Yavuz 58 (25ytd 50 ) {'review': 44, 'author': 12, 'report': 3}
+15 Jelte Fennema-Nio 56 (25ytd 29 ) {'author': 33, 'review': 22, 'report': 2}
+16 Andrey Borodin 55 (25ytd 32 ) {'author': 10, 'review': 44, 'report': 3}
+17 Peter Smith 52 (25ytd 44 ) {'review': 20, 'author': 30, 'report': 6}
+18 Lukas Fittl 46 (25ytd 4 ) {'report': 2, 'review': 27, 'author': 20, 'suggest': 1}
+19 Satyanarayana Narlapuram 45 (25ytd 1 ) {'report': 11, 'review': 14, 'author': 28}
+20 Greg Burd 44 (25ytd 13 ) {'author': 2, 'review': 37, 'report': 3, 'test': 4}
+21 Tender Wang 43 (25ytd 31 ) {'review': 23, 'suggest': 5, 'author': 10, 'report': 8}
+22 Hou Zhijie 43 (25ytd 36 ) {'review': 23, 'report': 1, 'author': 18, 'suggest': 1}
+23 Vignesh C 43 (25ytd 60 ) {'review': 18, 'author': 24, 'suggest': 1}
+24 Matheus Alcantara 42 (25ytd 23 ) {'review': 31, 'author': 11}
+25 Corey Huinker 42 (25ytd 32 ) {'review': 17, 'author': 25}
+
+TOP 25 non-committers 2022-2026
+1 Chao Li 554
+2 Bertrand Drouvot 354
+3 Alexander Lakhin 302
+4 jian he 275
+5 Peter Smith 260
+6 Kyotaro Horiguchi 228
+7 Bharath Rupireddy 217
+8 Ashutosh Bapat 212
+9 Vignesh C 211
+10 Justin Pryzby 204
+11 Hou Zhijie 203
+12 Hayato Kuroda 200
+13 Nazir Bilal Yavuz 169
+14 Sami Imseih 162
+15 Aleksander Alekseev 160
+16 Jelte Fennema-Nio 157
+17 Matthias van de Meent 133
+18 Andrey Borodin 127
+19 Kirill Reshke 126
+20 Zsolt Parragi 120
+21 Tender Wang 117
+22 Corey Huinker 116
+23 Ayush Tiwari 115
+24 Yugo Nagata 111
+25 shveta malik 107
+
+ratio growth, >=20 in 2026ytd
+Zsolt Parragi 1 118 
+Ayush Tiwari 0 114 
+Shihao Zhong 2 63 
+Bharath Rupireddy 3 59 
+Satyanarayana Narlapuram 1 45 
+Tristan Partin 1 37 
+Ewan Young 0 37 
+Lukas Fittl 4 46 
+solai v 0 32 
+Man Zeng 1 26 
+Rui Zhao 0 22 
+Thom Brown 2 22 
+ChangAo Chen 4 20 
+Chao Li 74 366 
+Xuneng Zhou 14 64 
+people>=15 in 26ytd 86 nik ratio rank 20 ab 44
+  Zsolt Parragi 1 118
+  Ayush Tiwari 0 114
+  Shihao Zhong 2 63
+  Bharath Rupireddy 3 59
+  Satyanarayana Narlapuram 1 45
+  Tristan Partin 1 37
+  Ewan Young 0 37
+  Lukas Fittl 4 46
+  solai v 0 32
+  Man Zeng 1 26
+  Rui Zhao 0 22
+  Thom Brown 2 22
+  Andrey Rachitskiy 0 19
+  Baji Shaik 0 16
+  Tatsuya Kawata 0 16
+  Mihail Nikalayeu 1 16
+  ChangAo Chen 4 20
+  Chao Li 74 366
+  Xuneng Zhou 14 64
+  Nikolay Samokhvalov 4 15
+  Andreas Karlsson 9 33
+  Greg Burd 13 44
+  Antonin Houska 9 30
+  Etsuro Fujita 10 26
+  Amit Langote 25 62
+rep 1 Noah Misch 65
+rep 2 Alexander Lakhin 64
+rep 3 Tom Lane 29
+rep 4 Andres Freund 24
+rep 5 Fujii Masao 18
+rep 6 Chao Li 16
+rep 7 Thom Brown 15
+rep 8 Nikolay Samokhvalov 14
+rep 9 Zsolt Parragi 13
+rep 10 Robert Haas 13
+rep 11 Peter Eisentraut 13
+rep 12 Xint Code 13
+nik rep rank 8 312
+ab review rank 17 251 44
+rev 1 Chao Li 256
+rev 2 Tom Lane 186
+rev 3 Fujii Masao 145
+rev 4 Michael Paquier 114
+rev 5 Andres Freund 114
+rev 6 Amit Kapila 85
+rev 7 Daniel Gustafsson 85
+rev 8 Zsolt Parragi 75
+rev 9 Alvaro Herrera 63
+rev 10 Ashutosh Bapat 58
+rev 11 Heikki Linnakangas 56
+rev 12 Ayush Tiwari 56
+rev 13 Masahiko Sawada 54
+rev 14 Kirill Reshke 48
+rev 15 Hayato Kuroda 45
+rev 16 Nazir Bilal Yavuz 44
+rev 17 Andrey Borodin 44
+rev 18 Bertrand Drouvot 42
+rev 19 Sami Imseih 41
+rev 20 shveta malik 40

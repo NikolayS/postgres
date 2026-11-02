@@ -1,0 +1,379 @@
+<title>Postgres Credit Ledger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column (~1040px) of numbered findings; each finding = headline sentence + one chart or table. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#111620; --ink-2:#4a5262; --ink-3:#7a8293;
+  --rule:#dfe3ea; --grid:#e9ecf1; --track:#eceff4;
+  --accent:#1f5fa8;
+  --nik:#2a78d6; --ab:#eb6834; --kuk:#a7aebb; --other:#a7aebb; --other-2:#c9ced8;
+  --hl-nik:#e6f0fc; --hl-ab:#fdece4;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
+  --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
+  --nik:#3987e5; --ab:#d95926; --kuk:#6b7383; --other:#5d6574; --other-2:#3f4652;
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
+  --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
+  --nik:#3987e5; --ab:#d95926; --kuk:#6b7383; --other:#5d6574; --other-2:#3f4652;
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 64px;display:grid;gap:56px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.05;font-weight:700}
+h2{font-size:clamp(21px,2.6vw,27px);line-height:1.2;font-weight:700}
+h3{font-size:17px;font-weight:600}
+p{margin:0;max-width:68ch}
+.mono,code{font-family:var(--f-mono);font-size:.88em}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.muted{color:var(--ink-2)}
+.num{font-variant-numeric:tabular-nums}
+header{display:grid;gap:14px;border-bottom:1px solid var(--rule);padding-bottom:28px}
+header .lede{font-size:17px;color:var(--ink-2)}
+.who{display:inline-flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}
+.sw.nik{background:var(--nik)}.sw.ab{background:var(--ab)}.sw.kuk{background:var(--kuk)}.sw.oth{background:var(--other)}
+section{display:grid;gap:18px}
+section > .head{display:grid;gap:6px}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:20px}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:720px){.kpis{grid-template-columns:1fr}}
+.kpi{display:grid;gap:14px}
+.kpi .name{display:flex;align-items:center;gap:8px;font-family:var(--f-display);font-size:19px;font-weight:700}
+.kpi .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.kpi .big{font-family:var(--f-display);font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .lab{font-size:12.5px;color:var(--ink-2);line-height:1.35;margin-top:6px}
+/* line chart */
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{fill:var(--ink-3);font-family:var(--f-mono);font-size:11px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:150px;z-index:2}
+.tip b{font-family:var(--f-mono);font-weight:500}
+.tip .r{display:flex;justify-content:space-between;gap:12px;align-items:center}
+/* bar lists */
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.two{grid-template-columns:1fr}}
+.bars{display:grid;gap:3px}
+.bar{display:grid;grid-template-columns:2.2em minmax(0,11.5em) minmax(0,1fr) 3.2em;align-items:center;gap:8px;padding:3px 6px;border-radius:5px;font-size:13.5px}
+.bar .rk{font-family:var(--f-mono);font-size:12px;color:var(--ink-3);text-align:right}
+.bar .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .tr{height:12px;position:relative}
+.bar .fl{position:absolute;left:0;top:0;bottom:0;background:var(--other-2);border-radius:0 4px 4px 0}
+.bar .v{font-family:var(--f-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+.bar.c .nm::after,.ctag{content:"C";display:inline-block;margin-left:6px;font-size:10px;line-height:14px;padding:0 4px;border-radius:3px;border:1px solid var(--rule);font-family:var(--f-mono);color:var(--ink-3);vertical-align:1px}
+.two > .card{align-content:start}
+.bar.nik{background:var(--hl-nik)}.bar.nik .fl{background:var(--nik)}.bar.nik .nm{font-weight:600}
+.bar.ab{background:var(--hl-ab)}.bar.ab .fl{background:var(--ab)}.bar.ab .nm{font-weight:600}
+.gap{text-align:center;color:var(--ink-3);font-family:var(--f-mono);font-size:12px;letter-spacing:.3em;padding:2px 0}
+/* dumbbell */
+.db{display:grid;gap:2px}
+.dbr{display:grid;grid-template-columns:minmax(0,12em) minmax(0,1fr) 6.5em;align-items:center;gap:10px;padding:4px 6px;border-radius:5px;font-size:13.5px}
+.dbr .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dbr .tr{position:relative;height:16px}
+.dbr .ln{position:absolute;top:7px;height:2px;background:var(--other-2)}
+.dbr .d{position:absolute;top:3px;width:10px;height:10px;border-radius:50%;margin-left:-5px;box-shadow:0 0 0 2px var(--panel)}
+.dbr .d.a{background:var(--panel);border:2px solid var(--other);width:10px;height:10px;box-sizing:border-box}
+.dbr .d.b{background:var(--ink-2)}
+.dbr .v{font-family:var(--f-mono);font-size:12px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.dbr.nik{background:var(--hl-nik)}.dbr.nik .d.b{background:var(--nik)}.dbr.nik .ln{background:var(--nik)}.dbr.nik .nm{font-weight:600}
+.dbr.ab{background:var(--hl-ab)}.dbr.ab .d.b{background:var(--ab)}.dbr.ab .ln{background:var(--ab)}.dbr.ab .nm{font-weight:600}
+.axisrow{display:grid;grid-template-columns:minmax(0,12em) minmax(0,1fr) 6.5em;gap:10px;padding:0 6px}
+.axis{position:relative;height:16px;font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
+.axis span{position:absolute;transform:translateX(-50%)}
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--panel);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td .mono{white-space:nowrap}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-2);margin:1px 3px 1px 0;white-space:nowrap}
+.pill.author{border-color:var(--ink-2);color:var(--ink)}
+.rolebar{display:flex;height:10px;border-radius:3px;overflow:hidden;gap:2px;min-width:120px}
+.rolebar i{display:block;height:100%}
+.r-a{background:var(--ink)}.r-v{background:var(--ink-3)}.r-r{background:var(--other-2)}.r-o{background:var(--track)}
+.keyrow{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
+.keyrow span{display:inline-flex;gap:6px;align-items:center}
+.keyrow i{width:10px;height:10px;border-radius:2px;display:inline-block}
+details summary{cursor:pointer;color:var(--accent);font-weight:500}
+details summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes{display:grid;gap:8px;font-size:13.5px;color:var(--ink-2)}
+.notes li{margin-bottom:6px}
+.callout{border-left:3px solid var(--rule);padding-left:14px;color:var(--ink-2)}
+a{color:var(--accent)}
+</style>
+<style>
+.kpi4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.kpi4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{display:grid;gap:6px;align-content:start}
+.tile .big{font-family:var(--f-display);font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.tile .lab{font-size:13px;color:var(--ink-2);line-height:1.4}
+.delta{font-family:var(--f-mono);font-size:12px;color:var(--ink-2)}
+.cols{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;align-items:end;height:200px;padding-top:18px}
+.col{display:grid;grid-template-rows:auto 1fr;height:100%;align-items:end;justify-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.col .cv{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
+.col .cb{width:70%;max-width:56px;background:var(--accent);border-radius:4px 4px 0 0;align-self:end}
+.col.partial .cb{background:repeating-linear-gradient(135deg,var(--accent) 0 5px,color-mix(in srgb,var(--accent) 55%,var(--panel)) 5px 9px)}
+.colx{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;border-top:1px solid var(--rule);padding-top:6px;font-family:var(--f-mono);font-size:11.5px;color:var(--ink-3);text-align:center}
+.vs th:nth-child(2),.vs td:nth-child(2){background:var(--hl-nik)}
+.vs th:nth-child(3),.vs td:nth-child(3){background:var(--hl-ab)}
+.vs td.lead{font-weight:700}
+.part{border-top:2px solid var(--ink);padding-top:22px}
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">PostgreSQL master · credits in commit messages · data through 2026-10-29</div>
+  <h1>Who gets credited in PostgreSQL commits</h1>
+  <p class="lede">Every commit to <code>master</code> lists who wrote, reviewed, reported or tested the change. This page counts those credits for every contributor from 2019 to 2026, shows who is growing fastest in 2026, and then looks closer at Nikolay Samokhvalov and Andrey Borodin.</p>
+</header>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">2026 so far, Jan 1 – Oct 29, vs the same dates in 2025</div>
+    <h2 id="ovH"></h2>
+  </div>
+  <div class="kpi4" id="ov"></div>
+  <div class="card" style="display:grid;gap:8px">
+    <h3>People credited per year</h3>
+    <p class="muted" style="font-size:13px">Distinct people named in at least one commit. The striped 2026 bar covers only Jan 1 to Oct 29.</p>
+    <div class="cols" id="pcols"></div><div class="colx" id="pcolx"></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">The leaders in 2026</div>
+    <h2>Tom Lane is still credited the most, and Chao Li is second. Committers hold 12 of the top 15 places.</h2>
+    <p class="muted">Credited commits from Jan 1 to Oct 29, 2026. Committers get credit for their own commits, so the right list leaves them out. <span class="ctag">C</span> marks a committer.</p>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Everyone</h3><div class="bars" id="all26"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>People who aren't committers</h3><div class="bars" id="nc26"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Growth</div>
+    <h2>Chao Li grew the most, gaining 292 credited commits. Zsolt Parragi and Ayush Tiwari went from almost nothing to more than 100.</h2>
+    <p class="muted">The 15 biggest gains, comparing Jan 1 – Oct 29 of each year. The hollow dot is 2025 and the filled dot is 2026.</p>
+  </div>
+  <div class="card"><div id="growth"></div></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Reviewing and reporting</div>
+    <h2>Chao Li also leads in reviews. Noah Misch and Alexander Lakhin report the most bugs.</h2>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:12px"><h3>Reviewed-by, 2026 so far</h3><div class="bars" id="rev26"></div></div>
+    <div class="card" style="display:grid;gap:12px"><h3>Reported-by, 2026 so far</h3><div class="bars" id="rep26"></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Five-year view</div>
+    <h2>Across 2022–2026, the most-credited people who aren't committers</h2>
+    <p class="muted">Out of 1,280 people credited in this period.</p>
+  </div>
+  <div class="card" style="display:grid;gap:12px"><div class="bars" id="nc5"></div></div>
+</section>
+
+<section class="part">
+  <div class="head">
+    <div class="eyebrow">A closer look</div>
+    <h2>Nikolay Samokhvalov and Andrey Borodin</h2>
+    <p class="muted" id="vsLede"></p>
+  </div>
+  <div class="tbl"><table class="vs" id="vs"></table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Over 25 years</div>
+    <h2>Andrey has been credited every year since 2016. Nikolay has two separate periods, 2007–2010 and 2020 onward.</h2>
+    <p class="muted">Commits per year whose message names the person in any role, including credits written as free text. 2026 runs only to October 29.</p>
+  </div>
+  <div class="card">
+    <div class="legend" style="margin-bottom:10px"><span><i class="sw ab"></i>Andrey Borodin</span><span><i class="sw nik"></i>Nikolay Samokhvalov</span><span><i class="sw kuk"></i>Alexander Kukushkin</span></div>
+    <div class="chart" id="line"></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Roles over 25 years</div>
+    <h2>Andrey is mostly a reviewer, Nikolay mostly a reporter, Kukushkin mostly an author.</h2>
+    <p class="muted">A commit can credit one person for several roles, so role totals can exceed commit counts.</p>
+  </div>
+  <div class="tbl"><table id="roles"></table></div>
+  <div class="keyrow"><span><i class="r-a"></i>Author</span><span><i class="r-v"></i>Reviewer</span><span><i class="r-r"></i>Reporter</span><span><i class="r-o" style="outline:1px solid var(--rule)"></i>Suggested / tested</span></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Reference points</div>
+    <h2>Kirk Wolak and Alexander Kukushkin</h2>
+  </div>
+  <div class="two">
+    <div class="card" style="display:grid;gap:10px">
+      <h3>Kirk Wolak</h3>
+      <p class="muted">Credited on 6 commits, all from 2022 to 2024, and none since. In 2022–2026 he ranks about 360th of 1,280 people who aren't committers.</p>
+      <div class="tbl" style="border:0"><table id="kw"></table></div>
+    </div>
+    <div class="card" style="display:grid;gap:10px">
+      <h3>Alexander Kukushkin</h3>
+      <p class="muted">Credited on 15 commits from 2013 to 2025, mostly as author. Nearly all are about HA and replication: pg_rewind timeouts and <code>--config-file</code>, keeping recycled WAL, moving <code>max_wal_senders</code> out of <code>max_connections</code>, the WAL continuation-record check that left standbys stuck, and <code>search_path</code> as <code>GUC_REPORT</code>. Michael Paquier committed 8 of the 15. He has no commits in 2026 so far.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">Ledger</div>
+    <h2>All 33 commits that credit Nikolay Samokhvalov</h2>
+    <p class="muted">Most of the 2026 reports are PG19 bugs, especially in the new RI fast-path (batched FK checks), which accounts for 7 commits. 12 of the commits were backpatched.</p>
+  </div>
+  <div class="tbl"><table id="nik"></table></div>
+</section>
+
+<section class="notes">
+  <div class="eyebrow">How this was counted</div>
+  <ul>
+    <li><b>Source.</b> PostgreSQL <code>master</code>, through 2026-10-29. That is 54,611 commits since Oct 2001.</li>
+    <li><b>Rankings and overview.</b> These come from parsing <code>Author</code>, <code>Co-authored-by</code>, <code>Reviewed-by</code>, <code>Reported-by</code>, <code>Tested-by</code> and <code>Suggested-by</code> lines in commits since 2019. When a commit has no <code>Author:</code> line, the committer is counted as the author. Name variants are merged by shared email and by ignoring middle initials. Credits written as free text aren't counted here.</li>
+    <li><b>Individual timelines.</b> The 25-year charts, the roles table and the ledger come from searching commit messages for each name, so free-text credits like "Patch by X, reviewed by Y" are included. A line with only a name is counted as authorship, which was the convention before about 2015. Because of this, timeline totals can be slightly higher than ranking totals; for example, Nikolay has 25 commits for 2022–2026 in the timeline but 24 in the rankings.</li>
+    <li><b>Growth.</b> Compares Jan 1–Oct 29, 2026 with the same dates in 2025. The share of commits that use these credit lines rose from 82% to 88%, which slightly inflates 2026 growth for everyone.</li>
+    <li><b>Committer.</b> Anyone who committed to master during 2022–2026 (32 people).</li>
+    <li><b>Scripts and data.</b> Every number on this page can be rebuilt with <code>pg-commit-credits/run.sh</code> on the <code>claude/great-lovelace-gf5t4g</code> branch of <code>NikolayS/postgres</code>.</li>
+  </ul>
+</section>
+</div>
+
+<script>
+const D = __DATA__;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = n => n.toLocaleString('en-US');
+const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
+
+// Overview
+(function(){
+  const c=D.commitsYTD, p=D.people, r=D.rolesYTD;
+  $('ovH').textContent = `${fmt(p['2026'])} people have been credited so far in 2026, up ${pct(p['2025'],p['2026']).slice(1)} on the same period of 2025. Commits are up ${pct(c['2025'],c['2026']).slice(1)}.`;
+  const t=(big,lab,d)=>`<div class="card tile"><div class="big">${big}</div><div class="lab">${lab}</div><div class="delta">${d}</div></div>`;
+  $('ov').innerHTML =
+    t(fmt(c['2026']),'commits to master',`2025: ${fmt(c['2025'])} · ${pct(c['2025'],c['2026'])}`)+
+    t(fmt(p['2026']),'distinct people credited',`2025: ${fmt(p['2025'])} · ${pct(p['2025'],p['2026'])}`)+
+    t(fmt(r['2026'].review),'Reviewed-by credits',`2025: ${fmt(r['2025'].review)} · ${pct(r['2025'].review,r['2026'].review)}`)+
+    t(fmt(r['2026'].report),'Reported-by credits',`2025: ${fmt(r['2025'].report)} · ${pct(r['2025'].report,r['2026'].report)}`);
+  const ys=Object.keys(D.peopleYear), mx=Math.max(...Object.values(D.peopleYear));
+  $('pcols').innerHTML=ys.map(y=>`<div class="col ${y==='2026'?'partial':''}" title="${y}: ${D.peopleYear[y]} people${y==='2026'?' (to Oct 29)':''}"><span class="cv">${D.peopleYear[y]}</span><span class="cb" style="height:${D.peopleYear[y]/mx*100}%"></span></div>`).join('');
+  $('pcolx').innerHTML=ys.map(y=>`<span>${y}${y==='2026'?'*':''}</span>`).join('');
+})();
+
+// Bar lists (top N only, no highlights)
+function bars(id, rows, n){
+  rows=rows.filter(r=>r.rank<=n);
+  const max=Math.max(...rows.map(r=>r.v));
+  $(id).innerHTML=rows.map(r=>`<div class="bar ${r.c?'c':''}" title="${esc(r.name)}: ${r.v}${r.prev!=null?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.v/max*100)}%"></span></span><span class="v">${r.v}</span></div>`).join('');
+}
+bars('all26',D.top26,15); bars('nc26',D.topNC26,15); bars('rev26',D.rev26,12); bars('rep26',D.rep26,12); bars('nc5',D.topNC5y,20);
+
+// Dumbbell
+(function(){
+  const max=400, p=v=>v/max*100;
+  let h=D.growth.map(r=>`<div class="dbr" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a})"><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`).join('');
+  h+=`<div class="axisrow"><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
+  $('growth').innerHTML=`<div class="db">${h}</div>`;
+})();
+
+// Nikolay vs Andrey: same metrics side by side
+(function(){
+  const N=D.ranks.nik, A=D.ranks.ab, Y=D.years;
+  const tot=k=>Object.values(Y[k]).reduce((a,b)=>a+b,0);
+  const rk=x=>x[0]?`#${x[0]} <span class="muted" style="font-size:12px">of ${fmt(x[1])}</span>`:'–';
+  const rows=[
+    ['Commits credited, 2001–2026', tot('nik'), tot('ab'), 'hi'],
+    ['Active years', '2007–2010, 2020–2026', '2016–2026', null],
+    ['Credited commits, 2026 so far', N.v26, A.v26, 'hi'],
+    ['Same period of 2025', N.v25, A.v25, 'hi'],
+    ['Growth rate', '×'+(N.v26/N.v25).toFixed(2), '×'+(A.v26/A.v25).toFixed(2), 'nik'],
+    ['2026 rank, everyone', rk(N.y26), rk(A.y26), 'ab'],
+    ['2026 rank, non-committers', rk(N.y26nc), rk(A.y26nc), 'ab'],
+    ['2026 rank, Reviewed-by', rk(N.rev), rk(A.rev), 'ab'],
+    ['2026 rank, Reported-by', rk(N.rep), rk(A.rep), 'nik'],
+    ['2022–2026 rank, non-committers', rk(N.y5nc), rk(A.y5nc), 'ab'],
+    ['2026 credits by role', `${N.roles26.report||0} reporter · ${N.roles26.author||0} author · ${N.roles26.review||0} reviewer`, `${A.roles26.review||0} reviewer · ${A.roles26.author||0} author · ${A.roles26.report||0} reporter`, null],
+  ];
+  $('vs').innerHTML='<thead><tr><th>Metric</th><th><span class="who"><i class="sw nik"></i>Nikolay</span></th><th><span class="who"><i class="sw ab"></i>Andrey</span></th></tr></thead><tbody>'+
+    rows.map(([m,a,b,w])=>{const la = w==='nik' || (w==='hi' && a>b), lb = w==='ab' || (w==='hi' && b>a);
+      return `<tr><td>${m}</td><td class="${la?'lead':''}">${a}</td><td class="${lb?'lead':''}">${b}</td></tr>`}).join('')+'</tbody>';
+  $('vsLede').innerHTML=`Andrey is much more active. In 2026 he is credited on ${(A.v26/N.v26).toFixed(1)}× as many commits, mostly as a reviewer, and he ranks ahead of Nikolay on every overall measure. Nikolay is ahead on two measures: reporting bugs (#${N.rep[0]} of all reporters in 2026) and growth rate (×${(N.v26/N.v25).toFixed(2)} vs ×${(A.v26/A.v25).toFixed(2)}). Bold marks whichever of the two leads on each line.`;
+})();
+
+// Line chart
+(function(){
+  const years = []; for (let y=2005;y<=2026;y++) years.push(y);
+  const S = [[['ab','Andrey Borodin'],['nik','Nikolay Samokhvalov'],['kuk','Alexander Kukushkin']];  // Kukushkin drawn in neutral gray as a reference line
+  const W=980,H=300,m={l:34,r:150,t:12,b:26};
+  const x = y => m.l + (y-2005)/(2026-2005)*(W-m.l-m.r);
+  const ymax=60, yy = v => H-m.b - v/ymax*(H-m.t-m.b);
+  let g='';
+  for (let v=0; v<=ymax; v+=10){ g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${yy(v)}" y2="${yy(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l-8}" y="${yy(v)+4}" text-anchor="end">${v}</text>`; }
+  for (let y=2005;y<=2026;y++) if (y%5===0 || y===2026) g+=`<text x="${x(y)}" y="${H-6}" text-anchor="middle">${y}</text>`;
+  let lines='', labs=[];
+  S.forEach(([k,n])=>{
+    const pts = years.map(y=>[x(y), yy(D.years[k][y]||0)]);
+    lines += `<polyline fill="none" stroke="var(--${k})" stroke-width="2" stroke-linejoin="round" points="${pts.map(p=>p.join(',')).join(' ')}"/>`;
+    const last = D.years[k]['2026']||0;
+    lines += `<circle cx="${x(2026)}" cy="${yy(last)}" r="4.5" fill="var(--${k})" stroke="var(--panel)" stroke-width="2"/>`;
+    labs.push([k,n,last,yy(last)]);
+  });
+  labs.sort((a,b)=>a[3]-b[3]); for (let i=1;i<labs.length;i++) if (labs[i][3]-labs[i-1][3]<16) labs[i][3]=labs[i-1][3]+16;
+  labs.forEach(([k,n,v,ly])=>{ lines += `<text x="${x(2026)+10}" y="${ly+4}" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px">${n.split(' ')[1]} <tspan style="fill:var(--ink-3);font-family:var(--f-mono)">${v}</tspan></text>`; });
+  const el=$('line');
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Commits per year crediting each person, 2005 to 2026">${g}<line id="xh" y1="${m.t}" y2="${H-m.b}" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>${lines}<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+  const svg=el.querySelector('svg'), tip=el.querySelector('.tip'), xh=el.querySelector('#xh');
+  svg.addEventListener('pointermove', ev => {
+    const r=svg.getBoundingClientRect(), sx=(ev.clientX-r.left)/r.width*W;
+    const y=Math.max(2005,Math.min(2026,Math.round(2005+(sx-m.l)/(W-m.l-m.r)*21)));
+    xh.setAttribute('x1',x(y)); xh.setAttribute('x2',x(y)); xh.setAttribute('opacity',1);
+    tip.innerHTML=`<div style="font-family:var(--f-mono);margin-bottom:4px">${y}${y===2026?' (to Oct 29)':''}</div>`+S.map(([k,n])=>`<div class="r"><span class="who" style="font-weight:400"><i class="sw ${k}"></i>${n}</span><b>${D.years[k][y]||0}</b></div>`).join('');
+    tip.hidden=false;
+    const px=x(y)/W*r.width; tip.style.left=Math.min(px+12, r.width-tip.offsetWidth-4)+'px'; tip.style.top='8px';
+  });
+  svg.addEventListener('pointerleave',()=>{tip.hidden=true;xh.setAttribute('opacity',0)});
+})();
+
+// Roles table
+(function(){
+  const P=[['nik','Nikolay Samokhvalov'],['ab','Andrey Borodin'],['kuk','Alexander Kukushkin'],['kw','Kirk Wolak']];
+  const tot=k=>Object.values(D.years[k]).reduce((a,b)=>a+b,0);
+  const yrs=k=>{const ks=Object.keys(D.years[k]).map(Number);return Math.min(...ks)+'–'+Math.max(...ks)};
+  const max=Math.max(...P.map(([k])=>Object.values(D.roles[k]).reduce((a,b)=>a+b,0)));
+  let h=`<thead><tr><th>Person</th><th class="n">Commits</th><th>Years</th><th class="n">Author</th><th class="n">Reviewer</th><th class="n">Reporter</th><th class="n">Other</th><th style="min-width:160px">Mix</th><th class="n">Committers</th></tr></thead><tbody>`;
+  P.forEach(([k,n])=>{const r=D.roles[k],a=r.author||0,v=r.review||0,p=r.report||0,o=(r.suggest||0)+(r.test||0);
+    const w=x=>(x/max*100)+'%';
+    h+=`<tr><td><span class="who">${k==='kw'?'<i class="sw oth"></i>':`<i class="sw ${k}"></i>`}${n}</span></td><td class="n"><b>${tot(k)}</b></td><td class="mono">${yrs(k)}</td><td class="n">${a}</td><td class="n">${v}</td><td class="n">${p}</td><td class="n">${o}</td><td><div class="rolebar" style="width:100%" title="${a} author, ${v} reviewer, ${p} reporter, ${o} other"><i class="r-a" style="width:${w(a)}"></i><i class="r-v" style="width:${w(v)}"></i><i class="r-r" style="width:${w(p)}"></i><i class="r-o" style="width:${w(o)}"></i></div></td><td class="n">${D.ncommitters[k]}</td></tr>`;});
+  $('roles').innerHTML=h+'</tbody>';
+})();
+
+// Tables
+function pills(rs){return rs.map(r=>`<span class="pill ${r}">${({author:'author',review:'reviewer',report:'reporter',suggest:'suggested',test:'tested'})[r]||r}</span>`).join('')}
+$('nik').innerHTML='<thead><tr><th>Date</th><th>Commit</th><th>Subject</th><th>Committer</th><th>Role</th></tr></thead><tbody>'+D.nikList.map(r=>`<tr><td class="mono num">${r.d}</td><td class="mono">${r.h}</td><td>${esc(r.s)}</td><td style="white-space:nowrap">${esc(r.cn)}</td><td>${pills(r.roles)}</td></tr>`).join('')+'</tbody>';
+$('kw').innerHTML='<thead><tr><th>Date</th><th>Subject</th><th>Role</th></tr></thead><tbody>'+D.kwList.map(r=>`<tr><td class="mono num">${r.d}</td><td>${esc(r.s.replace(/^\|.*?\|\s*/,'').replace(/^-email limit-\|\s*/,''))}</td><td>${pills(r.roles)}</td></tr>`).join('')+'</tbody>';
+</script>
