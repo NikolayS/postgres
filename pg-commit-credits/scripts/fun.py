@@ -97,7 +97,7 @@ for c in log:
             except ValueError: pass
 order = sorted(bp, key=lambda v: float(v))
 out['backpatch'] = dict(n=nbp, masterOnly=master_only, targets=[dict(v=v, n=bp[v]) for v in order if bp[v] >= 3],
-                        reporters=[dict(name=nm(k), n=n, deep=bpdeep[k], hl='nik' if k == NIK else 'ab' if k == AB else '') for k, n in bprep.most_common(15)],
+                        reporters=[dict(rank=i + 1, name=nm(k), n=n, deep=bpdeep[k]) for i, (k, n) in enumerate(bprep.most_common()) if i < 15 or k in (NIK, AB)],
                         nik=bprep[NIK], ab=bprep[AB], nikRank=[k for k, _ in bprep.most_common()].index(NIK) + 1 if NIK in bprep else None,
                         abRank=[k for k, _ in bprep.most_common()].index(AB) + 1 if AB in bprep else None, nReporters=len(bprep))
 

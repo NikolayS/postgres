@@ -80,7 +80,7 @@ mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:6
 .gap{text-align:center;color:var(--ink-3);font-family:var(--f-mono);font-size:12px;letter-spacing:.3em;padding:2px 0}
 /* dumbbell */
 .db{display:grid;gap:2px}
-.dbr{display:grid;grid-template-columns:minmax(0,12em) minmax(0,1fr) 6.5em;align-items:center;gap:10px;padding:4px 6px;border-radius:5px;font-size:13.5px}
+.dbr{display:grid;grid-template-columns:2em minmax(0,12em) minmax(0,1fr) 6.5em;align-items:center;gap:10px;padding:4px 6px;border-radius:5px;font-size:13.5px}
 .dbr .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dbr .tr{position:relative;height:16px}
 .dbr .ln{position:absolute;top:7px;height:2px;background:var(--other-2)}
@@ -90,7 +90,15 @@ mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:6
 .dbr .v{font-family:var(--f-mono);font-size:12px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
 .dbr.nik{background:var(--hl-nik)}.dbr.nik .d.b{background:var(--nik)}.dbr.nik .ln{background:var(--nik)}.dbr.nik .nm{font-weight:600}
 .dbr.ab{background:var(--hl-ab)}.dbr.ab .d.b{background:var(--ab)}.dbr.ab .ln{background:var(--ab)}.dbr.ab .nm{font-weight:600}
-.axisrow{display:grid;grid-template-columns:minmax(0,12em) minmax(0,1fr) 6.5em;gap:10px;padding:0 6px}
+.dbr .rk{font-family:var(--f-mono);font-size:12px;color:var(--ink-3);text-align:right}
+@media (max-width:600px){
+  .dbr{grid-template-columns:2em minmax(0,1fr) auto;row-gap:2px}
+  .dbr .tr{grid-column:2 / 4;grid-row:2}
+  .axisrow{grid-template-columns:2em minmax(0,1fr) auto}
+  .axisrow > span:nth-child(2){display:none}
+  .axisrow .axis{grid-column:2 / 4}
+}
+.axisrow{display:grid;grid-template-columns:2em minmax(0,12em) minmax(0,1fr) 6.5em;gap:10px;padding:0 6px}
 .axis{position:relative;height:16px;font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
 .axis span{position:absolute;transform:translateX(-50%)}
 /* tables */
@@ -182,7 +190,7 @@ a{color:var(--accent)}
   <div class="head">
     <div class="eyebrow">Growth</div>
     <h2>Chao Li grew the most, gaining 292 credited commits. Zsolt Parragi and Ayush Tiwari went from almost nothing to more than 100.</h2>
-    <p class="muted">The 15 biggest gains, comparing Jan 1 – __ASOF_SHORT__ of each year. The hollow dot is 2025 and the filled dot is 2026.</p>
+    <p class="muted">The 15 biggest gains, comparing Jan 1 – __ASOF_SHORT__ of each year, ranked by gain among everyone credited in 2026. The hollow dot is 2025 and the filled dot is 2026.</p>
   </div>
   <div class="card"><div id="growth"></div></div>
 </section>
@@ -546,10 +554,10 @@ bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); b
 // Dumbbell
 (function(){
   const max=400, p=v=>v/max*100;
-  const G=D.growth.slice(); const inG=n=>G.some(r=>r.name===n);
-  const us=[['Andrey Borodin',D.ranks.ab],['Nikolay Samokhvalov',D.ranks.nik]].filter(([n])=>!inG(n)).map(([n,r])=>({name:n,a:r.v25,b:r.v26,c:false,us:1}));
-  let h=G.concat(us).map((r,i)=>(r.us&&!(G.concat(us)[i-1]||{}).us?'<div class="gap">· · ·</div>':'')+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a})"><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`).join('');
-  h+=`<div class="axisrow"><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
+  let prev=0;
+  let h=D.growth.map(r=>{const g=r.rank>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank;
+    return g+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a}), #${r.rank} by gain"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`}).join('');
+  h+=`<div class="axisrow"><span></span><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
   $('growth').innerHTML=`<div class="db">${h}</div>`;
 })();
 
@@ -635,7 +643,8 @@ const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','
 const clean = n => String(n).replace(/^[en]1?:/,'');
 function simpleBars(id, rows, cls){
   const max=Math.max(...rows.map(r=>r.n));
-  $(id).innerHTML=rows.map((r,i)=>`<div class="bar ${cls||hlc(r.name)}" title="${esc(r.tip||(r.name+': '+r.n))}"><span class="rk">${r.rk??i+1}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.n/max*100)}%"></span></span><span class="v">${r.n}</span></div>`).join('');
+  let prev=0;
+  $(id).innerHTML=rows.map((r,i)=>{const rk=typeof r.rk==='number'?r.rk:i+1, g=(typeof r.rk==='number'&&rk>prev+1&&prev)?'<div class="gap">· · ·</div>':'';prev=rk;return g+`<div class="bar ${cls||hlc(r.name)}" title="${esc(r.tip||(r.name+': '+r.n))}"><span class="rk">${r.rk??i+1}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.n/max*100)}%"></span></span><span class="v">${r.n}</span></div>`}).join('');
 }
 
 // AI
@@ -766,7 +775,7 @@ function card(k,b,s,cls){return `<div class="rc ${cls||''}"><div class="k">${k}<
   const P=F.backpatch, top=P.targets.reduce((a,b)=>b.n>a.n?b:a);
   $('bpH').textContent=`${fmt(P.n)} fixes since 2019 say how far back they were applied. The most common target is PG${top.v}, with ${top.n} fixes. Alexander Lakhin's reports led to the most backpatched fixes.`;
   cols('bpCols','bpX',P.targets.map(t=>({label:t.v,n:t.n})));
-  simpleBars('bpRep',P.reporters.map(r=>({name:r.name,n:r.n,tip:`${r.name}: ${r.n} backpatched fixes, ${r.deep} reaching PG13 or older`})));
+  simpleBars('bpRep',P.reporters.map(r=>({rk:r.rank,name:r.name,n:r.n,tip:`${r.name}: ${r.n} backpatched fixes, ${r.deep} reaching PG13 or older`})));
 })();
 
 // streaks + Tom Lane calendar

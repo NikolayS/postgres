@@ -31,7 +31,8 @@ out['topNC5y']=top(c5,20,True,ex)
 rep=cnt(2026,2026,True,roles={'report'}); rv=cnt(2026,2026,True,roles={'review'})
 out['rep26']=top(rep,20,False,ex); out['rev26']=top(rv,20,False,ex)
 g=sorted(c26,key=lambda k:c26[k]-c25[k],reverse=True)
-out['growth']=[dict(name=nm(k),a=c25[k],b=c26[k],c=k in committers) for k in g[:15]]
+out['growth']=[dict(rank=i+1,name=nm(k),a=c25[k],b=c26[k],c=k in committers) for i,k in enumerate(g) if i<15 or k in ex]
+out['growthN']=len(g)
 el=[k for k in c26 if c26[k]>=15]; rr=sorted(el,key=lambda k:c26[k]/max(c25[k],3),reverse=True)
 out['ratioRank']={'nik':rr.index(ids['nik'])+1,'ab':rr.index(ids['ab'])+1,'n':len(el)}
 def rk(c,k,excl): 
