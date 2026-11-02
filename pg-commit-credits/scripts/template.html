@@ -76,6 +76,7 @@ section > .head{display:grid;gap:6px}
 .bar.nik{background:var(--hl-nik)}.bar.nik .fl{background:var(--nik)}.bar.nik .nm{font-weight:600}
 .bar.ab{background:var(--hl-ab)}.bar.ab .fl{background:var(--ab)}.bar.ab .nm{font-weight:600}
 .bars.wide .bar{grid-template-columns:0 minmax(0,17em) minmax(0,1fr) 3.2em}.bars.wide .rk{visibility:hidden}
+mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:600}mark.m-nik{background:var(--hl-nik);box-shadow:inset 0 -2px 0 var(--nik)}mark.m-ab{background:var(--hl-ab);box-shadow:inset 0 -2px 0 var(--ab)}
 .gap{text-align:center;color:var(--ink-3);font-family:var(--f-mono);font-size:12px;letter-spacing:.3em;padding:2px 0}
 /* dumbbell */
 .db{display:grid;gap:2px}
@@ -149,6 +150,7 @@ a{color:var(--accent)}
   <div class="eyebrow">PostgreSQL master · credits in commit messages · data through __ASOF__</div>
   <h1>Who gets credited in PostgreSQL commits</h1>
   <p class="lede">Every commit to <code>master</code> lists who wrote, reviewed, reported or tested the change. This page counts those credits for every contributor from 2019 to 2026, shows who is growing fastest in 2026, and then looks closer at Nikolay Samokhvalov and Andrey Borodin.</p>
+  <p class="lede" style="font-size:14.5px">Throughout the page, <mark class="m-nik">Nikolay</mark> is marked in blue and <mark class="m-ab">Andrey</mark> in orange. Where one of you is outside a top list, your row is added at the bottom after a gap.</p>
 </header>
 
 <section>
@@ -239,7 +241,7 @@ a{color:var(--accent)}
   <div class="head">
     <div class="eyebrow">Who commits whose work</div>
     <h2>Contributors who aren't committers usually reach master through one or two committers. Amit Kapila's logical replication group is the densest cluster.</h2>
-    <p class="muted">The 30 strongest pairs in 2022–2026. Each line joins a contributor (left) to the committer who committed their credited work (right). Thicker lines mean more commits.</p>
+    <p class="muted">The 30 strongest pairs in 2022–2026. Each line joins a contributor (left) to the committer who committed their credited work (right). Thicker lines mean more commits. Nikolay's and Andrey's strongest pairs are added in their colors.</p>
   </div>
   <div class="card"><div class="chart" id="net"></div></div>
 </section>
@@ -513,6 +515,8 @@ const D = __DATA__;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => n.toLocaleString('en-US');
+const hlc = n => /Samokhvalov/.test(n) ? 'nik' : /Borodin/.test(n) ? 'ab' : '';
+const mk = s => { const c = hlc(s); return c ? `<mark class="m-${c}">${s}</mark>` : s; };
 const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
 
 // Overview
@@ -532,16 +536,19 @@ const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
 
 // Bar lists (top N only, no highlights)
 function bars(id, rows, n){
-  rows=rows.filter(r=>r.rank<=n);
+  rows=rows.filter(r=>r.rank<=n||hlc(r.name)).sort((a,b)=>a.rank-b.rank);
   const max=Math.max(...rows.map(r=>r.v));
-  $(id).innerHTML=rows.map(r=>`<div class="bar ${r.c?'c':''}" title="${esc(r.name)}: ${r.v}${r.prev!=null?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.v/max*100)}%"></span></span><span class="v">${r.v}</span></div>`).join('');
+  let prev=0;
+  $(id).innerHTML=rows.map(r=>{const g=r.rank>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank;return g+`<div class="bar ${r.c?'c':''} ${hlc(r.name)}" title="${esc(r.name)}: ${r.v}${r.prev!=null?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.v/max*100)}%"></span></span><span class="v">${r.v}</span></div>`}).join('');
 }
 bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); bars('rep26',D.rep26,20); bars('nc5',D.topNC5y,20);
 
 // Dumbbell
 (function(){
   const max=400, p=v=>v/max*100;
-  let h=D.growth.map(r=>`<div class="dbr" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a})"><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`).join('');
+  const G=D.growth.slice(); const inG=n=>G.some(r=>r.name===n);
+  const us=[['Andrey Borodin',D.ranks.ab],['Nikolay Samokhvalov',D.ranks.nik]].filter(([n])=>!inG(n)).map(([n,r])=>({name:n,a:r.v25,b:r.v26,c:false,us:1}));
+  let h=G.concat(us).map((r,i)=>(r.us&&!(G.concat(us)[i-1]||{}).us?'<div class="gap">· · ·</div>':'')+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a})"><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`).join('');
   h+=`<div class="axisrow"><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
   $('growth').innerHTML=`<div class="db">${h}</div>`;
 })();
@@ -628,7 +635,7 @@ const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','
 const clean = n => String(n).replace(/^[en]1?:/,'');
 function simpleBars(id, rows, cls){
   const max=Math.max(...rows.map(r=>r.n));
-  $(id).innerHTML=rows.map((r,i)=>`<div class="bar ${cls||''}" title="${esc(r.tip||(r.name+': '+r.n))}"><span class="rk">${r.rk??i+1}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.n/max*100)}%"></span></span><span class="v">${r.n}</span></div>`).join('');
+  $(id).innerHTML=rows.map((r,i)=>`<div class="bar ${cls||hlc(r.name)}" title="${esc(r.tip||(r.name+': '+r.n))}"><span class="rk">${r.rk??i+1}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.n/max*100)}%"></span></span><span class="v">${r.n}</span></div>`).join('');
 }
 
 // AI
@@ -659,15 +666,15 @@ function simpleBars(id, rows, cls){
   $('co').innerHTML='<thead><tr><th>Company</th>'+ys.map(y=>`<th class="n">${y}${y==='2026'?'*':''}</th>`).join('')+'<th>Trend</th><th>Most credited, 2022–2026</th></tr></thead><tbody>'+
     C.order.map(c=>{const v=ys.map(y=>C.years[c][y]);const W=110,H=26,x=i=>4+i/(v.length-1)*(W-8),y=n=>H-3-n/Math.max(...v,1)*(H-6);
       const sp=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${v.map((n,i)=>x(i)+','+y(n)).join(' ')}"/><circle cx="${x(v.length-1)}" cy="${y(v[v.length-1])}" r="2.5" fill="var(--accent)"/></svg>`;
-      return `<tr><td style="white-space:nowrap"><b>${esc(c)}</b></td>${v.map(n=>`<td class="n" style="background:color-mix(in srgb,var(--accent) ${Math.round(n/mx*35)}%,transparent)">${n||'·'}</td>`).join('')}<td>${sp}</td><td class="muted" style="font-size:12.5px">${C.people[c].map(clean).map(esc).join(', ')}</td></tr>`}).join('')+
+      return `<tr><td style="white-space:nowrap"><b>${esc(c)}</b></td>${v.map(n=>`<td class="n" style="background:color-mix(in srgb,var(--accent) ${Math.round(n/mx*35)}%,transparent)">${n||'·'}</td>`).join('')}<td>${sp}</td><td class="muted" style="font-size:12.5px">${C.people[c].map(clean).map(esc).map(mk).join(', ')}</td></tr>`}).join('')+
     `<tr><td colspan="${ys.length+3}" class="muted" style="font-size:12px">* 2026 runs to __ASOF_SHORT__. Cells count commits that credit at least one person from the company. Shading scales with the count.</td></tr></tbody>`;
 })();
 
 // Network (bipartite)
 (function(){
-  const P=X.network.pairs.slice(0,30);
+  const P=X.network.pairs.slice(0,30).concat([['Andrey Borodin',X.network.ab[0]],['Nikolay Samokhvalov',X.network.nik[0]]].map(([a,c])=>({a,b:c.name,n:c.n,hl:hlc(a)})));
   const L=[...new Set(P.map(p=>p.a))], R=[...new Set(P.map(p=>p.b))];
-  const tot=(arr,key)=>Object.fromEntries(arr.map(n=>[n,P.filter(p=>p[key]===n).reduce((s,p)=>s+p.n,0)]));
+  const tot=(arr,key)=>Object.fromEntries(arr.map(n=>[n,P.filter(p=>p[key]===n&&(key==='a'||!p.hl||P.every(q=>q.b!==n||q.hl))).reduce((s,p)=>s+p.n,0)]));
   const tl=tot(L,'a'), tr=tot(R,'b');
   L.sort((a,b)=>tl[b]-tl[a]); R.sort((a,b)=>tr[b]-tr[a]);
   const W=900, row=24, H=Math.max(L.length,R.length)*row+20, HB=H+16, lx=200, rx=W-200;
@@ -675,8 +682,8 @@ function simpleBars(id, rows, cls){
   const max=Math.max(...P.map(p=>p.n));
   let s='';
   P.forEach(p=>{const a=yl(L.indexOf(p.a)), b=yr(R.indexOf(p.b));
-    s+=`<path d="M${lx},${a} C${(lx+rx)/2},${a} ${(lx+rx)/2},${b} ${rx},${b}" fill="none" stroke="var(--accent)" stroke-opacity=".35" stroke-width="${1+p.n/max*9}"><title>${esc(p.a)} → ${esc(p.b)}: ${p.n} commits</title></path>`;});
-  L.forEach((n,i)=>s+=`<circle cx="${lx}" cy="${yl(i)}" r="4" fill="var(--ink-2)"/><text x="${lx-10}" y="${yl(i)+4}" text-anchor="end" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px">${esc(n)} <tspan style="fill:var(--ink-3);font-family:var(--f-mono);font-size:11px">${tl[n]}</tspan></text>`);
+    s+=`<path d="M${lx},${a} C${(lx+rx)/2},${a} ${(lx+rx)/2},${b} ${rx},${b}" fill="none" stroke="${p.hl?`var(--${p.hl})`:'var(--accent)'}" stroke-opacity="${p.hl?.9:.35}" stroke-width="${Math.max(p.hl?2.5:1,1+p.n/max*9)}"><title>${esc(p.a)} → ${esc(p.b)}: ${p.n} commits</title></path>`;});
+  L.forEach((n,i)=>s+=`<circle cx="${lx}" cy="${yl(i)}" r="${hlc(n)?5:4}" fill="${hlc(n)?`var(--${hlc(n)})`:'var(--ink-2)'}"/><text x="${lx-10}" y="${yl(i)+4}" text-anchor="end" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px;font-weight:${hlc(n)?700:400}">${esc(n)} <tspan style="fill:var(--ink-3);font-family:var(--f-mono);font-size:11px">${tl[n]}</tspan></text>`);
   R.forEach((n,i)=>s+=`<circle cx="${rx}" cy="${yr(i)}" r="5" fill="var(--ink)"/><text x="${rx+10}" y="${yr(i)+4}" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px;font-weight:600">${esc(n)} <tspan style="fill:var(--ink-3);font-family:var(--f-mono);font-size:11px;font-weight:400">${tr[n]}</tspan></text>`);
   $('net').innerHTML=`<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${HB}" style="min-width:640px" role="img" aria-label="Contributor to committer pairs">${s}<text x="${lx}" y="${HB-2}" text-anchor="middle" style="font-size:10.5px">contributors</text><text x="${rx}" y="${HB-2}" text-anchor="middle" style="font-size:10.5px">committers</text></svg></div>`;
 })();
@@ -699,7 +706,7 @@ function simpleBars(id, rows, cls){
   const a=R.find(r=>r.v===16), b=R.find(r=>r.v===19);
   $('relH').textContent=`PG19 credited ${b.people} people, about twice as many as PG16 (${a.people}). PG20 has already credited ${R[R.length-1].people} with the cycle still in progress.`;
   $('rel').innerHTML='<thead><tr><th>Cycle</th><th>Dates</th><th class="n">Commits</th><th class="n">People credited</th><th>Most credited non-committers</th></tr></thead><tbody>'+
-    R.map(r=>`<tr><td><b>PG${r.v}</b></td><td class="mono" style="white-space:nowrap;font-size:12px">${r.start} → ${r.end||'now'}</td><td class="n">${fmt(r.commits)}</td><td class="n"><b>${r.people}</b></td><td style="font-size:13px">${r.top.slice(0,3).map(t=>`${esc(t.name)} <span class="mono muted" style="font-size:11px">${t.n}</span>`).join(' · ')}</td></tr>`).join('')+'</tbody>';
+    R.map(r=>`<tr><td><b>PG${r.v}</b></td><td class="mono" style="white-space:nowrap;font-size:12px">${r.start} → ${r.end||'now'}</td><td class="n">${fmt(r.commits)}</td><td class="n"><b>${r.people}</b></td><td style="font-size:13px">${r.top.slice(0,3).map(t=>`${mk(esc(t.name))} <span class="mono muted" style="font-size:11px">${t.n}</span>`).join(' · ')}</td></tr>`).join('')+'</tbody>';
 })();
 
 // Closer look: committers, code, releases for us
@@ -803,7 +810,7 @@ function card(k,b,s,cls){return `<div class="rc ${cls||''}"><div class="k">${k}<
     ['report','review','author'].map(k=>{const r=R[k];return `<tr><td><b>${nm[k]}</b></td><td class="n">${r.n}</td>${cell(r.once,r.n)}${cell(r.author,r.n)}${cell(r.review,r.n)}${cell(r.report,r.n)}</tr>`}).join('')+'</tbody>';
   simpleBars('ldBit',L.newCommitters.map(x=>({name:x.name+(x.firstCredit<'2019-07-01'?' *':''),n:x.days,tip:`${x.name}: first credit in this data ${x.firstCredit}, first commit ${x.firstCommit}`})));
   $('clubH').textContent=`The all-five-roles club: ${L.club.length} people`;
-  $('club').innerHTML=L.club.map(esc).join(' · ');
+  $('club').innerHTML=L.club.map(esc).map(mk).join(' · ');
 })();
 
 // big days
