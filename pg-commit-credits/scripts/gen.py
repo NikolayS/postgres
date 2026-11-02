@@ -1,7 +1,7 @@
 import os; exec(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'rank.py')).read().split("print('distinct")[0])
 import subprocess
 out={}
-P={'nik':'Samokhvalov','kuk':'Kukushkin','ab':'Borodin','kw':'Wolak'}
+P={'nik':'Samokhvalov','ab':'Borodin','kw':'Wolak'}
 G={}
 for k,f in P.items():
     r=json.load(open(os.path.join(DATA,f+'.json')));G[k]=r
@@ -15,9 +15,9 @@ def lst(k):
         s=subprocess.run(['git','-C',PG_REPO,'log','-1','--format=%ad%x01%s','--date=short',z['h']],capture_output=True,text=True).stdout.strip().split('\x01')
         res.append(dict(h=z['h'][:9],d=s[0],cn=z['cn'],roles=z['roles'],s=s[1][:110]))
     return res
-out['nikList']=lst('nik'); out['kwList']=lst('kw')
+out['nikList']=lst('nik'); out['abList']=lst('ab'); out['kwList']=lst('kw')
 committers=set(k for h,d,m in D['rows'] if d[:4]>='2022' for k,r in m.items() if 'commit' in r)
-ids={'nik':'e:samokhvalov@gmail.com','ab':'e:amborodin86@gmail.com','kuk':'e:cyberdemn@gmail.com','kw':'n:kirk wolak'}
+ids={'nik':'e:samokhvalov@gmail.com','ab':'e:amborodin86@gmail.com','kw':'n:kirk wolak'}
 def roleset(k,y,ytd=True):
     return dict(collections.Counter(x for h,d,m in D['rows'] if d[:4]==str(y) and (not ytd or d[4:]<=CUT) for x in m.get(k,[]) if x!='commit'))
 def top(c,n,excl=False,extra=()):

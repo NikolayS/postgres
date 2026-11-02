@@ -8,7 +8,6 @@ cd "$(dirname "$0")"
 S=scripts; D=data
 # 1. Per-person timelines (grep of commit messages, prose credits included)
 python3 $S/roles.py 'Samokhvalov'               > $D/Samokhvalov.json
-python3 $S/roles.py 'Kukushkin'                 > $D/Kukushkin.json
 python3 $S/roles.py 'Andre[wy] (M\. )?Borodin'  > $D/Borodin.json
 python3 $S/roles.py 'Wolak|wolakk@'             > $D/Wolak.json
 # 2. All contributors since 2019, parsed from credit trailers

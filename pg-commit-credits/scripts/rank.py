@@ -30,7 +30,7 @@ def rankof(c,k,excl=False):
     l=[x for x,_ in c.most_common() if not(excl and x in committers)]
     return (l.index(k)+1 if k in l else None, len(l))
 full25=cnt(2025,2025)
-for who in ['samokhvalov','borodin','wolak','kukushkin']:
+for who in ['samokhvalov','borodin','wolak']:
     ks=[k for k in disp if who in disp[k].lower() or who in k]
     for k in ks:
         print(who,k,nm(k),'5y',c5[k],rankof(c5,k),rankof(c5,k,True),'| 26ytd',c26[k],rankof(c26,k),rankof(c26,k,True),'| 25ytd',c25[k],rankof(c25,k),'| full2025',full25[k])

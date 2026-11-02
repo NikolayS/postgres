@@ -1,6 +1,6 @@
 # pg-commit-credits
 
-Who gets credited in PostgreSQL commit messages, and how that changes over time. It covers 25 years of `master` (2001–2026) and focuses on **Nikolay Samokhvalov** and **Andrey Borodin**, with Alexander Kukushkin and Kirk Wolak for reference.
+Who gets credited in PostgreSQL commit messages, and how that changes over time. It covers 25 years of `master` (2001–2026) and focuses on **Nikolay Samokhvalov** and **Andrey Borodin**, with Kirk Wolak for reference.
 
 **The brief:** [`docs/index.html`](docs/index.html) is a self-contained page with charts. Open it in a browser after downloading it, or view the published version at https://claude.ai/artifact/MkumSYN4JuYfqYXxXkWcRg (shared on request).
 
@@ -21,7 +21,6 @@ Data runs through **2026-10-29**, the latest commit on master at the time of the
 - **Largest gain in 2026:** Chao Li went from 74 to 366 credited commits. He is #2 overall, behind Tom Lane, and #1 among reviewers. Zsolt Parragi (1 → 118) and Ayush Tiwari (0 → 114) went from almost nothing to more than 100.
 - **More people credited:** 580 distinct people were credited from Jan 1 to Oct 29, 2026, up from 451 in the same period of 2025.
 - **Kirk Wolak:** credited on 6 commits, all from 2022–2024.
-- **Alexander Kukushkin:** credited on 15 commits from 2013 to 2025, mostly as author, nearly all on HA and replication.
 - **AI in the commit log:** 49 commits name AI tools (Claude, GPT/Codex, Xint Code and others), all of them in 2026 and none before February. That's 5.7% of 2026 commits that credit a bug reporter.
 - **Companies:** only about 9% of credits can be tied to a company email domain. Among those, Fujitsu, Postgres Pro and EDB are steady, and Percona jumped in 2026.
 - **Newcomers:** only about 1 in 5 first-time contributors is credited again the following year. 2026 has 318 newcomers, the most since at least 2019.
