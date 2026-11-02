@@ -45,14 +45,7 @@ out['nCommitters']=len(committers)
 out['commitsYTD']={y:sum(1 for h,d,m in D['rows'] if d[:4]==str(y) and d[4:]<=CUT) for y in (2025,2026)}
 out['rolesYTD']={y:dict(collections.Counter(x for h,d,m in D['rows'] if d[:4]==str(y) and d[4:]<=CUT for r in m.values() for x in r if x!='commit')) for y in (2025,2026)}
 out['newcomers26']=sum(1 for k in c26 if not any(k in m for h,d,m in D['rows'] if d[:4]<'2026'))
-# People who are tracked but have no entry in a list (e.g. no 2026 credits) get an explicit "not ranked" row
-def addz(lst, **kw):
-    for k in ex:
-        if not any(x.get('id')==k or x.get('name')==nm(k) for x in lst):
-            lst.append(dict(dict(rank=None,name=nm(k),v=0,c=False,id=k), **kw))
-for key in ('top26','topNC26'): addz(out[key], prev=0)
-for key in ('rep26','rev26','topNC5y'): addz(out[key])
-addz(out['growth'], a=0, b=0)
+# Tracked people with no credits in a list's period are simply left out of that list.
 json.dump(out,open(os.path.join(DATA,'brief.json'),'w'),ensure_ascii=False)
 print(json.dumps({k:out[k] for k in ['years','roles','ranks','ratioRank','people','peopleYear']},ensure_ascii=False)[:3000])
 print(len(out['nikList']),len(out['kwList']), [x['name'] for x in out['topNC26']][-3:])
