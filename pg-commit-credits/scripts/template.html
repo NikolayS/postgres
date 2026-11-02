@@ -9,7 +9,7 @@
   --rule:#dfe3ea; --grid:#e9ecf1; --track:#eceff4;
   --accent:#1f5fa8;
   --nik:#2a78d6; --ab:#eb6834; --kuk:#a7aebb; --other:#a7aebb; --other-2:#c9ced8;
-  --hl-nik:#e6f0fc; --hl-ab:#fdece4;
+  --hl-nik:#e6f0fc; --hl-ab:#fdece4; --kw:#1baf7a; --hl-kw:#e2f5ed;
   --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --f-body:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
   --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -18,12 +18,12 @@
   --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
   --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
   --nik:#3987e5; --ab:#d95926; --kuk:#6b7383; --other:#5d6574; --other-2:#3f4652;
-  --hl-nik:#1c2a3d; --hl-ab:#33231c; color-scheme:dark}}
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; --kw:#199e70; --hl-kw:#16302a; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12151b; --panel:#1a1e26; --ink:#eef0f4; --ink-2:#b4bac6; --ink-3:#8a91a0;
   --rule:#2c323d; --grid:#262b35; --track:#252a34; --accent:#7fb2ee;
   --nik:#3987e5; --ab:#d95926; --kuk:#6b7383; --other:#5d6574; --other-2:#3f4652;
-  --hl-nik:#1c2a3d; --hl-ab:#33231c; color-scheme:dark}
+  --hl-nik:#1c2a3d; --hl-ab:#33231c; --kw:#199e70; --hl-kw:#16302a; color-scheme:dark}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
 .wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 64px;display:grid;gap:56px}
 h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
@@ -76,7 +76,9 @@ section > .head{display:grid;gap:6px}
 .bar.nik{background:var(--hl-nik)}.bar.nik .fl{background:var(--nik)}.bar.nik .nm{font-weight:600}
 .bar.ab{background:var(--hl-ab)}.bar.ab .fl{background:var(--ab)}.bar.ab .nm{font-weight:600}
 .bars.wide .bar{grid-template-columns:0 minmax(0,17em) minmax(0,1fr) 3.2em}.bars.wide .rk{visibility:hidden}
-mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:600}mark.m-nik{background:var(--hl-nik);box-shadow:inset 0 -2px 0 var(--nik)}mark.m-ab{background:var(--hl-ab);box-shadow:inset 0 -2px 0 var(--ab)}
+mark.m-kw{background:var(--hl-kw);box-shadow:inset 0 -2px 0 var(--kw)}
+.bar.kw,.dbr.kw{background:var(--hl-kw)}.bar.kw .fl,.dbr.kw .d.b,.dbr.kw .ln{background:var(--kw)}.bar.kw .nm,.dbr.kw .nm{font-weight:600}.sw.kw{background:var(--kw)}
+mark.m-kw,mark.m-nik,mark.m-ab{color:inherit;padding:0 4px;border-radius:3px;font-weight:600}mark.m-nik{background:var(--hl-nik);box-shadow:inset 0 -2px 0 var(--nik)}mark.m-ab{background:var(--hl-ab);box-shadow:inset 0 -2px 0 var(--ab)}
 .gap{text-align:center;color:var(--ink-3);font-family:var(--f-mono);font-size:12px;letter-spacing:.3em;padding:2px 0}
 /* dumbbell */
 .db{display:grid;gap:2px}
@@ -158,7 +160,7 @@ a{color:var(--accent)}
   <div class="eyebrow">PostgreSQL master · credits in commit messages · data through __ASOF__</div>
   <h1>Who gets credited in PostgreSQL commits</h1>
   <p class="lede">Every commit to <code>master</code> lists who wrote, reviewed, reported or tested the change. This page counts those credits for every contributor from 2019 to 2026, shows who is growing fastest in 2026, and then looks closer at Nikolay Samokhvalov and Andrey Borodin.</p>
-  <p class="lede" style="font-size:14.5px">Throughout the page, <mark class="m-nik">Nikolay</mark> is marked in blue and <mark class="m-ab">Andrey</mark> in orange. Where one of you is outside a top list, your row is added at the bottom after a gap.</p>
+  <p class="lede" style="font-size:14.5px">Throughout the page, <mark class="m-nik">Nikolay</mark> is marked in blue, <mark class="m-ab">Andrey</mark> in orange and <mark class="m-kw">Kirk Wolak</mark> in green. Anyone outside a top list is added at the bottom after a gap, with "–" where they have no credits in that period.</p>
 </header>
 
 <section>
@@ -463,7 +465,7 @@ a{color:var(--accent)}
     <p class="muted">Commits per year whose message names the person in any role, including credits written as free text. 2026 runs only to __ASOF_LONG__.</p>
   </div>
   <div class="card">
-    <div class="legend" style="margin-bottom:10px"><span><i class="sw ab"></i>Andrey Borodin</span><span><i class="sw nik"></i>Nikolay Samokhvalov</span><span><i class="sw kuk"></i>Alexander Kukushkin</span></div>
+    <div class="legend" style="margin-bottom:10px"><span><i class="sw ab"></i>Andrey Borodin</span><span><i class="sw nik"></i>Nikolay Samokhvalov</span><span><i class="sw kw"></i>Kirk Wolak</span><span><i class="sw kuk"></i>Alexander Kukushkin</span></div>
     <div class="chart" id="line"></div>
   </div>
 </section>
@@ -485,7 +487,7 @@ a{color:var(--accent)}
   </div>
   <div class="two">
     <div class="card" style="display:grid;gap:10px">
-      <h3>Kirk Wolak</h3>
+      <h3><span class="who"><i class="sw kw"></i>Kirk Wolak</span></h3>
       <p class="muted">Credited on 6 commits, all from 2022 to 2024, and none since. In 2022–2026 he ranks about 360th of 1,280 people who aren't committers.</p>
       <div class="tbl" style="border:0"><table id="kw"></table></div>
     </div>
@@ -523,7 +525,7 @@ const D = __DATA__;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => n.toLocaleString('en-US');
-const hlc = n => /Samokhvalov/.test(n) ? 'nik' : /Borodin/.test(n) ? 'ab' : '';
+const hlc = n => /Samokhvalov/.test(n) ? 'nik' : /Borodin/.test(n) ? 'ab' : /Wolak/.test(n) ? 'kw' : '';
 const mk = s => { const c = hlc(s); return c ? `<mark class="m-${c}">${s}</mark>` : s; };
 const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
 
@@ -544,10 +546,10 @@ const pct = (a,b) => (b>=a?'+':'−')+Math.round(Math.abs(b-a)/a*100)+'%';
 
 // Bar lists (top N only, no highlights)
 function bars(id, rows, n){
-  rows=rows.filter(r=>r.rank<=n||hlc(r.name)).sort((a,b)=>a.rank-b.rank);
+  rows=rows.filter(r=>(r.rank&&r.rank<=n)||hlc(r.name)).sort((a,b)=>(a.rank||1e9)-(b.rank||1e9));
   const max=Math.max(...rows.map(r=>r.v));
   let prev=0;
-  $(id).innerHTML=rows.map(r=>{const g=r.rank>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank;return g+`<div class="bar ${r.c?'c':''} ${hlc(r.name)}" title="${esc(r.name)}: ${r.v}${r.prev!=null?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${Math.max(1.5,r.v/max*100)}%"></span></span><span class="v">${r.v}</span></div>`}).join('');
+  $(id).innerHTML=rows.map(r=>{const g=(r.rank||1e9)>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank||1e9;return g+`<div class="bar ${r.c?'c':''} ${hlc(r.name)}" title="${esc(r.name)}: ${r.rank?r.v:'no credits in this period'}${r.prev!=null&&r.rank?` (2025 same period: ${r.prev})`:''}"><span class="rk">${r.rank||'–'}</span><span class="nm">${esc(r.name)}</span><span class="tr"><span class="fl" style="width:${r.rank?Math.max(1.5,r.v/max*100):0}%"></span></span><span class="v">${r.rank?r.v:'none'}</span></div>`}).join('');
 }
 bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); bars('rep26',D.rep26,20); bars('nc5',D.topNC5y,20);
 
@@ -555,8 +557,8 @@ bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); b
 (function(){
   const max=400, p=v=>v/max*100;
   let prev=0;
-  let h=D.growth.map(r=>{const g=r.rank>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank;
-    return g+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a}), #${r.rank} by gain"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`}).join('');
+  let h=D.growth.slice().sort((a,b)=>(a.rank||1e9)-(b.rank||1e9)).map(r=>{const g=(r.rank||1e9)>prev+1?'<div class="gap">· · ·</div>':'';prev=r.rank||1e9;
+    return g+`<div class="dbr ${hlc(r.name)}" title="${esc(r.name)}: ${r.a} → ${r.b} (+${r.b-r.a}), ${r.rank?'#'+r.rank+' by gain':'no credits in either year'}"><span class="rk">${r.rank||'–'}</span><span class="nm">${esc(r.name)}${r.c?'<span class="ctag">C</span>':''}</span><span class="tr"><span class="ln" style="left:${p(r.a)}%;width:${p(r.b-r.a)}%"></span><span class="d a" style="left:${p(r.a)}%"></span><span class="d b" style="left:${p(r.b)}%"></span></span><span class="v">${r.a} → <b style="color:var(--ink)">${r.b}</b></span></div>`}).join('');
   h+=`<div class="axisrow"><span></span><span></span><span class="axis">${[0,100,200,300,400].map(v=>`<span style="left:${p(v)}%">${v}</span>`).join('')}</span><span></span></div>`;
   $('growth').innerHTML=`<div class="db">${h}</div>`;
 })();
@@ -588,7 +590,7 @@ bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); b
 // Line chart
 (function(){
   const years = []; for (let y=2005;y<=2026;y++) years.push(y);
-  const S = [['ab','Andrey Borodin'],['nik','Nikolay Samokhvalov'],['kuk','Alexander Kukushkin']];  // Kukushkin drawn in neutral gray as a reference line
+  const S = [['ab','Andrey Borodin'],['nik','Nikolay Samokhvalov'],['kw','Kirk Wolak'],['kuk','Alexander Kukushkin']];  // Kukushkin drawn in neutral gray as a reference line
   const W=980,H=300,m={l:34,r:150,t:12,b:26};
   const x = y => m.l + (y-2005)/(2026-2005)*(W-m.l-m.r);
   const ymax=60, yy = v => H-m.b - v/ymax*(H-m.t-m.b);
@@ -603,7 +605,7 @@ bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); b
     lines += `<circle cx="${x(2026)}" cy="${yy(last)}" r="4.5" fill="var(--${k})" stroke="var(--panel)" stroke-width="2"/>`;
     labs.push([k,n,last,yy(last)]);
   });
-  labs.sort((a,b)=>a[3]-b[3]); for (let i=1;i<labs.length;i++) if (labs[i][3]-labs[i-1][3]<16) labs[i][3]=labs[i-1][3]+16;
+  labs.sort((a,b)=>b[3]-a[3]); for (let i=1;i<labs.length;i++) if (labs[i-1][3]-labs[i][3]<16) labs[i][3]=labs[i-1][3]-16;  // stack upward from the baseline
   labs.forEach(([k,n,v,ly])=>{ lines += `<text x="${x(2026)+10}" y="${ly+4}" style="fill:var(--ink);font-family:var(--f-body);font-size:12.5px">${n.split(' ')[1]} <tspan style="fill:var(--ink-3);font-family:var(--f-mono)">${v}</tspan></text>`; });
   const el=$('line');
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Commits per year crediting each person, 2005 to 2026">${g}<line id="xh" y1="${m.t}" y2="${H-m.b}" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>${lines}<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
@@ -628,7 +630,7 @@ bars('all26',D.top26,20); bars('nc26',D.topNC26,20); bars('rev26',D.rev26,20); b
   let h=`<thead><tr><th>Person</th><th class="n">Commits</th><th>Years</th><th class="n">Author</th><th class="n">Reviewer</th><th class="n">Reporter</th><th class="n">Other</th><th style="min-width:160px">Mix</th><th class="n">Committers</th></tr></thead><tbody>`;
   P.forEach(([k,n])=>{const r=D.roles[k],a=r.author||0,v=r.review||0,p=r.report||0,o=(r.suggest||0)+(r.test||0);
     const w=x=>(x/max*100)+'%';
-    h+=`<tr><td><span class="who">${k==='kw'?'<i class="sw oth"></i>':`<i class="sw ${k}"></i>`}${n}</span></td><td class="n"><b>${tot(k)}</b></td><td class="mono">${yrs(k)}</td><td class="n">${a}</td><td class="n">${v}</td><td class="n">${p}</td><td class="n">${o}</td><td><div class="rolebar" style="width:100%" title="${a} author, ${v} reviewer, ${p} reporter, ${o} other"><i class="r-a" style="width:${w(a)}"></i><i class="r-v" style="width:${w(v)}"></i><i class="r-r" style="width:${w(p)}"></i><i class="r-o" style="width:${w(o)}"></i></div></td><td class="n">${D.ncommitters[k]}</td></tr>`;});
+    h+=`<tr><td><span class="who"><i class="sw ${k}"></i>${n}</span></td><td class="n"><b>${tot(k)}</b></td><td class="mono">${yrs(k)}</td><td class="n">${a}</td><td class="n">${v}</td><td class="n">${p}</td><td class="n">${o}</td><td><div class="rolebar" style="width:100%" title="${a} author, ${v} reviewer, ${p} reporter, ${o} other"><i class="r-a" style="width:${w(a)}"></i><i class="r-v" style="width:${w(v)}"></i><i class="r-r" style="width:${w(p)}"></i><i class="r-o" style="width:${w(o)}"></i></div></td><td class="n">${D.ncommitters[k]}</td></tr>`;});
   $('roles').innerHTML=h+'</tbody>';
 })();
 
