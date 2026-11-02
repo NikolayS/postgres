@@ -22,6 +22,10 @@ Data runs through **2026-10-29**, the latest commit on master at the time of the
 - **More people credited:** 580 distinct people were credited from Jan 1 to Oct 29, 2026, up from 451 in the same period of 2025.
 - **Kirk Wolak:** credited on 6 commits, all from 2022–2024.
 - **Alexander Kukushkin:** credited on 15 commits from 2013 to 2025, mostly as author, nearly all on HA and replication.
+- **AI in the commit log:** 49 commits name AI tools (Claude, GPT/Codex, Xint Code and others), all of them in 2026 and none before February. That's 5.7% of 2026 commits that credit a bug reporter.
+- **Companies:** only about 9% of credits can be tied to a company email domain. Among those, Fujitsu, Postgres Pro and EDB are steady, and Percona jumped in 2026.
+- **Newcomers:** only about 1 in 5 first-time contributors is credited again the following year. 2026 has 318 newcomers, the most since at least 2019.
+- **Release cycles:** PG19 credited 572 people, about twice as many as PG16 (282).
 
 ## Layout
 
@@ -33,8 +37,10 @@ scripts/all.py          all contributors since 2019, parsed from credit trailers
 scripts/rank.py         rankings, 2026 vs 2025 comparison, growth (prints a report)
 scripts/q.py            extra cuts: growth rate, reporter and reviewer rankings
 scripts/gen.py          builds data/brief.json for the page
+scripts/extras.py       AI mentions, companies, committer network, code areas,
+                        newcomer retention, release cycles -> data/extras.json
 scripts/export_csv.py   data/contributors_by_year.csv
-scripts/build.py        puts brief.json into template.html, writes docs/index.html
+scripts/build.py        puts brief.json and extras.json into template.html, writes docs/index.html
 scripts/template.html   the page (inline SVG and HTML charts, no dependencies)
 scripts/shot.js         optional Playwright screenshots
 data/                   all generated outputs (JSON, CSV, rankings.txt)
@@ -59,5 +65,10 @@ If you're working from a shallow clone, deepen it first with `git fetch --shallo
 - **Per-person timelines** (`roles.py`) find every commit whose message matches the name. That catches free-text credits ("Patch by X, reviewed by Y") as well as trailers. Roles come from the trailer key, or from the nearest role word before the name. A line containing only a name counts as authorship, which was the convention before about 2015. Vladimir Borodin is excluded. Kirk Wolak's email-only credits (`wolakk@gmail.com`) are included.
 - **Rankings** (`all.py`) parse the `Author`, `Co-authored-by`, `Reviewed-by`, `Reported-by`, `Tested-by` and `Suggested-by` trailers, including continuation lines. When a commit has no `Author:` trailer, the git author (the committer) is counted as the author. Name variants are merged by shared email address and by ignoring middle initials. The merging isn't perfect. Free-text credits are not counted, so totals here can be a little lower than the per-person timelines.
 - **Growth** compares Jan 1 to `YTD_CUT` (Oct 29) of 2026 with the same dates in 2025. The share of commits that use credit trailers rose from 82% to 88% over that time, which slightly inflates 2026 growth for everyone.
+- **Data cutoff** is the date of the newest commit on `PG_REF` (override with `ASOF=YYYY-MM-DD`). The page's dates and the same-period comparison follow it automatically. The headline sentences in `scripts/template.html` are written by hand and need a review after each refresh.
+- **AI mentions** match tool names (Claude, GPT, Codex, OpenAI, Anthropic, LLM, Xint Code and others) anywhere in a commit message. Each commit goes into the first group that fits: tool credited by name, person credited working with AI, AI found the bug, AI helped draft the patch, or the message discusses AI reports.
+- **Companies** come from email domains. A person counts for a company in a year only when its domain is the address they used most that year. Only 6–10% of credits can be matched, and a domain doesn't prove employment.
+- **Newcomers** are people credited for the first time since 2019.
+- **Release cycles** run from one `Stamp HEAD as N devel` commit to the next.
 - **"Committer"** means anyone who committed to master in 2022–2026 (32 people). Committers get credit for their own commits, so the brief also ranks non-committers separately.
 - **`data/all.json`** holds every commit since 2019 as `[hash, date, {person_id: [roles]}]`, plus `disp`, which maps each person_id to a display name.

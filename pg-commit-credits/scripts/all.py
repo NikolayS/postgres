@@ -57,6 +57,7 @@ for h,d,cr in commits:
         if e: f('e:'+e)
         if nn and e: u('n:'+nn,'e:'+e)
 names=collections.defaultdict(collections.Counter)
+pemail=collections.defaultdict(lambda: collections.defaultdict(collections.Counter))  # key -> year -> email domain -> n
 rows=[]
 for h,d,cr in commits:
     seen={}
@@ -67,8 +68,9 @@ for h,d,cr in commits:
         elif e: key=f('e:'+e)
         else: continue
         if n: names[key][n.strip()]+=1
+        if e and '@' in e: pemail[key][d[:4]][e.split('@')[1].strip('"> ')]+=1
         seen.setdefault(key,set()).add(r)
     rows.append((h,d,{k:sorted(v) for k,v in seen.items()}))
 disp={k:c.most_common(1)[0][0] for k,c in names.items()}
-json.dump(dict(rows=rows,disp=disp),open(os.path.join(DATA,'all.json'),'w'))
+json.dump(dict(rows=rows,disp=disp,pemail=pemail),open(os.path.join(DATA,'all.json'),'w'))
 print(len(rows))
