@@ -41,7 +41,7 @@ A child that inherits a NOT ENFORCED CHECK constraint can run `alter table c add
 | REL_18 + v3-REL_18 | same | OK: regress 231, isolation 125 |
 | each, heap.c and tablecmds.c reverted | regress | FAIL, only inherit, the intended cases |
 | each patched tree | sql/repro.sql | "violated by some row"; NOT VALID add leaves convalidated f |
-| each patched tree | 19 adversarial cases plus pg_dump round trip | see EVIDENCE.md |
+| each patched tree | 23 adversarial cases, including a pg_dump round trip | see EVIDENCE.md |
 
 Not run: TAP suites, check-world.
 
