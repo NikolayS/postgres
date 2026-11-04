@@ -1,0 +1,518 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: jian he <jian.universality@gmail.com>
+Date: Fri, 23 Oct 2026 12:46:04 +0800
+Subject: [PATCH v5 1/2] Fix immutability check of SQL/JSON constructors for
+ container types
+
+contain_mutable_functions() asks to_json_is_immutable() or
+to_jsonb_is_immutable() about the type of every argument of
+JSON_ARRAY(), JSON_OBJECT() and the other SQL/JSON constructors.
+Until 18 both returned "mutable" for any array or composite argument.
+Commit ecd9288624a made them recurse into container types instead: an
+array, composite, domain, range or multirange is now treated as
+immutable when its element, attribute or subtype types are.
+
+That is not enough, because the JSON text of several of these types
+can change while the stored values do not, and nothing then rebuilds
+an index, a stored generated column or a partition key computed from
+it:
+
+- The output of a composite type includes the attribute names and
+  their number, which ALTER TYPE ... ADD/DROP/RENAME ATTRIBUTE, or
+  ALTER TABLE on a table's row type, can change.
+- The output of an enum changes with ALTER TYPE ... RENAME VALUE.
+  Before ecd9288624a an enum inside a container was never reached.
+  Now a range over an enum with an IMMUTABLE cast to json looks
+  immutable, although range_out prints the enum with enum_out and
+  not with the cast.
+- A user-defined range or multirange is converted through a cast to
+  json if one exists, looked up at run time, so creating or dropping
+  such a cast later changes the output.
+- record values built with ROW() reached the JSONTYPE_COMPOSITE case,
+  which treated them as immutable.
+- float4 and float8 were classified as JSONTYPE_NUMERIC, which is
+  treated as immutable, but float4out and float8out are STABLE on
+  master, so float8::text is rejected there while JSON_ARRAY(float8)
+  was accepted.
+
+18 rejects all of these expressions.  19 accepts them, and after one
+of the changes above an index scan and a sequential scan return
+different rows until REINDEX.  A unique index can accept a duplicate,
+a stored generated column keeps the old value, and partition pruning
+can skip the partition that holds a row.
+
+This patch makes json_check_mutability() treat as mutable:
+
+- every composite type and record (attribute names can change);
+- every enum (RENAME VALUE);
+- user-defined ranges and multiranges; built-in ones still recurse
+  into the subtype, since a cast to json is looked up only for
+  user-defined types (see json_categorize_type());
+- record, anyarray and anycompatiblearray, whose element types are
+  not known until run time.
+
+Any other type is judged by the volatility of its user-defined cast to
+json if there is one, else of its output function.  float4 and float8
+are no longer special-cased, so they follow float4out and float8out:
+mutable on master, unchanged on 19.  The is_jsonb argument of
+json_check_mutability() goes away, as the same cast lookup is used for
+json and jsonb.
+
+Compared with 18, this still accepts JSON_ARRAY() and JSON_OBJECT()
+over built-in ranges and multiranges with an immutable subtype, such
+as int4range, which 18 rejected.  It now rejects them over an enum, or
+over a user-defined range, that has an IMMUTABLE cast to json, which
+18 accepted; such a cast can be dropped after CREATE INDEX.  On master
+it also rejects float4 and float8, which 18 accepted.
+
+Author: jian he <jian.universality@gmail.com>
+Reported-by: Robert Haas <robertmhaas@gmail.com>
+Reported-by: shihao zhong <zhong950419@gmail.com>
+Discussion: https://postgr.es/m/CACJufxFz=OsXQdsMJ-cqoqspD9aJrwntsQP-U2A-UaV_M+-S9g@mail.gmail.com
+Discussion: https://postgr.es/m/CA+TgmoaiothgQrw9OtgsMzBUCnqJ2jdaGTbS6o3fkjCd+LfzWw@mail.gmail.com
+---
+ src/backend/utils/adt/json.c          |   2 +-
+ src/backend/utils/adt/jsonb.c         |   2 +-
+ src/backend/utils/adt/jsonfuncs.c     | 135 +++++++++++++++++---------
+ src/include/utils/jsonfuncs.h         |   3 +-
+ src/test/regress/expected/sqljson.out |  69 +++++++++++--
+ src/test/regress/sql/sqljson.sql      |  34 +++++--
+ 6 files changed, 182 insertions(+), 63 deletions(-)
+
+diff --git a/src/backend/utils/adt/json.c b/src/backend/utils/adt/json.c
+index 28e5f3cf9c0..5aab80f8763 100644
+--- a/src/backend/utils/adt/json.c
++++ b/src/backend/utils/adt/json.c
+@@ -697,7 +697,7 @@ to_json_is_immutable(Oid typoid)
+ {
+ 	bool		has_mutable = false;
+ 
+-	json_check_mutability(typoid, false, &has_mutable);
++	json_check_mutability(typoid, &has_mutable);
+ 	return !has_mutable;
+ }
+ 
+diff --git a/src/backend/utils/adt/jsonb.c b/src/backend/utils/adt/jsonb.c
+index 29efd5885ea..a00301853aa 100644
+--- a/src/backend/utils/adt/jsonb.c
++++ b/src/backend/utils/adt/jsonb.c
+@@ -1082,7 +1082,7 @@ to_jsonb_is_immutable(Oid typoid)
+ {
+ 	bool		has_mutable = false;
+ 
+-	json_check_mutability(typoid, true, &has_mutable);
++	json_check_mutability(typoid, &has_mutable);
+ 	return !has_mutable;
+ }
+ 
+diff --git a/src/backend/utils/adt/jsonfuncs.c b/src/backend/utils/adt/jsonfuncs.c
+index 1d3c8c0865a..3bee50f948b 100644
+--- a/src/backend/utils/adt/jsonfuncs.c
++++ b/src/backend/utils/adt/jsonfuncs.c
+@@ -506,6 +506,7 @@ static JsonParseErrorType transform_string_values_object_field_start(void *state
+ static JsonParseErrorType transform_string_values_array_element_start(void *state, bool isnull);
+ static JsonParseErrorType transform_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
+ 
++static Oid	get_json_cast_for_type(Oid typoid);
+ 
+ /*
+  * pg_parse_json_or_errsave
+@@ -6088,18 +6089,17 @@ json_categorize_type(Oid typoid, bool is_jsonb,
+ 
+ /*
+  * Check whether a type conversion to JSON or JSONB involves any mutable
+- * functions.  This recurses into container types (arrays, composites,
+- * ranges, multiranges, domains) to check their element/sub types.
++ * functions.  This recurses into container types (arrays, ranges, multiranges,
++ * domains, etc) to check their element/sub types.  Composite types are always
++ * considered mutable.
+  *
+  * The caller must initialize *has_mutable to false before calling.
+  * If any mutable function is found, *has_mutable is set to true.
+  */
+ void
+-json_check_mutability(Oid typoid, bool is_jsonb, bool *has_mutable)
++json_check_mutability(Oid typoid, bool *has_mutable)
+ {
+ 	char		att_typtype = get_typtype(typoid);
+-	JsonTypeCategory tcategory;
+-	Oid			outfuncoid;
+ 
+ 	/* since this function recurses, it could be driven to stack overflow */
+ 	check_stack_depth();
+@@ -6111,41 +6111,42 @@ json_check_mutability(Oid typoid, bool is_jsonb, bool *has_mutable)
+ 
+ 	if (att_typtype == TYPTYPE_DOMAIN)
+ 	{
+-		json_check_mutability(getBaseType(typoid), is_jsonb, has_mutable);
++		json_check_mutability(getBaseType(typoid), has_mutable);
+ 		return;
+ 	}
+-	else if (att_typtype == TYPTYPE_COMPOSITE)
++	else if (att_typtype == TYPTYPE_ENUM)
+ 	{
+ 		/*
+-		 * For a composite type, recurse into its attributes.  Use the
+-		 * typcache to avoid opening the relation directly.
++		 * ALTER TYPE ... RENAME VALUE can change an enum's output without
++		 * rebuilding indexes, so an enum is never immutable.
+ 		 */
+-		TupleDesc	tupdesc = lookup_rowtype_tupdesc(typoid, -1);
+-
+-		for (int i = 0; i < tupdesc->natts; i++)
+-		{
+-			Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+-
+-			if (attr->attisdropped)
+-				continue;
+-
+-			json_check_mutability(attr->atttypid, is_jsonb, has_mutable);
+-			if (*has_mutable)
+-				break;
+-		}
+-		ReleaseTupleDesc(tupdesc);
++		*has_mutable = true;
+ 		return;
+ 	}
+-	else if (att_typtype == TYPTYPE_RANGE)
++	else if (att_typtype == TYPTYPE_COMPOSITE)
+ 	{
+-		json_check_mutability(get_range_subtype(typoid), is_jsonb,
+-							  has_mutable);
++		/*
++		 * The output includes the attribute names, which ALTER TYPE can
++		 * change, so a composite is never immutable.
++		 */
++		*has_mutable = true;
+ 		return;
+ 	}
+-	else if (att_typtype == TYPTYPE_MULTIRANGE)
++	else if (att_typtype == TYPTYPE_RANGE ||
++			 att_typtype == TYPTYPE_MULTIRANGE)
+ 	{
+-		json_check_mutability(get_multirange_range(typoid), is_jsonb,
+-							  has_mutable);
++		/*
++		 * A cast to json on a user-defined range or multirange can be created
++		 * or dropped after this check, changing the output without
++		 * invalidating anything that depends on it, so treat such types as
++		 * mutable.
++		 */
++		if (typoid >= FirstNormalObjectId)
++			*has_mutable = true;
++		else if (att_typtype == TYPTYPE_RANGE)
++			json_check_mutability(get_range_subtype(typoid), has_mutable);
++		else
++			json_check_mutability(get_multirange_range(typoid), has_mutable);
+ 		return;
+ 	}
+ 	else
+@@ -6155,36 +6156,76 @@ json_check_mutability(Oid typoid, bool is_jsonb, bool *has_mutable)
+ 		if (OidIsValid(att_typelem))
+ 		{
+ 			/* recurse into array element type */
+-			json_check_mutability(att_typelem, is_jsonb, has_mutable);
++			json_check_mutability(att_typelem, has_mutable);
+ 			return;
+ 		}
+ 	}
+ 
+-	json_categorize_type(typoid, is_jsonb, &tcategory, &outfuncoid);
+-
+-	switch (tcategory)
++	switch (typoid)
+ 	{
+-		case JSONTYPE_NULL:
+-		case JSONTYPE_BOOL:
+-		case JSONTYPE_NUMERIC:
++		case BOOLOID:
++		case INT2OID:
++		case INT4OID:
++		case INT8OID:
++		case NUMERICOID:
++		case JSONOID:
++		case JSONBOID:
++			/* known immutable */
+ 			break;
+ 
+-		case JSONTYPE_DATE:
+-		case JSONTYPE_TIMESTAMP:
+-		case JSONTYPE_TIMESTAMPTZ:
++		case DATEOID:
++		case TIMESTAMPOID:
++		case TIMESTAMPTZOID:
+ 			*has_mutable = true;
+ 			break;
+ 
+-		case JSONTYPE_JSON:
+-		case JSONTYPE_JSONB:
+-		case JSONTYPE_ARRAY:
+-		case JSONTYPE_COMPOSITE:
++		case RECORDOID:
++		case ANYARRAYOID:
++		case ANYCOMPATIBLEARRAYOID:
++
++			/*
++			 * The field or element types of these pseudo-types are not known
++			 * until runtime, so assume the worst.
++			 */
++			*has_mutable = true;
+ 			break;
+ 
+-		case JSONTYPE_CAST:
+-		case JSONTYPE_OTHER:
+-			if (func_volatile(outfuncoid) != PROVOLATILE_IMMUTABLE)
+-				*has_mutable = true;
++		default:
++			{
++				Oid			funcoid = get_json_cast_for_type(typoid);
++
++				if (!OidIsValid(funcoid))
++				{
++					bool		typisvarlena;
++
++					getTypeOutputInfo(typoid, &funcoid, &typisvarlena);
++				}
++				if (func_volatile(funcoid) != PROVOLATILE_IMMUTABLE)
++					*has_mutable = true;
++			}
+ 			break;
+ 	}
+ }
++
++/*
++ * Return the OID of the cast function from typoid to JSON, or InvalidOid if
++ * there is no such cast.  As a matter of policy, we only consider explicit,
++ * user-defined casts.  This must match the lookup in json_categorize_type():
++ * it is used for both json and jsonb output, a cast to jsonb is never used.
++ */
++static Oid
++get_json_cast_for_type(Oid typoid)
++{
++	if (typoid >= FirstNormalObjectId)
++	{
++		Oid			castfunc;
++		CoercionPathType ctype;
++
++		ctype = find_coercion_pathway(JSONOID, typoid,
++									  COERCION_EXPLICIT,
++									  &castfunc);
++		if (ctype == COERCION_PATH_FUNC && OidIsValid(castfunc))
++			return castfunc;
++	}
++	return InvalidOid;
++}
+diff --git a/src/include/utils/jsonfuncs.h b/src/include/utils/jsonfuncs.h
+index 27713be3aeb..cc5e0244cca 100644
+--- a/src/include/utils/jsonfuncs.h
++++ b/src/include/utils/jsonfuncs.h
+@@ -83,8 +83,7 @@ typedef enum
+ 
+ extern void json_categorize_type(Oid typoid, bool is_jsonb,
+ 								 JsonTypeCategory *tcategory, Oid *outfuncoid);
+-extern void json_check_mutability(Oid typoid, bool is_jsonb,
+-								  bool *has_mutable);
++extern void json_check_mutability(Oid typoid, bool *has_mutable);
+ extern Datum datum_to_json(Datum val, JsonTypeCategory tcategory,
+ 						   Oid outfuncoid);
+ extern Datum datum_to_jsonb(Datum val, JsonTypeCategory tcategory,
+diff --git a/src/test/regress/expected/sqljson.out b/src/test/regress/expected/sqljson.out
+index 30f9e10ef0a..10116dc0785 100644
+--- a/src/test/regress/expected/sqljson.out
++++ b/src/test/regress/expected/sqljson.out
+@@ -1271,13 +1271,20 @@ create domain d_comp1 as comp1;
+ create domain mydomain as timestamptz;
+ create type mydomainrange as range(subtype=mydomain);
+ create type comp3 as (a int, b mydomainrange);
++create type comp4 as (a int, b int);
++create type myr AS range (subtype = int);
++create function myr_json(myr) returns json volatile
++  language sql AS $$ SELECT json_build_array(random()) $$;
++create cast (myr AS json) with function myr_json(myr);
+ create table test_mutability(
+ 	a text[], b timestamp, c timestamptz,
+ 	d date, f1 comp1[], f2 timestamp[],
+ 	f3 d_comp1[],
+ 	f4 mydomainrange[],
+ 	f5 comp3,
+-	f6 mydomainmultirange);
++	f6 mydomainmultirange,
++	f7 comp4,
++	f8 myr);
+ -- JSON_OBJECTAGG, JSON_ARRAYAGG are aggregate functions, cannot be used in index
+ create index xx on test_mutability(json_objectagg(a: b absent on null with unique keys returning jsonb));
+ ERROR:  aggregate functions are not allowed in index expressions
+@@ -1333,6 +1340,30 @@ create index on test_mutability(json_array(f6 returning jsonb)); -- error
+ ERROR:  functions in index expression must be marked IMMUTABLE
+ LINE 1: create index on test_mutability(json_array(f6 returning json...
+                                         ^
++create index on test_mutability(json_array(array[f6] returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(array[f6] returni...
++                                        ^
++create index on test_mutability(json_array(row(f6) returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(row(f6) returning...
++                                        ^
++create index on test_mutability(json_array(array[row(c)] returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(array[row(c)] ret...
++                                        ^
++create index on test_mutability(json_array(row(1) returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(row(1) returning ...
++                                        ^
++create index on test_mutability(json_array(f7 returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(f7 returning json...
++                                        ^
++create index on test_mutability(json_array(f8 returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_mutability(json_array(f8 returning json...
++                                        ^
+ -- jsonb: create expression index via json_object
+ create index on test_mutability(json_object('hello' value a returning jsonb)); -- ok
+ create index on test_mutability(json_object('hello' value b returning jsonb)); -- error
+@@ -1393,6 +1424,12 @@ alter table test_mutability add column f11 json generated always as (json_array(
+ ERROR:  generation expression is not immutable
+ alter table test_mutability add column f11 json generated always as (json_array(f6 returning json)); -- error
+ ERROR:  generation expression is not immutable
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f6)] returning json)); -- error
++ERROR:  generation expression is not immutable
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f7)] returning json)); -- error
++ERROR:  generation expression is not immutable
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f8)] returning json)); -- error
++ERROR:  generation expression is not immutable
+ -- data type json doesn't have a default operator class for access method "btree" so
+ -- we use a generated column to test whether the JSON_OBJECT expression is
+ -- immutable
+@@ -1415,19 +1452,39 @@ alter table test_mutability add column f12 json generated always as (json_object
+ ERROR:  generation expression is not immutable
+ alter table test_mutability add column f12 json generated always as (json_object('hello' value f6 returning json)); -- error
+ ERROR:  generation expression is not immutable
++alter table test_mutability add column f12 json generated always as (json_object('hello' value f7 returning json)); -- error
++ERROR:  generation expression is not immutable
++alter table test_mutability add column f12 json generated always as (json_object('hello' value row(f2) returning json)); -- error
++ERROR:  generation expression is not immutable
+ drop table test_mutability;
+ drop domain d_comp1;
+ drop type comp3;
+ drop type mydomainrange;
+ drop domain mydomain;
+ drop type comp1;
+--- Range/multirange with immutable subtype should be considered immutable
++drop type comp4;
++drop cast (myr AS json);
++drop function myr_json;
++drop type myr;
++-- User-defined range/multirange always considered as mutable
+ create type range_int as range(subtype=int);
+ create table test_range_immutable(r range_int, m multirange_int);
+-create index on test_range_immutable(json_array(r returning jsonb)); -- ok
+-create index on test_range_immutable(json_array(m returning jsonb)); -- ok
+-create index on test_range_immutable(json_object('key' value r returning jsonb)); -- ok
+-create index on test_range_immutable(json_object('key' value m returning jsonb)); -- ok
++create index on test_range_immutable(json_array(r returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_range_immutable(json_array(r returning ...
++                                             ^
++create index on test_range_immutable(json_array(m returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_range_immutable(json_array(m returning ...
++                                             ^
++create index on test_range_immutable(json_object('key' value r returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_range_immutable(json_object('key' value...
++                                             ^
++create index on test_range_immutable(json_object('key' value m returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_range_immutable(json_object('key' value...
++                                             ^
+ drop table test_range_immutable;
+ drop type range_int;
+ -- IS JSON predicate
+diff --git a/src/test/regress/sql/sqljson.sql b/src/test/regress/sql/sqljson.sql
+index 9fa203ccb53..504d00b5b2b 100644
+--- a/src/test/regress/sql/sqljson.sql
++++ b/src/test/regress/sql/sqljson.sql
+@@ -468,13 +468,20 @@ create domain d_comp1 as comp1;
+ create domain mydomain as timestamptz;
+ create type mydomainrange as range(subtype=mydomain);
+ create type comp3 as (a int, b mydomainrange);
++create type comp4 as (a int, b int);
++create type myr AS range (subtype = int);
++create function myr_json(myr) returns json volatile
++  language sql AS $$ SELECT json_build_array(random()) $$;
++create cast (myr AS json) with function myr_json(myr);
+ create table test_mutability(
+ 	a text[], b timestamp, c timestamptz,
+ 	d date, f1 comp1[], f2 timestamp[],
+ 	f3 d_comp1[],
+ 	f4 mydomainrange[],
+ 	f5 comp3,
+-	f6 mydomainmultirange);
++	f6 mydomainmultirange,
++	f7 comp4,
++	f8 myr);
+ 
+ -- JSON_OBJECTAGG, JSON_ARRAYAGG are aggregate functions, cannot be used in index
+ create index xx on test_mutability(json_objectagg(a: b absent on null with unique keys returning jsonb));
+@@ -493,6 +500,12 @@ create index on test_mutability(json_array(f3 returning jsonb)); -- error
+ create index on test_mutability(json_array(f4 returning jsonb)); -- error
+ create index on test_mutability(json_array(f5 returning jsonb)); -- error
+ create index on test_mutability(json_array(f6 returning jsonb)); -- error
++create index on test_mutability(json_array(array[f6] returning jsonb)); -- error
++create index on test_mutability(json_array(row(f6) returning jsonb)); -- error
++create index on test_mutability(json_array(array[row(c)] returning jsonb)); -- error
++create index on test_mutability(json_array(row(1) returning jsonb)); -- error
++create index on test_mutability(json_array(f7 returning jsonb)); -- error
++create index on test_mutability(json_array(f8 returning jsonb)); -- error
+ 
+ -- jsonb: create expression index via json_object
+ create index on test_mutability(json_object('hello' value a returning jsonb)); -- ok
+@@ -519,6 +532,9 @@ alter table test_mutability add column f11 json generated always as (json_array(
+ alter table test_mutability add column f11 json generated always as (json_array(f4 returning json)); -- error
+ alter table test_mutability add column f11 json generated always as (json_array(f5 returning json)); -- error
+ alter table test_mutability add column f11 json generated always as (json_array(f6 returning json)); -- error
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f6)] returning json)); -- error
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f7)] returning json)); -- error
++alter table test_mutability add column f11 json generated always as (json_array(array[row(f8)] returning json)); -- error
+ 
+ -- data type json doesn't have a default operator class for access method "btree" so
+ -- we use a generated column to test whether the JSON_OBJECT expression is
+@@ -533,6 +549,8 @@ alter table test_mutability add column f12 json generated always as (json_object
+ alter table test_mutability add column f12 json generated always as (json_object('hello' value f4 returning json)); -- error
+ alter table test_mutability add column f12 json generated always as (json_object('hello' value f5 returning json)); -- error
+ alter table test_mutability add column f12 json generated always as (json_object('hello' value f6 returning json)); -- error
++alter table test_mutability add column f12 json generated always as (json_object('hello' value f7 returning json)); -- error
++alter table test_mutability add column f12 json generated always as (json_object('hello' value row(f2) returning json)); -- error
+ 
+ drop table test_mutability;
+ drop domain d_comp1;
+@@ -540,14 +558,18 @@ drop type comp3;
+ drop type mydomainrange;
+ drop domain mydomain;
+ drop type comp1;
++drop type comp4;
++drop cast (myr AS json);
++drop function myr_json;
++drop type myr;
+ 
+--- Range/multirange with immutable subtype should be considered immutable
++-- User-defined range/multirange always considered as mutable
+ create type range_int as range(subtype=int);
+ create table test_range_immutable(r range_int, m multirange_int);
+-create index on test_range_immutable(json_array(r returning jsonb)); -- ok
+-create index on test_range_immutable(json_array(m returning jsonb)); -- ok
+-create index on test_range_immutable(json_object('key' value r returning jsonb)); -- ok
+-create index on test_range_immutable(json_object('key' value m returning jsonb)); -- ok
++create index on test_range_immutable(json_array(r returning jsonb)); -- error
++create index on test_range_immutable(json_array(m returning jsonb)); -- error
++create index on test_range_immutable(json_object('key' value r returning jsonb)); -- error
++create index on test_range_immutable(json_object('key' value m returning jsonb)); -- error
+ drop table test_range_immutable;
+ drop type range_int;
+ 
+-- 
+2.56.0
+

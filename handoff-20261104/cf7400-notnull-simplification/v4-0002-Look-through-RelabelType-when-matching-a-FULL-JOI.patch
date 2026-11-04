@@ -1,0 +1,123 @@
+From 248350acc1125a58a164043f2c051927a613bbb5 Mon Sep 17 00:00:00 2001
+From: Richard Guo <guofenglinux@gmail.com>
+Date: Fri, 16 Oct 2026 14:55:07 +0900
+Subject: [PATCH v4 2/4] Look through RelabelType when matching a FULL JOIN
+ merged column
+
+reconsider_full_join_clause() pushes a constant that is equated to the
+merged column of a FULL JOIN USING down into both join inputs.  To do
+so, it looks for the COALESCE that represents the merged column among
+the members of an equivalence class, and it requires that member to be
+a bare CoalesceExpr.
+
+The previous commit made eval_const_expressions() relabel a rebuilt
+COALESCE to keep the typmod of the original expression, which can
+differ from the typmod derived from its simplified arguments, for
+example when the arguments are inlined SQL functions.  The merged
+column then appears as a RelabelType over the COALESCE, the match
+fails, and a qual such as "x = 1" on the merged column is no longer
+pushed down to the join inputs.
+
+To fix, look through a RelabelType on top of the equivalence class
+member.  A RelabelType does not change the value, and the equality
+semantics are those of the equivalence class, which have already been
+checked against the join clause, so the deduction remains valid.
+
+Author: Richard Guo <guofenglinux@gmail.com>
+Discussion: https://postgr.es/m/CAHGQGwE6W9u8aRvbnWK0zVPukU46_yZqYL9WHMhfv8LNPN3pBw@mail.gmail.com
+Backpatch-through: 19
+---
+ src/backend/optimizer/path/equivclass.c | 12 ++++++++++--
+ src/test/regress/expected/join.out      | 21 +++++++++++++++++++++
+ src/test/regress/sql/join.sql           | 15 +++++++++++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/src/backend/optimizer/path/equivclass.c b/src/backend/optimizer/path/equivclass.c
+index fe1786ed61a..47f57241189 100644
+--- a/src/backend/optimizer/path/equivclass.c
++++ b/src/backend/optimizer/path/equivclass.c
+@@ -2498,13 +2498,21 @@ reconsider_full_join_clause(PlannerInfo *root, OuterJoinClauseInfo *ojcinfo)
+ 		match = false;
+ 		foreach(lc2, cur_ec->ec_members)
+ 		{
++			Expr	   *em_expr;
++
+ 			coal_em = (EquivalenceMember *) lfirst(lc2);
+ 
+ 			/* Child members should not exist in ec_members */
+ 			Assert(!coal_em->em_is_child);
+-			if (IsA(coal_em->em_expr, CoalesceExpr))
++
++			/* Look through a RelabelType, which doesn't change the value. */
++			em_expr = coal_em->em_expr;
++			if (IsA(em_expr, RelabelType))
++				em_expr = ((RelabelType *) em_expr)->arg;
++
++			if (IsA(em_expr, CoalesceExpr))
+ 			{
+-				CoalesceExpr *cexpr = (CoalesceExpr *) coal_em->em_expr;
++				CoalesceExpr *cexpr = (CoalesceExpr *) em_expr;
+ 				Node	   *cfirst;
+ 				Node	   *csecond;
+ 
+diff --git a/src/test/regress/expected/join.out b/src/test/regress/expected/join.out
+index 05b4786bce4..798be3ec571 100644
+--- a/src/test/regress/expected/join.out
++++ b/src/test/regress/expected/join.out
+@@ -6813,6 +6813,27 @@ explain (costs off)
+          Index Cond: (unique2 = 42)
+ (5 rows)
+ 
++-- the merged COALESCE may be relabeled to keep its typmod after inlining
++begin;
++create function join_typmod_f(numeric) returns numeric
++  language sql immutable as 'select $1';
++create temp table fj_a (a numeric(10,2));
++create temp table fj_b (b numeric(10,2));
++explain (costs off)
++  select * from (select join_typmod_f(a) as x from fj_a) s1
++    full join (select join_typmod_f(b) as x from fj_b) s2 using (x)
++  where x = 1;
++                QUERY PLAN                
++------------------------------------------
++ Merge Full Join
++   ->  Seq Scan on fj_a
++         Filter: (a = '1'::numeric)
++   ->  Materialize
++         ->  Seq Scan on fj_b
++               Filter: (b = '1'::numeric)
++(6 rows)
++
++rollback;
+ --
+ -- test that quals attached to an outer join have correct semantics,
+ -- specifically that they don't re-use expressions computed below the join;
+diff --git a/src/test/regress/sql/join.sql b/src/test/regress/sql/join.sql
+index bb82c7501e1..f1838567239 100644
+--- a/src/test/regress/sql/join.sql
++++ b/src/test/regress/sql/join.sql
+@@ -2449,6 +2449,21 @@ explain (costs off)
+ explain (costs off)
+   select * from tenk1 a full join tenk1 b using(unique2) where unique2 = 42;
+ 
++-- the merged COALESCE may be relabeled to keep its typmod after inlining
++begin;
++
++create function join_typmod_f(numeric) returns numeric
++  language sql immutable as 'select $1';
++create temp table fj_a (a numeric(10,2));
++create temp table fj_b (b numeric(10,2));
++
++explain (costs off)
++  select * from (select join_typmod_f(a) as x from fj_a) s1
++    full join (select join_typmod_f(b) as x from fj_b) s2 using (x)
++  where x = 1;
++
++rollback;
++
+ --
+ -- test that quals attached to an outer join have correct semantics,
+ -- specifically that they don't re-use expressions computed below the join;
+-- 
+2.50.1 (Apple Git-155)
+

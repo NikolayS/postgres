@@ -1,0 +1,54 @@
+==================== HEADER (not part of the body) ====================
+To: pgsql-hackers <pgsql-hackers@lists.postgresql.org>
+Cc: Robert Haas <robertmhaas@gmail.com>
+Subject: Re: pgsql: Reduce "Var IS [NOT] NULL" quals during constant folding
+In-Reply-To: <CA+TgmoZy22d8Mz3z_Sjj+cb6tJQyfe=fJT-XkWmFX2eGD067iw@mail.gmail.com>
+Attach: v1-0001-Fix-const-simplification-of-partition-keys-and-co.patch
+  (SHA-256 fc9687abf5a5cbcf5235aacc455033f69804f89b9a60861ecd9bbcbb6173c9df)
+Optional: add Richard Guo <rguo@postgresql.org> to Cc (Robert's message was To him).
+==================== BODY (send exactly what follows) =================
+On Tue, Oct 6, 2026 at 8:53 AM Robert Haas <robertmhaas@gmail.com> wrote:
+> I feel like this commit message might have missed a fairly important
+> point here, which is that this commit made it necessary, in some set
+> of circumstances, for eval_const_expressions() to happen with a valid
+> PlannerInfo *root and with varnos already fixed. In addition to the
+> cases covered by 317c117d6d2 and c925ad30b04, there seems to be issues
+> with partition keys and partition constraints: see
+> set_baserel_partition_key_exprs and set_baserel_partition_constraint.
+
+Here is a fix for both, done the same way as c925ad30b04. A plain int
+key is enough to see it:
+
+create table pt (a int not null, b int) partition by list (coalesce(a, b));
+create table pt1 partition of pt for values in (1);
+create table pt2 partition of pt for values in (2);
+explain (costs off) select * from pt where coalesce(a, b) = 1;
+
+18.3 scans only pt1. REL_19_STABLE 4b1abd678223 scans pt1 and pt2,
+with Filter: (a = 1): the qual is reduced, the key is not, so they no
+longer match. The CASE WHEN a IS NULL THEN b ELSE a END shape breaks
+since e2debb64380 [1], the COALESCE shape since 10c4fe074a9 [2].
+Run-time pruning with a generic plan and partitionwise join on such
+keys are lost the same way, and come back with the patch.
+
+The patch runs each partition key expression through
+eval_const_expressions() again with the root after ChangeVarNodes(),
+like c925ad30b04 does for index expressions [3]. For the partition
+constraint it fixes the varnos first and then const-simplifies with
+the root instead of expression_planner(), so the constraint is still
+simplified only once. Your finding8.sql gives One-Time Filter: false
+again, and finding6.sql scans only p1.
+
+AI prepared the attached patch and tests; I haven't manually reviewed
+the code yet. The new tests in partition_prune.sql cover the COALESCE
+and CASE keys, run-time pruning with a prepared statement, and the
+partition constraint case; each fails without the plancat.c change.
+Tested on REL_19_STABLE 4b1abd678223 and master 52b41da0be54 (the
+patch applies to both), assertions on: the regress and isolation
+suites pass.
+
+[1] https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=e2debb64380ebcf0979708a0fa88d9c8d924005b
+[2] https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=10c4fe074a92eccf9fa6f7a39fe4d3f97b9b87e2
+[3] https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=c925ad30b047ec1388247539e86729d584c34b8d
+
+Nik

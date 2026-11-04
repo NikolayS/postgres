@@ -1,0 +1,6 @@
+CREATE FUNCTION f(varchar) RETURNS varchar
+  LANGUAGE sql IMMUTABLE AS 'SELECT $1';
+CREATE TABLE t (a varchar(20) NOT NULL, b varchar(20));
+CREATE UNIQUE INDEX ON t ((f((CASE WHEN a IS NULL THEN b END)::varchar(3))));
+INSERT INTO t VALUES ('x', 'y')
+  ON CONFLICT ((f((CASE WHEN a IS NULL THEN b END)::varchar(3)))) DO NOTHING;

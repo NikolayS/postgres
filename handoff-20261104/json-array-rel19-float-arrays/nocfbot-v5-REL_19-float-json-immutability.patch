@@ -1,0 +1,162 @@
+From 578715b04bac60038011685d1fbb586e135f8d45 Mon Sep 17 00:00:00 2001
+From: Nik Samokhvalov <nik@postgres.ai>
+Date: Tue, 3 Nov 2026 19:14:34 -0800
+Subject: [PATCH] Treat arrays of setting-dependent types as mutable in JSON
+ (19)
+
+On REL_19_STABLE float4out, float8out, byteaout and the geometric
+output functions are still marked IMMUTABLE, although their output
+depends on extra_float_digits or bytea_output.  On master they are
+STABLE since e75fcc9867f, which was not backpatched, so there
+json_check_mutability() already treats these types as mutable.
+
+18 rejected every array in SQL/JSON constructors used in an index
+expression.  Since ecd9288624a, 19 recurses into the element type and
+accepts arrays of these types, and such an index returns wrong results
+after the setting changes.  Treat arrays of them, and of domains over
+them, as mutable on 19.  Scalars keep the 18 behavior, so existing
+schemas still restore.
+
+This is for REL_19_STABLE only, on top of the v5 series.  Master does
+not need it.
+
+Discussion: https://postgr.es/m/179372513496.2500379.6217138376932454060@gmail.com
+---
+ src/backend/utils/adt/jsonfuncs.c     | 38 ++++++++++++++++++++++++---
+ src/test/regress/expected/sqljson.out | 32 ++++++++++++++++++++++
+ src/test/regress/sql/sqljson.sql      | 15 +++++++++++
+ 3 files changed, 82 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/utils/adt/jsonfuncs.c b/src/backend/utils/adt/jsonfuncs.c
+index 82b16d6f150..7908331ab71 100644
+--- a/src/backend/utils/adt/jsonfuncs.c
++++ b/src/backend/utils/adt/jsonfuncs.c
+@@ -6088,6 +6088,34 @@ json_categorize_type(Oid typoid, bool is_jsonb,
+ 	}
+ }
+ 
++/*
++ * Does the output of this built-in type depend on extra_float_digits or
++ * bytea_output?  On master the output functions of these types are STABLE,
++ * so the generic check below already treats them as mutable.  In 19 they
++ * are still marked IMMUTABLE.  18 accepted them as scalars, so keep that,
++ * but do not newly accept arrays of them: 18 rejected every array.
++ */
++static bool
++json_output_depends_on_settings(Oid typoid)
++{
++	switch (typoid)
++	{
++		case FLOAT4OID:
++		case FLOAT8OID:
++		case BYTEAOID:
++		case POINTOID:
++		case LSEGOID:
++		case PATHOID:
++		case BOXOID:
++		case POLYGONOID:
++		case LINEOID:
++		case CIRCLEOID:
++			return true;
++		default:
++			return false;
++	}
++}
++
+ /*
+  * Check whether a type conversion to JSON or JSONB involves any mutable
+  * functions.  This recurses into container types (arrays, ranges, multiranges,
+@@ -6160,10 +6188,14 @@ json_check_mutability(Oid typoid, bool *has_mutable)
+ 			 * Elements of a user-defined base type are printed through a cast
+ 			 * to json if one exists, looked up at run time, so creating or
+ 			 * dropping that cast later changes the output.  Treat such arrays
+-			 * as mutable, like user-defined ranges; otherwise recurse into the
+-			 * element type.
++			 * as mutable, like user-defined ranges; otherwise recurse into
++			 * the element type.  Arrays of the types listed in
++			 * json_output_depends_on_settings() are mutable too.
+ 			 */
+-			if (getBaseType(att_typelem) >= FirstNormalObjectId)
++			Oid			elembase = getBaseType(att_typelem);
++
++			if (elembase >= FirstNormalObjectId ||
++				json_output_depends_on_settings(elembase))
+ 				*has_mutable = true;
+ 			else
+ 				json_check_mutability(att_typelem, has_mutable);
+diff --git a/src/test/regress/expected/sqljson.out b/src/test/regress/expected/sqljson.out
+index f5f1056de74..3e4ef1c4b42 100644
+--- a/src/test/regress/expected/sqljson.out
++++ b/src/test/regress/expected/sqljson.out
+@@ -1519,6 +1519,38 @@ drop type mytext_t cascade;
+ NOTICE:  drop cascades to 2 other objects
+ DETAIL:  drop cascades to function mytext_t_in(cstring)
+ drop cascades to function mytext_t_out(mytext_t)
++-- Arrays of types whose output depends on extra_float_digits or bytea_output
++-- are mutable; 18 rejected them.  Scalars of these types stay accepted.
++create domain d_float8 as float8;
++create table test_setting_array(f4 float4[], f8 float8[], df d_float8[],
++  b bytea[], p point[], s float8);
++create index on test_setting_array(json_array(f4 returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_array(f4 returning j...
++                                           ^
++create index on test_setting_array(json_array(f8 returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_array(f8 returning j...
++                                           ^
++create index on test_setting_array(json_array(df returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_array(df returning j...
++                                           ^
++create index on test_setting_array(json_array(b returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_array(b returning js...
++                                           ^
++create index on test_setting_array(json_array(p returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_array(p returning js...
++                                           ^
++create index on test_setting_array(json_object('key' value f8 returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_setting_array(json_object('key' value f...
++                                           ^
++create index on test_setting_array(json_array(s returning jsonb)); -- ok
++drop table test_setting_array;
++drop domain d_float8;
+ -- IS JSON predicate
+ SELECT NULL IS JSON;
+  ?column? 
+diff --git a/src/test/regress/sql/sqljson.sql b/src/test/regress/sql/sqljson.sql
+index f32b5def1ed..899d1245598 100644
+--- a/src/test/regress/sql/sqljson.sql
++++ b/src/test/regress/sql/sqljson.sql
+@@ -590,6 +590,21 @@ drop table test_base_array;
+ drop domain d_mytext_t;
+ drop type mytext_t cascade;
+ 
++-- Arrays of types whose output depends on extra_float_digits or bytea_output
++-- are mutable; 18 rejected them.  Scalars of these types stay accepted.
++create domain d_float8 as float8;
++create table test_setting_array(f4 float4[], f8 float8[], df d_float8[],
++  b bytea[], p point[], s float8);
++create index on test_setting_array(json_array(f4 returning jsonb)); -- error
++create index on test_setting_array(json_array(f8 returning jsonb)); -- error
++create index on test_setting_array(json_array(df returning jsonb)); -- error
++create index on test_setting_array(json_array(b returning jsonb)); -- error
++create index on test_setting_array(json_array(p returning jsonb)); -- error
++create index on test_setting_array(json_object('key' value f8 returning jsonb)); -- error
++create index on test_setting_array(json_array(s returning jsonb)); -- ok
++drop table test_setting_array;
++drop domain d_float8;
++
+ -- IS JSON predicate
+ SELECT NULL IS JSON;
+ SELECT NULL IS NOT JSON;
+
+base-commit: 4b1abd678223ab22e1fe245547bf5b4a91db56ee
+prerequisite-patch-id: 35205c44ccc706b9e6ac34241ef02a0fe5ec85db
+prerequisite-patch-id: 136b0fa329b0ae83c6027f44afb8d63aa47e7678
+-- 
+2.50.1 (Apple Git-155)
+

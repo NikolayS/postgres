@@ -1,0 +1,10 @@
+set enable_partitionwise_join = on;
+create table v1 (a varchar(3) not null, b varchar(3)) partition by list ((coalesce(a, b)::text));
+create table v1_1 partition of v1 for values in ('x'); create table v1_2 partition of v1 for values in ('y');
+create table v2 (a text not null, b text) partition by list (coalesce(a, b));
+create table v2_1 partition of v2 for values in ('x'); create table v2_2 partition of v2 for values in ('y');
+insert into v1 values ('x',null),('y','q'); insert into v2 values ('x','z'),('y',null); analyze v1, v2;
+explain (costs off) select * from v1 where coalesce(a,b)::text = 'x';
+select * from v1 where coalesce(a,b)::text = 'x';
+explain (costs off) select * from v1 join v2 on coalesce(v1.a,v1.b)::text = coalesce(v2.a,v2.b);
+select * from v1 join v2 on coalesce(v1.a,v1.b)::text = coalesce(v2.a,v2.b) order by 1;

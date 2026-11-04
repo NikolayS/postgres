@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manuel Reyes Bravo <manuelreyesbravo@gmail.com>
+Date: Tue, 3 Nov 2026 12:44:24 -0300
+Subject: [PATCH v5 2/2] Treat arrays of user-defined base types as mutable in
+ JSON check
+
+Since ecd9288624a, json_check_mutability() recurses into the element
+type of an array.  When the element is a user-defined base type, or a
+domain over one, it is converted through a cast to json if one exists,
+looked up at run time, so a cast created or dropped after CREATE INDEX
+changes the indexed value.  18 treats every array as mutable.
+
+Treat such arrays as mutable, as user-defined ranges already are.
+Arrays of built-in types, and of domains over them, are not affected.
+
+The same type used directly, or through a domain, has had this
+problem since before 19 and is left alone here.
+---
+ src/backend/utils/adt/jsonfuncs.c     | 13 +++++++++--
+ src/test/regress/expected/sqljson.out | 32 +++++++++++++++++++++++++++
+ src/test/regress/sql/sqljson.sql      | 17 ++++++++++++++
+ 3 files changed, 60 insertions(+), 2 deletions(-)
+
+diff --git a/src/backend/utils/adt/jsonfuncs.c b/src/backend/utils/adt/jsonfuncs.c
+index 3bee50f948b..d8e5712f90c 100644
+--- a/src/backend/utils/adt/jsonfuncs.c
++++ b/src/backend/utils/adt/jsonfuncs.c
+@@ -6155,8 +6155,17 @@ json_check_mutability(Oid typoid, bool *has_mutable)
+ 
+ 		if (OidIsValid(att_typelem))
+ 		{
+-			/* recurse into array element type */
+-			json_check_mutability(att_typelem, has_mutable);
++			/*
++			 * Elements of a user-defined base type are printed through a cast
++			 * to json if one exists, looked up at run time, so creating or
++			 * dropping that cast later changes the output.  Treat such arrays
++			 * as mutable, like user-defined ranges; otherwise recurse into the
++			 * element type.
++			 */
++			if (getBaseType(att_typelem) >= FirstNormalObjectId)
++				*has_mutable = true;
++			else
++				json_check_mutability(att_typelem, has_mutable);
+ 			return;
+ 		}
+ 	}
+diff --git a/src/test/regress/expected/sqljson.out b/src/test/regress/expected/sqljson.out
+index 10116dc0785..f5f1056de74 100644
+--- a/src/test/regress/expected/sqljson.out
++++ b/src/test/regress/expected/sqljson.out
+@@ -1487,6 +1487,38 @@ LINE 1: create index on test_range_immutable(json_object('key' value...
+                                              ^
+ drop table test_range_immutable;
+ drop type range_int;
++-- Arrays of a user-defined base type, or of a domain over one, are mutable:
++-- their elements are converted through a cast to json, looked up at run time
++create type mytext_t;
++create function mytext_t_in(cstring) returns mytext_t
++  language internal immutable strict as 'textin';
++NOTICE:  return type mytext_t is only a shell
++create function mytext_t_out(mytext_t) returns cstring
++  language internal immutable strict as 'textout';
++NOTICE:  argument type mytext_t is only a shell
++LINE 1: create function mytext_t_out(mytext_t) returns cstring
++                                     ^
++create type mytext_t (input = mytext_t_in, output = mytext_t_out, like = text);
++create domain d_mytext_t as mytext_t;
++create table test_base_array(a mytext_t[], b d_mytext_t[]);
++create index on test_base_array(json_array(a returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_base_array(json_array(a returning jsonb...
++                                        ^
++create index on test_base_array(json_array(b returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_base_array(json_array(b returning jsonb...
++                                        ^
++create index on test_base_array(json_object('key' value a returning jsonb)); -- error
++ERROR:  functions in index expression must be marked IMMUTABLE
++LINE 1: create index on test_base_array(json_object('key' value a re...
++                                        ^
++drop table test_base_array;
++drop domain d_mytext_t;
++drop type mytext_t cascade;
++NOTICE:  drop cascades to 2 other objects
++DETAIL:  drop cascades to function mytext_t_in(cstring)
++drop cascades to function mytext_t_out(mytext_t)
+ -- IS JSON predicate
+ SELECT NULL IS JSON;
+  ?column? 
+diff --git a/src/test/regress/sql/sqljson.sql b/src/test/regress/sql/sqljson.sql
+index 504d00b5b2b..f32b5def1ed 100644
+--- a/src/test/regress/sql/sqljson.sql
++++ b/src/test/regress/sql/sqljson.sql
+@@ -573,6 +573,23 @@ create index on test_range_immutable(json_object('key' value m returning jsonb))
+ drop table test_range_immutable;
+ drop type range_int;
+ 
++-- Arrays of a user-defined base type, or of a domain over one, are mutable:
++-- their elements are converted through a cast to json, looked up at run time
++create type mytext_t;
++create function mytext_t_in(cstring) returns mytext_t
++  language internal immutable strict as 'textin';
++create function mytext_t_out(mytext_t) returns cstring
++  language internal immutable strict as 'textout';
++create type mytext_t (input = mytext_t_in, output = mytext_t_out, like = text);
++create domain d_mytext_t as mytext_t;
++create table test_base_array(a mytext_t[], b d_mytext_t[]);
++create index on test_base_array(json_array(a returning jsonb)); -- error
++create index on test_base_array(json_array(b returning jsonb)); -- error
++create index on test_base_array(json_object('key' value a returning jsonb)); -- error
++drop table test_base_array;
++drop domain d_mytext_t;
++drop type mytext_t cascade;
++
+ -- IS JSON predicate
+ SELECT NULL IS JSON;
+ SELECT NULL IS NOT JSON;
+-- 
+2.56.0
+

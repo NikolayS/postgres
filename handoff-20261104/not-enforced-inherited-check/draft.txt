@@ -1,0 +1,108 @@
+==================== HEADER (not part of the body) ====================
+To: pgsql-hackers <pgsql-hackers@lists.postgresql.org>
+Cc: Chao Li <li.evan.chao@gmail.com>
+Subject: Re: [PATCH] validate inherited check constraints when enabling enforcement
+In-Reply-To: <3CDC7AF1-CEDC-4FC1-AA2F-053BF59D00E6@gmail.com>
+Attach: v3-0001-Validate-inherited-CHECK-constraints-when-enablin.patch
+  (SHA-256 bbbf09dec5c4f7eec533bb8babca06ed339111b98abdb427c374f1e34ba4a56c)
+Attach: v3-0001-Validate-inherited-CHECK-constraints-when-enablin-REL_18.patch.txt
+  (SHA-256 463443a42a9e91acfb9f30fa388f34a59f23285f859bec46dfb861c062d98bec)
+==================== BODY (send exactly what follows) =================
+On Sun, Sep 13, 2026 at 11:24 PM Chao Li <li.evan.chao@gmail.com> wrote:
+> For this patch, I think one of the trickiest cases is something like
+> this:
+>
+> Initial state:
+> P (not enforced, not valid), say the constraint name is cc
+> |
+> -> c1 (not enforced, not valid)
+>      |
+>      -> c2 (enforce, not valid), c2 has enforced the constraint individually
+>
+> Then we run:
+> ALTER TABLE c1 ADD CONSTRAINT cc (...);
+>
+> The command needs to recurse to c2. Since c2 is already enforced, no
+> additional enforcement change is needed there. However, because c2 is
+> still not validated, it still needs to be validated as part of this
+> command.
+
+Thanks Chao.
+
+Since then, 0b12a5a7435a (8356d8e4dba6 on REL_19_STABLE) [1] made
+enforcing a parent over an ENFORCED NOT VALID child an error, instead of
+validating the child implicitly. v3 is rebased on top of it and follows
+the same rule, so your case now hits that commit's error:
+
+ERROR: constraint "cc" conflicts with NOT VALID constraint on child table "c2"
+HINT: You may need to use ALTER TABLE ... VALIDATE CONSTRAINT on table "c2" first.
+
+After "alter table c2 validate constraint cc", the add on c1 succeeds
+and c1 and c2 end up enforced and valid. The test for this case now
+expects the error.
+
+This also made the force_validation handling dead code: a descendant
+that is enforced but not valid errors out before it is reached, and the
+merged root already gets convalidated from initially_valid. v3 removes
+it, and core regression and isolation tests still pass.
+
+> My understanding is that enforcing_conoid is used to remember an
+> inherited constraint that is about to become locally enforced through
+> the merge. If so, would it make sense to also check
+> conform->coninhcount > 0 here?
+
+I think it's not needed. MergeWithExistingConstraint() merges at the
+named relation only when the existing constraint is not local (and the
+relation is not a partition), so it is purely inherited, and
+coninhcount > 0. A local NOT ENFORCED constraint with the same name
+gets "already exists". Below the top level, merging an enforced
+constraint into a NOT ENFORCED one errors out. So enforcing_conoid is
+used (newcons == NIL) only after a merge into a purely inherited
+constraint. I left the code as is; happy to add the check if you
+prefer it as documentation.
+
+> When force_validation is true, I think skip_validation should
+> necessarily be false. If that is an invariant of this function, would
+> it be worth adding an assertion to make that explicit, such as:
+>
+> Assert(!force_validation || !skip_validation);
+
+It held (callers passed initially_valid for one and skip_validation for
+the other), but force_validation is gone in v3, so there is nothing
+left to assert.
+
+Changes in v3:
+- rebased on master; test blocks merged with the ones from 0b12a5a7435a
+- force_validation removed
+- one test now expects the error for an ENFORCED NOT VALID descendant
+- an add with not valid over an ENFORCED NOT VALID descendant now
+  succeeds: the constraint on the named table stays NOT VALID and the
+  descendant is unchanged (new test)
+- commit message, with Backpatch-through: 18
+- a separate version for REL_18_STABLE
+
+The master file applies as-is to REL_19_STABLE. REL_18_STABLE has no
+ALTER CONSTRAINT [NOT] ENFORCED for CHECK, so that version does the
+descendant handling inline in ATAddCheckNNConstraint(), raising the
+same error for an ENFORCED NOT VALID descendant. It uses the same tests
+and expected output as master. AI prepared the REL_18 version; I
+haven't manually reviewed that code yet.
+
+Tested with assertions, core regression and isolation tests pass on
+each:
+- master at b6178c942ea7 with v3-0001
+- REL_19_STABLE at 4b1abd678223 with v3-0001
+- REL_18_STABLE at d6694976c88c with the -REL_18 file
+
+On master and REL_18_STABLE, the new tests fail without the code
+changes and pass with them.
+
+Attached:
+- v3-0001-Validate-inherited-CHECK-constraints-when-enablin.patch
+  (master, REL_19_STABLE)
+- v3-0001-Validate-inherited-CHECK-constraints-when-enablin-REL_18.patch.txt
+  (REL_18_STABLE)
+
+[1] https://git.postgresql.org/gitweb/?p=postgresql.git;a=commitdiff;h=0b12a5a7435a
+
+Nik

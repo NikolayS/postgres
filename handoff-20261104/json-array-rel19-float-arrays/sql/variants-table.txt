@@ -1,0 +1,18 @@
+variant | 19+v5 | 19+v5+fix | master+v5 | 18.6
+01 scalar float4 | ok | ok | REJ: functions in index expression must  | ok
+02 scalar float8 | ok | ok | REJ: functions in index expression must  | ok
+03 scalar bytea | ok | ok | REJ: functions in index expression must  | ok
+04 int[] | ok | ok | ok | REJ: functions in index expression must 
+05 text[] | ok | ok | ok | REJ: functions in index expression must 
+06 numeric[] | ok | ok | ok | REJ: functions in index expression must 
+07 composite with float field | REJ: functions in index expression must  | REJ: functions in index expression must  | REJ: functions in index expression must  | REJ: functions in index expression must 
+08 json_object float value | ok | ok | REJ: functions in index expression must  | ok
+09 json_object float key | ok | ok | REJ: functions in index expression must  | ok
+10 nested json_array of float8 | ok | ok | REJ: functions in index expression must  | ok
+11 scalar domain over float8 | ok | ok | REJ: functions in index expression must  | ok
+12 scalar point | ok | ok | REJ: functions in index expression must  | ok
+13 text + int | ok | ok | ok | ok
+14 nested json_array(f8a) inside json_array | ok | REJ: functions in index expression must  | REJ: functions in index expression must  | REJ: functions in index expression must 
+15 json_scalar float8 / json_scalar float8 via JSON() | ok | ok | REJ: functions in index expression must  | ok
+16 generated column float8[] | ok | REJ: generation expression is not immuta | REJ: generation expression is not immuta | REJ: generation expression is not immuta
+17 partition key float8[] | ok | REJ: functions in partition key expressi | REJ: functions in partition key expressi | REJ: functions in partition key expressi

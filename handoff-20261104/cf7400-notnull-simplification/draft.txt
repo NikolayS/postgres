@@ -1,0 +1,76 @@
+==================== HEADER (not part of the body) ====================
+STATE: NOT READY. This is the draft for v4. It must change before it is
+sent: see README.md "Next steps" (series renamed to v3, 0003 predicate
+fix, nullable_partexprs test, 0004 credits). No Gmail draft exists.
+To: shihao zhong <zhong950419@gmail.com>
+Cc: Richard Guo <guofenglinux@gmail.com>, Fujii Masao <masao.fujii@gmail.com>,
+    Melanie Plageman <melanieplageman@gmail.com>, Tom Lane <tgl@sss.pgh.pa.us>,
+    Dean Rasheed <dean.a.rasheed@gmail.com>, Peter Eisentraut <peter@eisentraut.org>,
+    Manu <manuelreyesbravo@gmail.com>, pgsql-hackers <pgsql-hackers@lists.postgresql.org>
+Subject: Re: [PG19] Wrong results from NOT NULL-based expression simplification
+In-Reply-To: <CAGRkXqSQT4CMmOUXDYBoxyMXdU6DqXMQqb-LPyrPTx-kDtJeYQ@mail.gmail.com>
+Attach: v4-0001-Preserve-typmod-when-reducing-CASE-COALESCE-and-N.patch
+Attach: v4-0002-Look-through-RelabelType-when-matching-a-FULL-JOI.patch
+Attach: v4-0003-Simplify-index-expressions-once-in-ON-CONFLICT-in.patch
+Attach: v4-0004-Look-through-typmod-only-RelabelType-on-partition.patch
+Note: these .patch names make cfbot test this series instead of
+Richard's v2. 0001 and 0002 are Richard's v2 unchanged. To avoid taking
+over cfbot, prefix all four with nocfbot- and adjust one sentence.
+==================== BODY (current text; will change) =================
+On Fri, Oct 16, 2026 at 9:13 PM shihao zhong <zhong950419@gmail.com> wrote:
+> With v2 this scans both partitions, on master only pc1.
+>
+>     CREATE FUNCTION pf(numeric) RETURNS numeric
+>       LANGUAGE sql IMMUTABLE AS 'SELECT $1';
+>     CREATE TABLE pc (a numeric(10), b numeric(10))
+>       PARTITION BY LIST ((COALESCE(pf(a), b)));
+>     CREATE TABLE pc1 PARTITION OF pc FOR VALUES IN (1);
+>     CREATE TABLE pc2 PARTITION OF pc FOR VALUES IN (2);
+>     EXPLAIN (COSTS OFF) SELECT * FROM pc WHERE COALESCE(pf(a), b) = 1;
+>
+> This is because the key is RelabelType, partprune.c shard it only from the
+> clause.
+
+The same one-sided strip is in two more places: group_by_has_partkey()
+and match_expr_to_partition_keys(). So with v2, partitionwise aggregate
+is lost on the same table:
+
+set enable_partitionwise_aggregate = on;
+explain (costs off) select coalesce(pf(a), b), count(*) from pc group by 1;
+
+18.6 gives Append -> HashAggregate per partition. REL_19_STABLE
+4b1abd678223 + v2 gives Finalize HashAggregate -> Append -> Partial
+HashAggregate. Partitionwise join is lost too, for example with
+varchar(3) columns, where the join clause is relabeled to text.
+
+v4 attached. 0001 and 0002 are Richard's v2, unchanged.
+
+0003 fixes Manu's ON CONFLICT case [1]. infer_arbiter_indexes() now
+reads the index expressions from pg_index and simplifies them once with
+root, like the inference expressions, instead of simplifying again the
+relcache copy that was already simplified without root. Matching stays
+exact equal().
+
+0004 replaces shihao's partprune.c patch and covers all three places.
+It looks through a RelabelType on the partition key only when the
+RelabelType keeps type and collation. group_by_has_partkey() has no
+opfamily check, so a key relabeled to another binary-compatible type
+must still not match.
+
+This is not the issue Robert reported in [2], where the partition key
+is not simplified with root. A fix for that does not help here: the
+key and the query expression already carry the same RelabelType. The
+two fixes are independent and apply in either order.
+
+AI found the two extra places and prepared 0003 and 0004; I haven't
+manually reviewed the code yet. New tests in insert_conflict,
+partition_prune (incl. run-time pruning), partition_aggregate and
+partition_join; each fails without its hunk. Tested on REL_19_STABLE
+4b1abd678223 with assertions: regress and isolation suites pass. The
+series applies to master b6178c942ea7. With v4, the plan shapes for
+all cases above match 18.6 again; only the relabel shows in EXPLAIN.
+
+[1] https://www.postgresql.org/message-id/179220962657.1343374.11137544623255312817@gmail.com
+[2] https://www.postgresql.org/message-id/CA+TgmoZy22d8Mz3z_Sjj+cb6tJQyfe=fJT-XkWmFX2eGD067iw@mail.gmail.com
+
+Nik

@@ -1,0 +1,41 @@
+==================== HEADER (not part of the body) ====================
+To: pgsql-hackers <pgsql-hackers@lists.postgresql.org>
+Cc: 신성준 <shinsj4653@gmail.com>, Henson Choi <assam258@gmail.com>
+Subject: Re: Add wait events for server logging destination writes
+In-Reply-To: <CACdN0M6QfkDmMYXQ5as4+dnZEg8tBExEAcedz8dEhH7vomX4aA@mail.gmail.com>
+Attach: none
+==================== BODY (send exactly what follows) =================
+Hi Seongjun,
+
+On Wed, Oct 28, 2026 at 10:00 PM 신성준 <shinsj4653@gmail.com> wrote:
+> v9 keeps an outer wait event across a log write by using
+> pgstat_report_wait_start_nested() / pgstat_report_wait_end_nested()
+> at the new logging sites.  That was the open point from Nik's last
+> review.
+>
+> What would help most now:
+> - Nik, a rerun of your harness against v9 when you have a free
+>   moment.  No hurry.
+
+My AI harness tested v9 on master at 35273454065e, cassert build.  The
+outer event survives the log write now.  Sampled after ereport(LOG)
+returned, inside the extension's region, v9 shows
+
+  active | Extension | HarnessOuterWait
+
+for stderr with logging_collector off and on, csvlog, jsonlog, all
+three together, and syslog.  v8 shows an empty wait_event_type and
+wait_event in the same runs, so the check can tell them apart.  The
+core regression suite passes with v9.
+
+I also read the wrapped sites.  They wrap only leaf OS calls (write(),
+openlog(), syslog(), and the Windows calls in 0002), and nothing in
+between can ereport, so I see no path that leaves start without end.
+
+No new findings.  I did not test Windows or the macro alternative
+Henson described.
+
+From the tester's side I consider v9 ready.
+
+Thanks,
+Nik

@@ -1,0 +1,262 @@
+From 2c2cb03650622b626eaade624108c324748d6106 Mon Sep 17 00:00:00 2001
+From: Richard Guo <guofenglinux@gmail.com>
+Date: Sun, 11 Oct 2026 09:21:34 +0900
+Subject: [PATCH v4 1/4] Preserve typmod when reducing CASE, COALESCE, and
+ NULLIF
+
+Commit d8ce0050a made eval_const_expressions() preserve the typmod and
+collation when a COALESCE, CASE, or NULLIF is reduced to one of its
+inputs.  But the typmod a node exposes can also change when it is not
+reduced, so simplifying an expression twice could give a different
+tree than simplifying it once.
+
+The typmod of a CASE or COALESCE is derived from its results or
+arguments, so dropping only some of them can change it.  The typmod of
+a NULLIF is that of its first argument, which can change when that
+argument is itself simplified, for instance when a SQL function is
+inlined.  Also, an all-null COALESCE was reduced to a null constant
+with typmod -1.
+
+ON CONFLICT inference simplifies index expressions twice but the
+inference expressions only once, so a matching arbiter index could
+fail to be found.
+
+To fix, relabel the rebuilt CASE, COALESCE, or NULLIF node to the
+original typmod, and use that typmod for the all-null COALESCE
+constant and for a NULLIF folded to a constant.
+
+These oversights are long-standing, but before v19 they only affect
+the typmod the expression exposes, so this is not back-patched
+further.
+
+Reported-by: Fujii Masao <masao.fujii@gmail.com>
+Author: Richard Guo <guofenglinux@gmail.com>
+Discussion: https://postgr.es/m/CAHGQGwE6W9u8aRvbnWK0zVPukU46_yZqYL9WHMhfv8LNPN3pBw@mail.gmail.com
+Backpatch-through: 19
+---
+ src/backend/optimizer/util/clauses.c          | 45 +++++++++++---
+ src/test/regress/expected/insert_conflict.out | 62 +++++++++++++++++++
+ src/test/regress/sql/insert_conflict.sql      | 30 +++++++++
+ 3 files changed, 127 insertions(+), 10 deletions(-)
+
+diff --git a/src/backend/optimizer/util/clauses.c b/src/backend/optimizer/util/clauses.c
+index 6d072beea22..c4e15cc32de 100644
+--- a/src/backend/optimizer/util/clauses.c
++++ b/src/backend/optimizer/util/clauses.c
+@@ -3224,7 +3224,7 @@ eval_const_expressions_mutator(Node *node,
+ 				/*
+ 				 * If either argument is NULL they can't be equal, so the
+ 				 * result is the first argument, relabeled if needed to expose
+-				 * the NULLIF's typmod and collation
++				 * the NULLIF's typmod and collation.
+ 				 */
+ 				foreach(arg, expr->args)
+ 				{
+@@ -3246,11 +3246,22 @@ eval_const_expressions_mutator(Node *node,
+ 				 */
+ 				set_opfuncid((OpExpr *) expr);
+ 
++				/* Use the original typmod, as for the relabel below */
+ 				if (!has_nonconst_input &&
+ 					ece_function_is_safe(expr->opfuncid, context))
+-					return ece_evaluate_expr(expr);
+-
+-				return (Node *) expr;
++					return (Node *) evaluate_expr((Expr *) expr,
++												  expr->opresulttype,
++												  exprTypmod(node),
++												  expr->opcollid);
++
++				/* Simplifying arguments can change the typmod, so relabel */
++				return applyRelabelType((Node *) expr,
++										expr->opresulttype,
++										exprTypmod(node),
++										expr->opcollid,
++										COERCE_IMPLICIT_CAST,
++										-1,
++										false);
+ 			}
+ 		case T_ScalarArrayOpExpr:
+ 			{
+@@ -3720,7 +3731,7 @@ eval_const_expressions_mutator(Node *node,
+ 				/*
+ 				 * If no non-FALSE alternatives, CASE reduces to the default
+ 				 * result, relabeled if needed to expose the CASE's typmod and
+-				 * collation
++				 * collation.
+ 				 */
+ 				if (newargs == NIL)
+ 					return applyRelabelType(defresult,
+@@ -3738,7 +3749,14 @@ eval_const_expressions_mutator(Node *node,
+ 				newcase->args = newargs;
+ 				newcase->defresult = (Expr *) defresult;
+ 				newcase->location = caseexpr->location;
+-				return (Node *) newcase;
++				/* Dropping branches can change the typmod, so relabel */
++				return applyRelabelType((Node *) newcase,
++										caseexpr->casetype,
++										exprTypmod(node),
++										caseexpr->casecollid,
++										COERCE_IMPLICIT_CAST,
++										-1,
++										false);
+ 			}
+ 		case T_CaseTestExpr:
+ 			{
+@@ -3818,18 +3836,18 @@ eval_const_expressions_mutator(Node *node,
+ 
+ 				/*
+ 				 * If all the arguments were constant null, the result is just
+-				 * null
++				 * null, with the COALESCE's typmod and collation.
+ 				 */
+ 				if (newargs == NIL)
+ 					return (Node *) makeNullConst(coalesceexpr->coalescetype,
+-												  -1,
++												  exprTypmod(node),
+ 												  coalesceexpr->coalescecollid);
+ 
+ 				/*
+ 				 * If there's exactly one surviving argument, we no longer
+ 				 * need COALESCE at all: the result is that argument,
+ 				 * relabeled if needed to expose the COALESCE's typmod and
+-				 * collation
++				 * collation.
+ 				 */
+ 				if (list_length(newargs) == 1)
+ 					return applyRelabelType((Node *) linitial(newargs),
+@@ -3845,7 +3863,14 @@ eval_const_expressions_mutator(Node *node,
+ 				newcoalesce->coalescecollid = coalesceexpr->coalescecollid;
+ 				newcoalesce->args = newargs;
+ 				newcoalesce->location = coalesceexpr->location;
+-				return (Node *) newcoalesce;
++				/* Dropping arguments can change the typmod, so relabel */
++				return applyRelabelType((Node *) newcoalesce,
++										coalesceexpr->coalescetype,
++										exprTypmod(node),
++										coalesceexpr->coalescecollid,
++										COERCE_IMPLICIT_CAST,
++										-1,
++										false);
+ 			}
+ 		case T_SQLValueFunction:
+ 			{
+diff --git a/src/test/regress/expected/insert_conflict.out b/src/test/regress/expected/insert_conflict.out
+index 0dd8bc734a0..a88fea802bc 100644
+--- a/src/test/regress/expected/insert_conflict.out
++++ b/src/test/regress/expected/insert_conflict.out
+@@ -208,6 +208,68 @@ explain (costs off) insert into insertconflict_nn values(1, 'x') on conflict (a)
+ ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
+ drop table insertconflict_nn;
+ --
++-- Index expressions whose typmod changes when simplified can be inferred
++--
++create table insertconflict_typmod (a varchar(20) not null, b varchar(20));
++create unique index typmod_coalesce_key on insertconflict_typmod(coalesce(null::varchar, a, b));
++create unique index typmod_case_key on insertconflict_typmod((case when false then null::varchar when a is not null then a else b end));
++create unique index typmod_null_key on insertconflict_typmod(coalesce((case when a is not null then null::varchar(5) else b end)::varchar(20)));
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict (coalesce(null::varchar, a, b)) do nothing;
++                            QUERY PLAN                            
++------------------------------------------------------------------
++ Insert on insertconflict_typmod
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: typmod_coalesce_key, typmod_case_key
++   ->  Result
++(4 rows)
++
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict ((case when false then null::varchar when a is not null then a else b end)) do nothing;
++                            QUERY PLAN                            
++------------------------------------------------------------------
++ Insert on insertconflict_typmod
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: typmod_coalesce_key, typmod_case_key
++   ->  Result
++(4 rows)
++
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict (coalesce((case when a is not null then null::varchar(5) else b end)::varchar(20))) do nothing;
++                 QUERY PLAN                  
++---------------------------------------------
++ Insert on insertconflict_typmod
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: typmod_null_key
++   ->  Result
++(4 rows)
++
++drop table insertconflict_typmod;
++create function insertconflict_typmod_f(numeric) returns numeric language sql immutable as 'select $1';
++create table insertconflict_typmod_num (a numeric(10) not null);
++create unique index typmod_nullif_key on insertconflict_typmod_num(nullif(insertconflict_typmod_f(a), case when a is null then a end));
++explain (costs off) insert into insertconflict_typmod_num values(1) on conflict (nullif(insertconflict_typmod_f(a), case when a is null then a end)) do nothing;
++                  QUERY PLAN                   
++-----------------------------------------------
++ Insert on insertconflict_typmod_num
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: typmod_nullif_key
++   ->  Result
++(4 rows)
++
++-- NULLIF folded to a constant
++create function insertconflict_typmod_sf(numeric) returns numeric language sql stable as 'select $1';
++create unique index typmod_nullif_const_key on insertconflict_typmod_num(nullif(insertconflict_typmod_sf(case when a is null then 3::numeric(10) else 2::numeric(10) end), 3));
++explain (costs off) insert into insertconflict_typmod_num values(1) on conflict (nullif(insertconflict_typmod_sf(case when a is null then 3::numeric(10) else 2::numeric(10) end), 3)) do nothing;
++                     QUERY PLAN                      
++-----------------------------------------------------
++ Insert on insertconflict_typmod_num
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: typmod_nullif_const_key
++   ->  Result
++(4 rows)
++
++drop table insertconflict_typmod_num;
++drop function insertconflict_typmod_f(numeric);
++drop function insertconflict_typmod_sf(numeric);
++--
+ -- Single key tests
+ --
+ create unique index key_index on insertconflicttest(key);
+diff --git a/src/test/regress/sql/insert_conflict.sql b/src/test/regress/sql/insert_conflict.sql
+index 8539c49c939..50a716fb9b2 100644
+--- a/src/test/regress/sql/insert_conflict.sql
++++ b/src/test/regress/sql/insert_conflict.sql
+@@ -91,6 +91,36 @@ explain (costs off) insert into insertconflict_nn values(1, 'x') on conflict (a)
+ 
+ drop table insertconflict_nn;
+ 
++--
++-- Index expressions whose typmod changes when simplified can be inferred
++--
++create table insertconflict_typmod (a varchar(20) not null, b varchar(20));
++create unique index typmod_coalesce_key on insertconflict_typmod(coalesce(null::varchar, a, b));
++create unique index typmod_case_key on insertconflict_typmod((case when false then null::varchar when a is not null then a else b end));
++create unique index typmod_null_key on insertconflict_typmod(coalesce((case when a is not null then null::varchar(5) else b end)::varchar(20)));
++
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict (coalesce(null::varchar, a, b)) do nothing;
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict ((case when false then null::varchar when a is not null then a else b end)) do nothing;
++explain (costs off) insert into insertconflict_typmod values('x', 'y') on conflict (coalesce((case when a is not null then null::varchar(5) else b end)::varchar(20))) do nothing;
++
++drop table insertconflict_typmod;
++
++create function insertconflict_typmod_f(numeric) returns numeric language sql immutable as 'select $1';
++create table insertconflict_typmod_num (a numeric(10) not null);
++create unique index typmod_nullif_key on insertconflict_typmod_num(nullif(insertconflict_typmod_f(a), case when a is null then a end));
++
++explain (costs off) insert into insertconflict_typmod_num values(1) on conflict (nullif(insertconflict_typmod_f(a), case when a is null then a end)) do nothing;
++
++-- NULLIF folded to a constant
++create function insertconflict_typmod_sf(numeric) returns numeric language sql stable as 'select $1';
++create unique index typmod_nullif_const_key on insertconflict_typmod_num(nullif(insertconflict_typmod_sf(case when a is null then 3::numeric(10) else 2::numeric(10) end), 3));
++
++explain (costs off) insert into insertconflict_typmod_num values(1) on conflict (nullif(insertconflict_typmod_sf(case when a is null then 3::numeric(10) else 2::numeric(10) end), 3)) do nothing;
++
++drop table insertconflict_typmod_num;
++drop function insertconflict_typmod_f(numeric);
++drop function insertconflict_typmod_sf(numeric);
++
+ --
+ -- Single key tests
+ --
+
+base-commit: 4b1abd678223ab22e1fe245547bf5b4a91db56ee
+-- 
+2.50.1 (Apple Git-155)
+

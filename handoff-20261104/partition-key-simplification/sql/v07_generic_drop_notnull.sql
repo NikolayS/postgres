@@ -1,0 +1,14 @@
+create table pt (a int not null, b int) partition by list (coalesce(a, b));
+create table pt1 partition of pt for values in (1); create table pt2 partition of pt for values in (2);
+insert into pt values (1, null), (2, null);
+set plan_cache_mode = force_generic_plan;
+prepare q (int) as select * from pt where coalesce(a, b) = $1;
+explain (costs off) execute q (2);
+execute q (2);
+alter table pt alter column a drop not null;
+insert into pt values (null, 2);
+explain (costs off) execute q (2);
+execute q (2);
+prepare q2 (int) as select * from pt where coalesce(a, b) = $1;
+explain (costs off) execute q2 (2);
+execute q2 (2);

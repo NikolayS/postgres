@@ -1,0 +1,4 @@
+comment = 'outer wait event test module'
+default_version = '1.0'
+module_pathname = '$libdir/outer_wait'
+relocatable = true

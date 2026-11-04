@@ -1,0 +1,48 @@
+==================== HEADER (not part of the body) ====================
+To: pgsql-hackers <pgsql-hackers@lists.postgresql.org>
+Cc: Manu <manuelreyesbravo@gmail.com>
+Subject: Re: PG19 regression in ecd9288624a: JSON_ARRAY() indexes that go stale
+In-Reply-To: <179372513496.2500379.6217138376932454060@gmail.com>
+Attach: nocfbot-v5-REL_19-float-json-immutability.patch
+  (SHA-256 f67dfa8e989f01c7ccb9a10def4d235ceeefc7836a5b63b7ab8460d999e878fd)
+Optional: add Andrew Dunstan (open item owner) to Cc.
+==================== BODY (send exactly what follows) =================
+On Tue, Nov 3, 2026 at 8:58 AM Manu <manuelreyesbravo@gmail.com> wrote:
+> - float4, float8, then extra_float_digits = 0: stale / stale / stale,
+>   since float8out is still IMMUTABLE in 18 and 19; on master it is
+>   STABLE now, and there v5 rejects them
+
+True for scalars, but arrays of them are new in 19. 18 rejects every
+array here; 19 recurses into the element type, and on REL_19_STABLE
+float4out, float8out, byteaout and the geometric output functions are
+still IMMUTABLE (e75fcc9867fd made them STABLE on master only [1]). So
+19 with v5 accepts float4[], float8[], bytea[], point[] etc., and the
+index goes stale:
+
+create table t (f float8[]);
+insert into t values ('{0.30000000000000004}');
+create index t_i on t ((json_array(f returning jsonb)));
+set extra_float_digits = 0;
+set enable_seqscan = off;
+select count(*) from t where json_array(f returning jsonb) = '[[0.3]]';
+
+On REL_19_STABLE 4b1abd678223 with v5 the index scan returns 0, a seq
+scan returns 1. 18.6 rejects the CREATE INDEX. bytea[] with
+bytea_output = escape behaves the same.
+
+AI found this while testing v5 and prepared the attached patch; I
+haven't manually reviewed the code yet. It is for REL_19_STABLE only,
+on top of v5: arrays of float4, float8, bytea and the geometric types,
+or of domains over them, are mutable. Scalars keep the 18 behavior, so
+existing schemas still restore. Master doesn't need it, there v5
+already rejects all of these. The file name starts with nocfbot so
+cfbot keeps testing v5.
+
+Tested on REL_19_STABLE 4b1abd678223 + v5 + this patch, assertions
+on: the regress suite passes; without the jsonfuncs.c hunk the new
+sqljson test fails. On master 52b41da0be54 + v5, the same statements
+are rejected already.
+
+[1] https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=e75fcc9867fdfe295957ad5c9a98cbe2e1b4c5c3
+
+Nik

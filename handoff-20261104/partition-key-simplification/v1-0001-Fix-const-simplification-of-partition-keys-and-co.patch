@@ -1,0 +1,251 @@
+From ea7515ac2e4d22c0c43e2f11f7c4dd3c7958de50 Mon Sep 17 00:00:00 2001
+From: Nik Samokhvalov <nik@postgres.ai>
+Date: Tue, 3 Nov 2026 19:28:31 -0800
+Subject: [PATCH v1] Fix const-simplification of partition keys and constraints
+
+Since commit e2debb64380, eval_const_expressions() reduces NullTest
+quals on NOT NULL columns, which needs a valid PlannerInfo and the
+final varnos; commit 10c4fe074a9 extended that to dropping COALESCE
+arguments after a non-nullable one.  The planner's copies of
+partition key expressions and of the partition constraint were still
+simplified only without a root (in the relcache, and via
+expression_planner() for the constraint), so they were not reduced
+the way the query's quals are.  For a table partitioned by
+coalesce(a, b) with "a" NOT NULL, the qual coalesce(a, b) = 1 becomes
+a = 1 and no longer matches the partition key, which disables
+plan-time and run-time partition pruning as well as partitionwise
+join.  Likewise, a qual contradicting a partition's own constraint no
+longer excludes it.
+
+To fix, in set_baserel_partition_key_exprs() run each key expression
+through eval_const_expressions() again with a valid root after fixing
+its varnos, as commit c925ad30b04 did for index expressions and
+predicates.  In set_baserel_partition_constraint(), fix the varnos
+first and then const-simplify with the root instead of using
+expression_planner().  The extra pass happens only for expression
+partition keys and is cheap on such small, already-simplified trees;
+the constraint is const-simplified once, as before.
+
+Discussion: https://postgr.es/m/CA+TgmoZy22d8Mz3z_Sjj+cb6tJQyfe=fJT-XkWmFX2eGD067iw@mail.gmail.com
+Backpatch-through: 19
+---
+ src/backend/optimizer/util/plancat.c          | 31 ++++++---
+ src/test/regress/expected/partition_prune.out | 66 +++++++++++++++++++
+ src/test/regress/sql/partition_prune.sql      | 37 +++++++++++
+ 3 files changed, 126 insertions(+), 8 deletions(-)
+
+diff --git a/src/backend/optimizer/util/plancat.c b/src/backend/optimizer/util/plancat.c
+index 84b9c188fb5..217907ab158 100644
+--- a/src/backend/optimizer/util/plancat.c
++++ b/src/backend/optimizer/util/plancat.c
+@@ -82,9 +82,11 @@ static void set_relation_partition_info(PlannerInfo *root, RelOptInfo *rel,
+ 										Relation relation);
+ static PartitionScheme find_partition_scheme(PlannerInfo *root,
+ 											 Relation relation);
+-static void set_baserel_partition_key_exprs(Relation relation,
++static void set_baserel_partition_key_exprs(PlannerInfo *root,
++											Relation relation,
+ 											RelOptInfo *rel);
+-static void set_baserel_partition_constraint(Relation relation,
++static void set_baserel_partition_constraint(PlannerInfo *root,
++											 Relation relation,
+ 											 RelOptInfo *rel);
+ 
+ 
+@@ -1631,7 +1633,7 @@ get_relation_constraints(PlannerInfo *root,
+ 	if (include_partition && relation->rd_rel->relispartition)
+ 	{
+ 		/* make sure rel->partition_qual is set */
+-		set_baserel_partition_constraint(relation, rel);
++		set_baserel_partition_constraint(root, relation, rel);
+ 		result = list_concat(result, rel->partition_qual);
+ 	}
+ 
+@@ -2708,8 +2710,8 @@ set_relation_partition_info(PlannerInfo *root, RelOptInfo *rel,
+ 	Assert(partdesc != NULL && rel->part_scheme != NULL);
+ 	rel->boundinfo = partdesc->boundinfo;
+ 	rel->nparts = partdesc->nparts;
+-	set_baserel_partition_key_exprs(relation, rel);
+-	set_baserel_partition_constraint(relation, rel);
++	set_baserel_partition_key_exprs(root, relation, rel);
++	set_baserel_partition_constraint(root, relation, rel);
+ }
+ 
+ /*
+@@ -2824,7 +2826,7 @@ find_partition_scheme(PlannerInfo *root, Relation relation)
+  * rel->partexprs.
+  */
+ static void
+-set_baserel_partition_key_exprs(Relation relation,
++set_baserel_partition_key_exprs(PlannerInfo *root, Relation relation,
+ 								RelOptInfo *rel)
+ {
+ 	PartitionKey partkey = RelationGetPartitionKey(relation);
+@@ -2866,6 +2868,14 @@ set_baserel_partition_key_exprs(Relation relation,
+ 			/* Re-stamp the expression with given varno. */
+ 			partexpr = (Expr *) copyObject(lfirst(lc));
+ 			ChangeVarNodes((Node *) partexpr, 1, varno, 0);
++
++			/*
++			 * The relcache const-simplified the expression without a valid
++			 * "root".  Run it through const-simplification again now that the
++			 * varnos are fixed, so that NullTest quals for Vars are reduced
++			 * the same way as in qual clauses we match it against.
++			 */
++			partexpr = (Expr *) eval_const_expressions(root, (Node *) partexpr);
+ 			lc = lnext(partkey->partexprs, lc);
+ 		}
+ 
+@@ -2892,7 +2902,8 @@ set_baserel_partition_key_exprs(Relation relation,
+  * given relation.
+  */
+ static void
+-set_baserel_partition_constraint(Relation relation, RelOptInfo *rel)
++set_baserel_partition_constraint(PlannerInfo *root, Relation relation,
++								 RelOptInfo *rel)
+ {
+ 	List	   *partconstr;
+ 
+@@ -2905,13 +2916,17 @@ set_baserel_partition_constraint(Relation relation, RelOptInfo *rel)
+ 	 * quals should be in canonical form already; also, since the qual is in
+ 	 * implicit-AND format, we'd have to explicitly convert it to explicit-AND
+ 	 * format and back again.
++	 *
++	 * Fix the varnos first and use a valid "root", because
++	 * eval_const_expressions reduces NullTest quals for Vars based on varno.
+ 	 */
+ 	partconstr = RelationGetPartitionQual(relation);
+ 	if (partconstr)
+ 	{
+-		partconstr = (List *) expression_planner((Expr *) partconstr);
+ 		if (rel->relid != 1)
+ 			ChangeVarNodes((Node *) partconstr, 1, rel->relid, 0);
++		partconstr = (List *) eval_const_expressions(root, (Node *) partconstr);
++		fix_opfuncids((Node *) partconstr);
+ 		rel->partition_qual = partconstr;
+ 	}
+ }
+diff --git a/src/test/regress/expected/partition_prune.out b/src/test/regress/expected/partition_prune.out
+index 3506ecec477..99adc711c07 100644
+--- a/src/test/regress/expected/partition_prune.out
++++ b/src/test/regress/expected/partition_prune.out
+@@ -5145,3 +5145,69 @@ select * from (select a, b from phv_boolpart) t
+ (2 rows)
+ 
+ drop table phv_boolpart;
++--
++-- Partition key expressions and partition constraints must be
++-- const-simplified the same way as quals, so that NullTests on NOT NULL
++-- columns are reduced on both sides
++--
++create table pp_notnull (a int not null, b int) partition by list (coalesce(a, b));
++create table pp_notnull1 partition of pp_notnull for values in (1);
++create table pp_notnull2 partition of pp_notnull for values in (2);
++insert into pp_notnull values (1, null), (2, null);
++explain (costs off) select * from pp_notnull where coalesce(a, b) = 1;
++             QUERY PLAN             
++------------------------------------
++ Seq Scan on pp_notnull1 pp_notnull
++   Filter: (a = 1)
++(2 rows)
++
++-- run-time pruning
++prepare pp_notnull_q (int) as select * from pp_notnull where coalesce(a, b) = $1;
++set plan_cache_mode = force_generic_plan;
++explain (costs off) execute pp_notnull_q (1);
++                 QUERY PLAN                 
++--------------------------------------------
++ Append
++   Subplans Removed: 1
++   ->  Seq Scan on pp_notnull1 pp_notnull_1
++         Filter: (a = $1)
++(4 rows)
++
++execute pp_notnull_q (1);
++ a | b 
++---+---
++ 1 |  
++(1 row)
++
++reset plan_cache_mode;
++deallocate pp_notnull_q;
++drop table pp_notnull;
++create table pp_notnull (a int not null, b int)
++  partition by list ((case when a is null then b else a end));
++create table pp_notnull1 partition of pp_notnull for values in (1);
++create table pp_notnull2 partition of pp_notnull for values in (2);
++explain (costs off) select * from pp_notnull
++  where (case when a is null then b else a end) = 1;
++             QUERY PLAN             
++------------------------------------
++ Seq Scan on pp_notnull1 pp_notnull
++   Filter: (a = 1)
++(2 rows)
++
++drop table pp_notnull;
++-- the qual contradicts pp_notnull1's partition constraint
++create table pp_notnull (a int not null, b int) partition by range (coalesce(a, 0));
++create table pp_notnull1 partition of pp_notnull for values from (0) to (10)
++  partition by range (b);
++create table pp_notnull1_1 partition of pp_notnull1 for values from (0) to (100);
++create table pp_notnull1_def partition of pp_notnull1 default;
++create table pp_notnull2 partition of pp_notnull for values from (10) to (20);
++explain (costs off) select * from pp_notnull1 where coalesce(a, 0) = 15;
++           QUERY PLAN            
++---------------------------------
++ Result
++   Replaces: Scan on pp_notnull1
++   One-Time Filter: false
++(3 rows)
++
++drop table pp_notnull;
+diff --git a/src/test/regress/sql/partition_prune.sql b/src/test/regress/sql/partition_prune.sql
+index d6e096dc565..ae9feebf15d 100644
+--- a/src/test/regress/sql/partition_prune.sql
++++ b/src/test/regress/sql/partition_prune.sql
+@@ -1611,3 +1611,40 @@ select * from (select a, b from phv_boolpart) t
+   group by grouping sets (a, b);
+ 
+ drop table phv_boolpart;
++
++--
++-- Partition key expressions and partition constraints must be
++-- const-simplified the same way as quals, so that NullTests on NOT NULL
++-- columns are reduced on both sides
++--
++create table pp_notnull (a int not null, b int) partition by list (coalesce(a, b));
++create table pp_notnull1 partition of pp_notnull for values in (1);
++create table pp_notnull2 partition of pp_notnull for values in (2);
++insert into pp_notnull values (1, null), (2, null);
++explain (costs off) select * from pp_notnull where coalesce(a, b) = 1;
++-- run-time pruning
++prepare pp_notnull_q (int) as select * from pp_notnull where coalesce(a, b) = $1;
++set plan_cache_mode = force_generic_plan;
++explain (costs off) execute pp_notnull_q (1);
++execute pp_notnull_q (1);
++reset plan_cache_mode;
++deallocate pp_notnull_q;
++drop table pp_notnull;
++
++create table pp_notnull (a int not null, b int)
++  partition by list ((case when a is null then b else a end));
++create table pp_notnull1 partition of pp_notnull for values in (1);
++create table pp_notnull2 partition of pp_notnull for values in (2);
++explain (costs off) select * from pp_notnull
++  where (case when a is null then b else a end) = 1;
++drop table pp_notnull;
++
++-- the qual contradicts pp_notnull1's partition constraint
++create table pp_notnull (a int not null, b int) partition by range (coalesce(a, 0));
++create table pp_notnull1 partition of pp_notnull for values from (0) to (10)
++  partition by range (b);
++create table pp_notnull1_1 partition of pp_notnull1 for values from (0) to (100);
++create table pp_notnull1_def partition of pp_notnull1 default;
++create table pp_notnull2 partition of pp_notnull for values from (10) to (20);
++explain (costs off) select * from pp_notnull1 where coalesce(a, 0) = 15;
++drop table pp_notnull;
+
+base-commit: 4b1abd678223ab22e1fe245547bf5b4a91db56ee
+-- 
+2.50.1 (Apple Git-155)
+

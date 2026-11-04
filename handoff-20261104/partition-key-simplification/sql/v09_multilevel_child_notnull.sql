@@ -1,0 +1,13 @@
+create table pt (a int, b int) partition by list (coalesce(a, b));
+create table pt1 (a int not null, b int) partition by range (coalesce(a, b));
+create table pt1_lo partition of pt1 for values from (0) to (1);
+create table pt1_hi partition of pt1 for values from (1) to (100);
+alter table pt attach partition pt1 for values in (1);
+create table pt2 partition of pt for values in (2);
+insert into pt values (1, null), (null, 2), (2, 7);
+explain (costs off) select * from pt where coalesce(a, b) = 1;
+select * from pt where coalesce(a, b) = 1;
+explain (costs off) select * from pt where coalesce(a, b) = 2;
+select * from pt where coalesce(a, b) = 2;
+explain (costs off) select * from pt where a = 1;
+select * from pt where a = 1;

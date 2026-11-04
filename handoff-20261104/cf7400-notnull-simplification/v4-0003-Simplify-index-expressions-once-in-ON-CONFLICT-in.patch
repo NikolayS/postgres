@@ -1,0 +1,157 @@
+From e8b6b331bf080f9eb35b4fda09d73d30e3cde9ce Mon Sep 17 00:00:00 2001
+From: Nik Samokhvalov <nik@postgres.ai>
+Date: Tue, 3 Nov 2026 19:06:33 -0800
+Subject: [PATCH v4 3/4] Simplify index expressions once in ON CONFLICT
+ inference
+
+infer_arbiter_indexes() took the index expressions from the relcache,
+where they were already simplified with eval_const_expressions() and
+no PlannerInfo, and simplified them again with root.  The inference
+expressions are simplified only once, with root.  Simplifying twice
+does not always give the same tree as simplifying once: the Var IS
+[NOT] NULL fold added by e2debb64380 needs root, so in the relcache
+pass an immutable SQL function whose argument depends on that fold is
+inlined, while in the one-pass simplification the argument folds first
+and the function is pre-evaluated to a constant.  The two trees then
+differ, for instance in the typmod of the resulting constant, and a
+matching arbiter index is not found.
+
+To fix, start from the expressions stored in pg_index and simplify
+them once with root, exactly as the inference expressions are.  This
+keeps the exact equal() comparison, so an index whose expression is
+not the same as the inference expression still cannot be inferred.
+The cost is one stringToNode() and one eval_const_expressions() per
+candidate unique index with expressions, only when an inference
+specification is given.
+
+The index predicate is still taken from the relcache.  It is matched
+with predicate_implied_by(), which tolerates such differences in
+constants.
+
+Reported-by: Manu <manuelreyesbravo@gmail.com>
+Discussion: https://postgr.es/m/179220962657.1343374.11137544623255312817@gmail.com
+Discussion: https://postgr.es/m/CAGRkXqR7VXacmRP41UBaM5u4aseeCH5ECVmQgn_YS=L7=xdhTw@mail.gmail.com
+Backpatch-through: 19
+---
+ src/backend/optimizer/util/plancat.c          | 29 +++++++++++++++++--
+ src/test/regress/expected/insert_conflict.out | 29 +++++++++++++++++++
+ src/test/regress/sql/insert_conflict.sql      | 15 ++++++++++
+ 3 files changed, 70 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/optimizer/util/plancat.c b/src/backend/optimizer/util/plancat.c
+index 84b9c188fb5..3094c85bea4 100644
+--- a/src/backend/optimizer/util/plancat.c
++++ b/src/backend/optimizer/util/plancat.c
+@@ -1048,10 +1048,25 @@ infer_arbiter_indexes(PlannerInfo *root)
+ 		if (idxForm->indisexclusion)
+ 			continue;
+ 
+-		/* Simplify the index expressions the same way arbiterElems were */
+-		idxExprs = RelationGetIndexExpressions(idxRel);
+-		if (idxExprs)
++		/*
++		 * Simplify the index expressions the same way arbiterElems were.  We
++		 * must start from the catalog form, not from the relcache copy: that
++		 * one was already simplified without a PlannerInfo, and simplifying
++		 * it again does not always give the same tree as simplifying the
++		 * original once with root, so a matching expression could be missed.
++		 * The relcache keeps only the simplified form, so read pg_index here
++		 * the same way RelationGetIndexExpressions() does.
++		 */
++		idxExprs = NIL;
++		if (!heap_attisnull(idxRel->rd_indextuple, Anum_pg_index_indexprs, NULL))
+ 		{
++			Datum		exprsDatum;
++
++			exprsDatum = SysCacheGetAttrNotNull(INDEXRELID,
++												idxRel->rd_indextuple,
++												Anum_pg_index_indexprs);
++			idxExprs = (List *) stringToNode(TextDatumGetCString(exprsDatum));
++
+ 			if (varno != 1)
+ 				ChangeVarNodes((Node *) idxExprs, 1, varno, 0);
+ 
+@@ -1148,6 +1163,14 @@ infer_arbiter_indexes(PlannerInfo *root)
+ 		if (list_difference(idxNonVarExprs, inferElems) != NIL)
+ 			continue;
+ 
++		/*
++		 * Unlike the index expressions above, the predicate is taken from the
++		 * relcache and so is simplified twice.  That is good enough, because
++		 * predicate_implied_by() does not need the trees to be equal(): it
++		 * can prove the implication by comparing constants with the
++		 * operators, so a Const that differs only in typmod does not prevent
++		 * a match.
++		 */
+ 		predExprs = RelationGetIndexPredicate(idxRel);
+ 		if (predExprs)
+ 		{
+diff --git a/src/test/regress/expected/insert_conflict.out b/src/test/regress/expected/insert_conflict.out
+index a88fea802bc..0abe702aa15 100644
+--- a/src/test/regress/expected/insert_conflict.out
++++ b/src/test/regress/expected/insert_conflict.out
+@@ -269,6 +269,35 @@ explain (costs off) insert into insertconflict_typmod_num values(1) on conflict
+ drop table insertconflict_typmod_num;
+ drop function insertconflict_typmod_f(numeric);
+ drop function insertconflict_typmod_sf(numeric);
++-- Index expressions that need the NOT NULL fold before an inlined function
++-- can be pre-evaluated
++create function insertconflict_inline_f(varchar) returns varchar language sql immutable as 'select $1';
++create table insertconflict_inline (a varchar(20) not null, b varchar(20));
++create unique index inline_null_key on insertconflict_inline((insertconflict_inline_f((case when a is null then b end)::varchar(3))));
++create unique index inline_const_key on insertconflict_inline(b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(3))));
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict ((insertconflict_inline_f((case when a is null then b end)::varchar(3)))) do nothing;
++                 QUERY PLAN                  
++---------------------------------------------
++ Insert on insertconflict_inline
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: inline_null_key
++   ->  Result
++(4 rows)
++
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict (b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(3)))) do nothing;
++                  QUERY PLAN                  
++----------------------------------------------
++ Insert on insertconflict_inline
++   Conflict Resolution: NOTHING
++   Conflict Arbiter Indexes: inline_const_key
++   ->  Result
++(4 rows)
++
++-- fails, the expression has another value:
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict (b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(4)))) do nothing;
++ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
++drop table insertconflict_inline;
++drop function insertconflict_inline_f(varchar);
+ --
+ -- Single key tests
+ --
+diff --git a/src/test/regress/sql/insert_conflict.sql b/src/test/regress/sql/insert_conflict.sql
+index 50a716fb9b2..d3e004a2c10 100644
+--- a/src/test/regress/sql/insert_conflict.sql
++++ b/src/test/regress/sql/insert_conflict.sql
+@@ -121,6 +121,21 @@ drop table insertconflict_typmod_num;
+ drop function insertconflict_typmod_f(numeric);
+ drop function insertconflict_typmod_sf(numeric);
+ 
++-- Index expressions that need the NOT NULL fold before an inlined function
++-- can be pre-evaluated
++create function insertconflict_inline_f(varchar) returns varchar language sql immutable as 'select $1';
++create table insertconflict_inline (a varchar(20) not null, b varchar(20));
++create unique index inline_null_key on insertconflict_inline((insertconflict_inline_f((case when a is null then b end)::varchar(3))));
++create unique index inline_const_key on insertconflict_inline(b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(3))));
++
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict ((insertconflict_inline_f((case when a is null then b end)::varchar(3)))) do nothing;
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict (b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(3)))) do nothing;
++-- fails, the expression has another value:
++explain (costs off) insert into insertconflict_inline values('x', 'y') on conflict (b, (insertconflict_inline_f((case when a is null then b else 'abcdef' end)::varchar(4)))) do nothing;
++
++drop table insertconflict_inline;
++drop function insertconflict_inline_f(varchar);
++
+ --
+ -- Single key tests
+ --
+-- 
+2.50.1 (Apple Git-155)
+

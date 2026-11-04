@@ -1,0 +1,120 @@
+From 3efb91201fce65c51030db1871a816bf42af198d Mon Sep 17 00:00:00 2001
+From: Seongjun Shin <shinsj4653@gmail.com>
+Date: Fri, 29 May 2026 14:52:11 +0900
+Subject: [PATCH v9 2/2] Add wait events for Windows-specific logging output
+ paths
+
+On Windows, log output goes through paths other than write(2) that can
+also block: write_console() emits to the console with WriteConsoleW(),
+and write_eventlog() writes to the Windows event log with
+ReportEventW()/ReportEventA().  Like the write(2) path, these calls can
+block and previously left wait_event IS NULL in pg_stat_activity.
+
+Wrap WriteConsoleW() with the StderrWrite event introduced in the
+previous patch, and add a new EventlogWrite event for the event log
+path:
+
+  IO / EventlogWrite - ReportEventW()/ReportEventA() inside
+                       write_eventlog().
+
+This instruments the Windows logging paths consistently with the
+write(2) and syslog(3) paths, using the same nested start/end helpers
+so that a wait event published by the caller survives the write.  It
+is split out from the previous patch since it is platform-specific.
+
+EventlogWrite was confirmed at runtime on Windows through a CI job
+rigged to fail if the event is never sampled.  WriteConsoleW cannot be
+exercised without a real console, so it is covered by build and review
+only.
+
+Author: Seongjun Shin <shinsj4653@gmail.com>
+Reviewed-by: Kirk Wolak <wolakk@gmail.com>
+Reviewed-by: Kyotaro Horiguchi <horikyota.ntt@gmail.com>
+Reviewed-by: Michael Paquier <michael@paquier.xyz>
+Reviewed-by: Henson Choi <assam258@gmail.com>
+Reviewed-by: Nikolay Samokhvalov <nik@postgres.ai>
+Tested-by: Nikolay Samokhvalov <nik@postgres.ai>
+Discussion: https://postgr.es/m/CACdN0M78U+GvpqA7oey-GA7fFSYM636aDp6H9FVvCztv9zXxSA@mail.gmail.com
+---
+ src/backend/utils/activity/wait_event_names.txt |  1 +
+ src/backend/utils/error/elog.c                  | 16 +++++++++++++++-
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/src/backend/utils/activity/wait_event_names.txt b/src/backend/utils/activity/wait_event_names.txt
+index 4c64bceb47b..adb9a6cbc55 100644
+--- a/src/backend/utils/activity/wait_event_names.txt
++++ b/src/backend/utils/activity/wait_event_names.txt
+@@ -229,6 +229,7 @@ DATA_FILE_TRUNCATE	"Waiting for a relation data file to be truncated."
+ DATA_FILE_WRITE	"Waiting for a write to a relation data file."
+ DSM_ALLOCATE	"Waiting for a dynamic shared memory segment to be allocated."
+ DSM_FILL_ZERO_WRITE	"Waiting to fill a dynamic shared memory backing file with zeroes."
++EVENTLOG_WRITE	"Waiting for a write to the Windows event log."
+ LOCK_FILE_ADDTODATADIR_READ	"Waiting for a read while adding a line to the data directory lock file."
+ LOCK_FILE_ADDTODATADIR_SYNC	"Waiting for data to reach durable storage while adding a line to the data directory lock file."
+ LOCK_FILE_ADDTODATADIR_WRITE	"Waiting for a write while adding a line to the data directory lock file."
+diff --git a/src/backend/utils/error/elog.c b/src/backend/utils/error/elog.c
+index 0fb489ed563..a9bda78f0ed 100644
+--- a/src/backend/utils/error/elog.c
++++ b/src/backend/utils/error/elog.c
+@@ -2956,6 +2956,7 @@ write_eventlog(int level, const char *line, int len)
+ {
+ 	int			eventlevel = EVENTLOG_ERROR_TYPE;
+ 	static HANDLE evtHandle = INVALID_HANDLE_VALUE;
++	uint32		outer_wait_event_info;
+ 
+ 	if (evtHandle == INVALID_HANDLE_VALUE)
+ 	{
+@@ -3018,6 +3019,9 @@ write_eventlog(int level, const char *line, int len)
+ 		{
+ 			const WCHAR *utf16_const = utf16;
+ 
++			/* See write_console() for why the nested variants are used. */
++			outer_wait_event_info =
++				pgstat_report_wait_start_nested(WAIT_EVENT_EVENTLOG_WRITE);
+ 			ReportEventW(evtHandle,
+ 						 eventlevel,
+ 						 0,
+@@ -3027,12 +3031,15 @@ write_eventlog(int level, const char *line, int len)
+ 						 0,
+ 						 &utf16_const,
+ 						 NULL);
++			pgstat_report_wait_end_nested(outer_wait_event_info);
+ 			/* XXX Try ReportEventA() when ReportEventW() fails? */
+ 
+ 			pfree(utf16);
+ 			return;
+ 		}
+ 	}
++	outer_wait_event_info =
++		pgstat_report_wait_start_nested(WAIT_EVENT_EVENTLOG_WRITE);
+ 	ReportEventA(evtHandle,
+ 				 eventlevel,
+ 				 0,
+@@ -3042,6 +3049,7 @@ write_eventlog(int level, const char *line, int len)
+ 				 0,
+ 				 &line,
+ 				 NULL);
++	pgstat_report_wait_end_nested(outer_wait_event_info);
+ }
+ #endif							/* WIN32 */
+ 
+@@ -3082,9 +3090,15 @@ write_console(const char *line, int len)
+ 		{
+ 			HANDLE		stdHandle;
+ 			DWORD		written;
++			BOOL		ok;
+ 
+ 			stdHandle = GetStdHandle(STD_ERROR_HANDLE);
+-			if (WriteConsoleW(stdHandle, utf16, utf16len, &written, NULL))
++			/* see the comment at the write() below */
++			outer_wait_event_info =
++				pgstat_report_wait_start_nested(WAIT_EVENT_STDERR_WRITE);
++			ok = WriteConsoleW(stdHandle, utf16, utf16len, &written, NULL);
++			pgstat_report_wait_end_nested(outer_wait_event_info);
++			if (ok)
+ 			{
+ 				pfree(utf16);
+ 				return;
+-- 
+2.50.1 (Apple Git-155)
+

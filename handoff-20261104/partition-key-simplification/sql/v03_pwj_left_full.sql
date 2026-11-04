@@ -1,0 +1,10 @@
+set enable_partitionwise_join = on;
+create table t1 (a int not null, b int) partition by list (coalesce(a, b));
+create table t1_1 partition of t1 for values in (1); create table t1_2 partition of t1 for values in (2);
+create table t2 (a int not null, b int) partition by list (coalesce(a, b));
+create table t2_1 partition of t2 for values in (1); create table t2_2 partition of t2 for values in (2);
+insert into t1 values (1,null),(2,5); insert into t2 values (2,null); analyze t1, t2;
+explain (costs off) select * from t1 left join t2 on coalesce(t1.a,t1.b) = coalesce(t2.a,t2.b) where coalesce(t2.a, t2.b) is null;
+select * from t1 left join t2 on coalesce(t1.a,t1.b) = coalesce(t2.a,t2.b) where coalesce(t2.a, t2.b) is null order by 1,2;
+explain (costs off) select * from t1 full join t2 on coalesce(t1.a,t1.b) = coalesce(t2.a,t2.b) where coalesce(t1.a, t2.a) = 1;
+select * from t1 full join t2 on coalesce(t1.a,t1.b) = coalesce(t2.a,t2.b) where coalesce(t1.a, t2.a) = 1 order by 1,2,3,4;

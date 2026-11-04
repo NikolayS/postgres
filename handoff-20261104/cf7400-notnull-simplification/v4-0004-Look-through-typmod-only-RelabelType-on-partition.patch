@@ -1,0 +1,398 @@
+From c19afe491e5b88d4d16108412e8f267ed6f9131d Mon Sep 17 00:00:00 2001
+From: Nik Samokhvalov <nik@postgres.ai>
+Date: Tue, 3 Nov 2026 19:57:33 -0800
+Subject: [PATCH v4 4/4] Look through typmod-only RelabelType on partition keys
+
+The commit "Preserve typmod when reducing CASE, COALESCE, and NULLIF"
+made eval_const_expressions() put a RelabelType on a rebuilt CASE,
+COALESCE or NULLIF whose derived typmod differs from the original one,
+for instance when an inlined SQL function is removed from its
+arguments.  A partition key over such an expression now carries that
+RelabelType in rel->partexprs, and so does the matching expression in
+the query.  But three places strip RelabelType from the query
+expression only, and then compare it with equal() to the key:
+
+- gen_partprune_steps_internal() via match_clause_to_partition_key(),
+  so plan-time and run-time partition pruning were lost;
+- group_by_has_partkey(), so full partitionwise aggregation was lost;
+- match_expr_to_partition_keys(), so partitionwise join was lost when
+  the join clause operands are relabeled, as for varchar keys compared
+  with the text equality operator.
+
+To fix, look through a RelabelType on the partition key too, using a
+new helper strip_typmod_relabel() that removes only RelabelType nodes
+that keep the type and the collation.  Such a node changes neither the
+value nor how it compares.  A RelabelType that changes the type or the
+collation of the key is kept, so these matches do not get wider than
+before: group_by_has_partkey() has no operator family check, and a
+binary-compatible type with different equality semantics must not
+match.
+
+Re-simplifying the partition key with a valid root does not help here:
+the key and the query expression already have the same RelabelType,
+the mismatch comes from stripping it on one side only.
+
+Author: shihao zhong <zhong950419@gmail.com>
+Discussion: https://postgr.es/m/CAGRkXqSQT4CMmOUXDYBoxyMXdU6DqXMQqb-LPyrPTx-kDtJeYQ@mail.gmail.com
+Discussion: https://postgr.es/m/CAGRkXqR7VXacmRP41UBaM5u4aseeCH5ECVmQgn_YS=L7=xdhTw@mail.gmail.com
+Backpatch-through: 19
+---
+ src/backend/nodes/nodeFuncs.c                 | 24 +++++++++
+ src/backend/optimizer/plan/planner.c          |  7 +++
+ src/backend/optimizer/util/relnode.c          | 10 ++--
+ src/backend/partitioning/partprune.c          |  9 ++++
+ src/include/nodes/nodeFuncs.h                 |  1 +
+ .../regress/expected/partition_aggregate.out  | 23 ++++++++
+ src/test/regress/expected/partition_join.out  | 38 ++++++++++++++
+ src/test/regress/expected/partition_prune.out | 52 +++++++++++++++++++
+ src/test/regress/sql/partition_aggregate.sql  | 13 +++++
+ src/test/regress/sql/partition_join.sql       | 19 +++++++
+ src/test/regress/sql/partition_prune.sql      | 27 ++++++++++
+ 11 files changed, 220 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/nodes/nodeFuncs.c b/src/backend/nodes/nodeFuncs.c
+index 9512a6a824a..d7191a98d9d 100644
+--- a/src/backend/nodes/nodeFuncs.c
++++ b/src/backend/nodes/nodeFuncs.c
+@@ -692,6 +692,30 @@ relabel_to_typmod(Node *expr, int32 typmod)
+ 							COERCE_EXPLICIT_CAST, -1, false);
+ }
+ 
++/*
++ * strip_typmod_relabel
++ *		Remove RelabelType nodes that change just the typmod of the expression.
++ *
++ * Such a node does not change the value or how it compares, so code matching
++ * expressions with equal() can look through it.  A RelabelType that changes
++ * the type or the collation is kept.  This doesn't modify or copy the input
++ * expression tree, just returns a pointer to a suitable place within it.
++ */
++Node *
++strip_typmod_relabel(Node *expr)
++{
++	while (expr && IsA(expr, RelabelType))
++	{
++		RelabelType *r = (RelabelType *) expr;
++
++		if (r->resulttype != exprType((Node *) r->arg) ||
++			r->resultcollid != exprCollation((Node *) r->arg))
++			break;
++		expr = (Node *) r->arg;
++	}
++	return expr;
++}
++
+ /*
+  * strip_implicit_coercions: remove implicit coercions at top level of tree
+  *
+diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
+index face5bc2acf..966973bf26c 100644
+--- a/src/backend/optimizer/plan/planner.c
++++ b/src/backend/optimizer/plan/planner.c
+@@ -8583,6 +8583,13 @@ group_by_has_partkey(RelOptInfo *input_rel,
+ 			Expr	   *partexpr = lfirst(lc);
+ 			Oid			partcoll = input_rel->part_scheme->partcollation[cnt];
+ 
++			/*
++			 * The grouping expression is matched without its RelabelType
++			 * below, so look through a typmod-only RelabelType on the
++			 * partition key too.
++			 */
++			partexpr = (Expr *) strip_typmod_relabel((Node *) partexpr);
++
+ 			foreach(lg, groupexprs)
+ 			{
+ 				Expr	   *groupexpr = lfirst(lg);
+diff --git a/src/backend/optimizer/util/relnode.c b/src/backend/optimizer/util/relnode.c
+index aa7d92ac6df..bb4a4cb4093 100644
+--- a/src/backend/optimizer/util/relnode.c
++++ b/src/backend/optimizer/util/relnode.c
+@@ -2603,10 +2603,14 @@ match_expr_to_partition_keys(Expr *expr, RelOptInfo *rel, bool strict_op)
+ 	{
+ 		ListCell   *lc;
+ 
+-		/* We can always match to the non-nullable partition keys. */
++		/*
++		 * We can always match to the non-nullable partition keys.  The
++		 * expression has no RelabelType at this point, so look through a
++		 * typmod-only RelabelType on the partition key too.
++		 */
+ 		foreach(lc, rel->partexprs[cnt])
+ 		{
+-			if (equal(lfirst(lc), expr))
++			if (equal(strip_typmod_relabel(lfirst(lc)), expr))
+ 				return cnt;
+ 		}
+ 
+@@ -2622,7 +2626,7 @@ match_expr_to_partition_keys(Expr *expr, RelOptInfo *rel, bool strict_op)
+ 		 */
+ 		foreach(lc, rel->nullable_partexprs[cnt])
+ 		{
+-			if (equal(lfirst(lc), expr))
++			if (equal(strip_typmod_relabel(lfirst(lc)), expr))
+ 				return cnt;
+ 		}
+ 	}
+diff --git a/src/backend/partitioning/partprune.c b/src/backend/partitioning/partprune.c
+index 41105053c87..6b9689082be 100644
+--- a/src/backend/partitioning/partprune.c
++++ b/src/backend/partitioning/partprune.c
+@@ -1178,6 +1178,15 @@ gen_partprune_steps_internal(GeneratePruningStepsContext *context,
+ 			PartClauseInfo *pc = NULL;
+ 			List	   *clause_steps = NIL;
+ 
++			/*
++			 * match_clause_to_partition_key() strips any RelabelType from the
++			 * clause operands before comparing them to the partition key, so
++			 * look through a typmod-only RelabelType on the key too.  Such a
++			 * node appears when constant folding keeps the typmod of a
++			 * rebuilt CASE, COALESCE or NULLIF.
++			 */
++			partkey = (Expr *) strip_typmod_relabel((Node *) partkey);
++
+ 			switch (match_clause_to_partition_key(context,
+ 												  clause, partkey, i,
+ 												  &clause_is_not_null,
+diff --git a/src/include/nodes/nodeFuncs.h b/src/include/nodes/nodeFuncs.h
+index 696ffdebd4b..40a1874a747 100644
+--- a/src/include/nodes/nodeFuncs.h
++++ b/src/include/nodes/nodeFuncs.h
+@@ -52,6 +52,7 @@ extern Node *applyRelabelType(Node *arg, Oid rtype, int32 rtypmod, Oid rcollid,
+ 							  CoercionForm rformat, int rlocation,
+ 							  bool overwrite_ok);
+ extern Node *relabel_to_typmod(Node *expr, int32 typmod);
++extern Node *strip_typmod_relabel(Node *expr);
+ extern Node *strip_implicit_coercions(Node *node);
+ extern bool expression_returns_set(Node *clause);
+ 
+diff --git a/src/test/regress/expected/partition_aggregate.out b/src/test/regress/expected/partition_aggregate.out
+index 715a6db9f9f..1566ea90b65 100644
+--- a/src/test/regress/expected/partition_aggregate.out
++++ b/src/test/regress/expected/partition_aggregate.out
+@@ -1556,3 +1556,26 @@ SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) <
+  21 | 6000 | 6.0000000000000000 |  1000
+ (6 rows)
+ 
++-- The partition key and the GROUP BY expression can both carry a
++-- typmod-only RelabelType kept by constant folding
++CREATE FUNCTION pagg_relabel_f(numeric) RETURNS numeric
++  LANGUAGE sql IMMUTABLE AS 'SELECT $1';
++CREATE TABLE pagg_relabel (a numeric(10), b numeric(10))
++  PARTITION BY LIST ((COALESCE(pagg_relabel_f(a), b)));
++CREATE TABLE pagg_relabel_p1 PARTITION OF pagg_relabel FOR VALUES IN (1);
++CREATE TABLE pagg_relabel_p2 PARTITION OF pagg_relabel FOR VALUES IN (2);
++EXPLAIN (COSTS OFF)
++SELECT COALESCE(pagg_relabel_f(a), b), count(*) FROM pagg_relabel GROUP BY 1;
++                                 QUERY PLAN                                 
++----------------------------------------------------------------------------
++ Append
++   ->  HashAggregate
++         Group Key: (COALESCE(pagg_relabel.a, pagg_relabel.b))::numeric
++         ->  Seq Scan on pagg_relabel_p1 pagg_relabel
++   ->  HashAggregate
++         Group Key: (COALESCE(pagg_relabel_1.a, pagg_relabel_1.b))::numeric
++         ->  Seq Scan on pagg_relabel_p2 pagg_relabel_1
++(7 rows)
++
++DROP TABLE pagg_relabel;
++DROP FUNCTION pagg_relabel_f(numeric);
+diff --git a/src/test/regress/expected/partition_join.out b/src/test/regress/expected/partition_join.out
+index e53c0c1a4d8..89eb304319c 100644
+--- a/src/test/regress/expected/partition_join.out
++++ b/src/test/regress/expected/partition_join.out
+@@ -5645,4 +5645,42 @@ DROP INDEX pht1_c_idx CASCADE;
+ -- cleanup
+ DROP TABLE fract_t;
+ RESET max_parallel_workers_per_gather;
++-- The partition keys can carry a typmod-only RelabelType kept by constant
++-- folding, while the join clause operands are relabeled to text
++CREATE FUNCTION prt_relabel_f(varchar) RETURNS varchar
++  LANGUAGE sql IMMUTABLE AS 'SELECT $1';
++CREATE TABLE prt_relabel1 (a varchar(3), b varchar(3))
++  PARTITION BY LIST ((COALESCE(prt_relabel_f(a), b)));
++CREATE TABLE prt_relabel1_p1 PARTITION OF prt_relabel1 FOR VALUES IN ('a');
++CREATE TABLE prt_relabel1_p2 PARTITION OF prt_relabel1 FOR VALUES IN ('b');
++CREATE TABLE prt_relabel2 (a varchar(3), b varchar(3))
++  PARTITION BY LIST ((COALESCE(prt_relabel_f(a), b)));
++CREATE TABLE prt_relabel2_p1 PARTITION OF prt_relabel2 FOR VALUES IN ('a');
++CREATE TABLE prt_relabel2_p2 PARTITION OF prt_relabel2 FOR VALUES IN ('b');
++EXPLAIN (COSTS OFF)
++SELECT * FROM prt_relabel1 t1 JOIN prt_relabel2 t2
++  ON COALESCE(prt_relabel_f(t1.a), t1.b) = COALESCE(prt_relabel_f(t2.a), t2.b);
++                                          QUERY PLAN                                           
++-----------------------------------------------------------------------------------------------
++ Append
++   ->  Merge Join
++         Merge Cond: (((COALESCE(t1_1.a, t1_1.b))::text) = ((COALESCE(t2_1.a, t2_1.b))::text))
++         ->  Sort
++               Sort Key: ((COALESCE(t1_1.a, t1_1.b))::text)
++               ->  Seq Scan on prt_relabel1_p1 t1_1
++         ->  Sort
++               Sort Key: ((COALESCE(t2_1.a, t2_1.b))::text)
++               ->  Seq Scan on prt_relabel2_p1 t2_1
++   ->  Merge Join
++         Merge Cond: (((COALESCE(t1_2.a, t1_2.b))::text) = ((COALESCE(t2_2.a, t2_2.b))::text))
++         ->  Sort
++               Sort Key: ((COALESCE(t1_2.a, t1_2.b))::text)
++               ->  Seq Scan on prt_relabel1_p2 t1_2
++         ->  Sort
++               Sort Key: ((COALESCE(t2_2.a, t2_2.b))::text)
++               ->  Seq Scan on prt_relabel2_p2 t2_2
++(17 rows)
++
++DROP TABLE prt_relabel1, prt_relabel2;
++DROP FUNCTION prt_relabel_f(varchar);
+ RESET enable_partitionwise_join;
+diff --git a/src/test/regress/expected/partition_prune.out b/src/test/regress/expected/partition_prune.out
+index 3506ecec477..4345d64aa43 100644
+--- a/src/test/regress/expected/partition_prune.out
++++ b/src/test/regress/expected/partition_prune.out
+@@ -5014,6 +5014,58 @@ select min(a) over (partition by a order by a) from part_abc where a >= stable_o
+ drop view part_abc_view;
+ drop table part_abc;
+ --
++-- Constant folding keeps the typmod of a rebuilt CASE, COALESCE or NULLIF
++-- with a typmod-only RelabelType, both in the partition key and in quals
++--
++create function relabel_part_f(numeric) returns numeric
++  language sql immutable as 'select $1';
++create table relabel_part (a numeric(10), b numeric(10))
++  partition by list ((coalesce(relabel_part_f(a), b)));
++create table relabel_part1 partition of relabel_part for values in (1);
++create table relabel_part2 partition of relabel_part for values in (2);
++create table relabel_part_null partition of relabel_part for values in (null);
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) = 1;
++                      QUERY PLAN                      
++------------------------------------------------------
++ Seq Scan on relabel_part1 relabel_part
++   Filter: ((COALESCE(a, b))::numeric = '1'::numeric)
++(2 rows)
++
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) in (2, 3);
++                            QUERY PLAN                            
++------------------------------------------------------------------
++ Seq Scan on relabel_part2 relabel_part
++   Filter: ((COALESCE(a, b))::numeric = ANY ('{2,3}'::numeric[]))
++(2 rows)
++
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) is null;
++                  QUERY PLAN                   
++-----------------------------------------------
++ Seq Scan on relabel_part_null relabel_part
++   Filter: ((COALESCE(a, b))::numeric IS NULL)
++(2 rows)
++
++-- run-time pruning
++prepare relabel_part_q (numeric) as
++  select * from relabel_part where coalesce(relabel_part_f(a), b) = $1;
++set plan_cache_mode = force_generic_plan;
++explain (costs off) execute relabel_part_q (1);
++                    QUERY PLAN                    
++--------------------------------------------------
++ Append
++   Subplans Removed: 2
++   ->  Seq Scan on relabel_part1 relabel_part_1
++         Filter: ((COALESCE(a, b))::numeric = $1)
++(4 rows)
++
++reset plan_cache_mode;
++deallocate relabel_part_q;
++drop table relabel_part;
++drop function relabel_part_f(numeric);
++--
+ -- Check that operands wrapped in PlaceHolderVars are matched to partition
+ -- keys, allowing partition pruning to occur.  PlaceHolderVars can be
+ -- introduced when a subquery's output is used with grouping sets.
+diff --git a/src/test/regress/sql/partition_aggregate.sql b/src/test/regress/sql/partition_aggregate.sql
+index 38d241964b2..e9a1348c7f4 100644
+--- a/src/test/regress/sql/partition_aggregate.sql
++++ b/src/test/regress/sql/partition_aggregate.sql
+@@ -341,3 +341,16 @@ RESET parallel_setup_cost;
+ EXPLAIN (COSTS OFF)
+ SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3;
+ SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3;
++
++-- The partition key and the GROUP BY expression can both carry a
++-- typmod-only RelabelType kept by constant folding
++CREATE FUNCTION pagg_relabel_f(numeric) RETURNS numeric
++  LANGUAGE sql IMMUTABLE AS 'SELECT $1';
++CREATE TABLE pagg_relabel (a numeric(10), b numeric(10))
++  PARTITION BY LIST ((COALESCE(pagg_relabel_f(a), b)));
++CREATE TABLE pagg_relabel_p1 PARTITION OF pagg_relabel FOR VALUES IN (1);
++CREATE TABLE pagg_relabel_p2 PARTITION OF pagg_relabel FOR VALUES IN (2);
++EXPLAIN (COSTS OFF)
++SELECT COALESCE(pagg_relabel_f(a), b), count(*) FROM pagg_relabel GROUP BY 1;
++DROP TABLE pagg_relabel;
++DROP FUNCTION pagg_relabel_f(numeric);
+diff --git a/src/test/regress/sql/partition_join.sql b/src/test/regress/sql/partition_join.sql
+index e7f0cf23723..b626164a0b6 100644
+--- a/src/test/regress/sql/partition_join.sql
++++ b/src/test/regress/sql/partition_join.sql
+@@ -1341,4 +1341,23 @@ DROP INDEX pht1_c_idx CASCADE;
+ DROP TABLE fract_t;
+ 
+ RESET max_parallel_workers_per_gather;
++
++-- The partition keys can carry a typmod-only RelabelType kept by constant
++-- folding, while the join clause operands are relabeled to text
++CREATE FUNCTION prt_relabel_f(varchar) RETURNS varchar
++  LANGUAGE sql IMMUTABLE AS 'SELECT $1';
++CREATE TABLE prt_relabel1 (a varchar(3), b varchar(3))
++  PARTITION BY LIST ((COALESCE(prt_relabel_f(a), b)));
++CREATE TABLE prt_relabel1_p1 PARTITION OF prt_relabel1 FOR VALUES IN ('a');
++CREATE TABLE prt_relabel1_p2 PARTITION OF prt_relabel1 FOR VALUES IN ('b');
++CREATE TABLE prt_relabel2 (a varchar(3), b varchar(3))
++  PARTITION BY LIST ((COALESCE(prt_relabel_f(a), b)));
++CREATE TABLE prt_relabel2_p1 PARTITION OF prt_relabel2 FOR VALUES IN ('a');
++CREATE TABLE prt_relabel2_p2 PARTITION OF prt_relabel2 FOR VALUES IN ('b');
++EXPLAIN (COSTS OFF)
++SELECT * FROM prt_relabel1 t1 JOIN prt_relabel2 t2
++  ON COALESCE(prt_relabel_f(t1.a), t1.b) = COALESCE(prt_relabel_f(t2.a), t2.b);
++DROP TABLE prt_relabel1, prt_relabel2;
++DROP FUNCTION prt_relabel_f(varchar);
++
+ RESET enable_partitionwise_join;
+diff --git a/src/test/regress/sql/partition_prune.sql b/src/test/regress/sql/partition_prune.sql
+index d6e096dc565..f58fff132da 100644
+--- a/src/test/regress/sql/partition_prune.sql
++++ b/src/test/regress/sql/partition_prune.sql
+@@ -1541,6 +1541,33 @@ select min(a) over (partition by a order by a) from part_abc where a >= stable_o
+ drop view part_abc_view;
+ drop table part_abc;
+ 
++--
++-- Constant folding keeps the typmod of a rebuilt CASE, COALESCE or NULLIF
++-- with a typmod-only RelabelType, both in the partition key and in quals
++--
++create function relabel_part_f(numeric) returns numeric
++  language sql immutable as 'select $1';
++create table relabel_part (a numeric(10), b numeric(10))
++  partition by list ((coalesce(relabel_part_f(a), b)));
++create table relabel_part1 partition of relabel_part for values in (1);
++create table relabel_part2 partition of relabel_part for values in (2);
++create table relabel_part_null partition of relabel_part for values in (null);
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) = 1;
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) in (2, 3);
++explain (costs off)
++select * from relabel_part where coalesce(relabel_part_f(a), b) is null;
++-- run-time pruning
++prepare relabel_part_q (numeric) as
++  select * from relabel_part where coalesce(relabel_part_f(a), b) = $1;
++set plan_cache_mode = force_generic_plan;
++explain (costs off) execute relabel_part_q (1);
++reset plan_cache_mode;
++deallocate relabel_part_q;
++drop table relabel_part;
++drop function relabel_part_f(numeric);
++
+ --
+ -- Check that operands wrapped in PlaceHolderVars are matched to partition
+ -- keys, allowing partition pruning to occur.  PlaceHolderVars can be
+-- 
+2.50.1 (Apple Git-155)
+
