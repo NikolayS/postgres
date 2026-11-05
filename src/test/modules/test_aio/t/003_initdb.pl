@@ -55,7 +55,7 @@ sub test_create_node
 	# using (and later verifying) the setting from initdb provides some
 	# verification of having used the io_method during initdb, it's probably
 	# not worth the complication of only appending if the variable is set in
-	# in TEMP_CONFIG.
+	# TEMP_CONFIG.
 	$node->append_conf(
 		'postgresql.conf', qq(
 io_method=$io_method
