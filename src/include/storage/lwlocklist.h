@@ -57,7 +57,7 @@ PG_LWLOCK(22, Autovacuum)
 PG_LWLOCK(23, AutovacuumSchedule)
 PG_LWLOCK(24, SyncScan)
 PG_LWLOCK(25, RelationMapping)
-/* 26 was NotifySLRULock */
+PG_LWLOCK(26, NotifyQueueInsert)
 PG_LWLOCK(27, NotifyQueue)
 PG_LWLOCK(28, SerializableXactHash)
 PG_LWLOCK(29, SerializableFinishedList)
