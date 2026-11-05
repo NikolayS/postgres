@@ -1040,7 +1040,7 @@ SELECT websearch_to_tsquery('english', 'signal -"segmentation fault"');
 SELECT websearch_to_tsquery('english', '""" )( dummy \\ query &lt;-&gt;');
  websearch_to_tsquery
 ----------------------
- 'dummi' &amp; 'queri'
+ 'dummi' &lt;-&gt; 'queri'
 (1 row)
 </screen>
     </para>
@@ -1699,7 +1699,7 @@ SELECT tsquery_phrase(to_tsquery('fat'), to_tsquery('cat'), 10);
 
 <screen>
 SELECT numnode(plainto_tsquery('the any'));
-NOTICE:  query contains only stopword(s) or doesn't contain lexeme(s), ignored
+NOTICE:  text-search query contains only stop words or doesn't contain lexemes, ignored
  numnode
 ---------
        0

@@ -619,7 +619,7 @@
        </para>
        <para>
         <literal>'{[5,10)}'::nummultirange + '{[15,20)}'::nummultirange</literal>
-        <returnvalue>{[5,10), [15,20)}</returnvalue>
+        <returnvalue>{[5,10),[15,20)}</returnvalue>
        </para></entry>
       </row>
 
@@ -647,7 +647,7 @@
        </para>
        <para>
         <literal>'{[5,20)}'::int8multirange - '{[10,15)}'::int8multirange</literal>
-        <returnvalue>{[5,10), [15,20)}</returnvalue>
+        <returnvalue>{[5,10),[15,20)}</returnvalue>
        </para></entry>
       </row>
      </tbody>
@@ -1080,7 +1080,7 @@
        </para>
        <para>
         <literal>multirange_minus_multi('{[0,10)}'::int4multirange, '{[3,4)}'::int4multirange)</literal>
-        <returnvalue>{[0,3), [4,10)}</returnvalue>
+        <returnvalue>{[0,3),[4,10)}</returnvalue>
        </para></entry>
       </row>
      </tbody>

@@ -95,7 +95,7 @@ usage(void)
 			 "                         creating a replication slot\n"));
 	printf(_("  -E, --endpos=LSN       exit after receiving the specified LSN\n"));
 	printf(_("  -f, --file=FILE        receive log into this file, - for stdout\n"));
-	printf(_("  -F  --fsync-interval=SECS\n"
+	printf(_("  -F, --fsync-interval=SECS\n"
 			 "                         time between fsyncs to the output file (default: %d)\n"), (fsync_interval / 1000));
 	printf(_("      --if-not-exists    do not error if slot already exists when creating a slot\n"));
 	printf(_("  -I, --startpos=LSN     where in an existing slot should the streaming start\n"));
