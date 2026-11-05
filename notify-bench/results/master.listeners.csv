@@ -1,0 +1,8 @@
+label,workload,listeners_requested,sessions_live,clients,tps
+master,notify_uninterested,0,1,8,24521.495368
+master,notify_uninterested,50,51,8,19186.899494
+master,notify_uninterested,200,201,8,11720.226938
+master,notify_uninterested,500,501,8,8028.999061
+master,notify_interested,50,51,8,37042.417853
+master,notify_interested,200,201,8,37122.099701
+master,notify_interested,500,670,8,386.099710

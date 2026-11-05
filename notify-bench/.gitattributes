@@ -1,0 +1,5 @@
+# Stored diffs legitimately contain "space before tab" and trailing whitespace:
+# every context line of a unified diff is a space followed by the original
+# (tab-indented) source line. Exempt them, as the root .gitattributes does for
+# other files containing special whitespace.
+*.patch		-whitespace

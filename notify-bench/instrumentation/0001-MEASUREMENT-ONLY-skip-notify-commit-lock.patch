@@ -1,0 +1,33 @@
+diff --git a/src/backend/commands/async.c b/src/backend/commands/async.c
+index 2799f989..bbcebf36 100644
+--- a/src/backend/commands/async.c
++++ b/src/backend/commands/async.c
+@@ -1306,8 +1306,26 @@ PreCommit_Notify(void)
+ 		 * (Historical note: before PG 9.0, a similar lock on "database 0" was
+ 		 * used by the flatfiles mechanism.)
+ 		 */
+-		LockSharedObject(DatabaseRelationId, InvalidOid, 0,
+-						 AccessExclusiveLock);
++		/*
++		 * MEASUREMENT HACK -- NOT A PATCH PROPOSAL.
++		 *
++		 * Setting PG_NOTIFY_NOLOCK in the postmaster's environment skips the
++		 * serializing lock entirely.  This BREAKS the commit-order guarantee
++		 * and must never be used for anything but benchmarking: it exists so
++		 * that the identical binary can be measured with and without the
++		 * lock, isolating the lock's cost from every other cost NOTIFY adds
++		 * (XID assignment, SLRU writes, extra WAL, signalling).
++		 */
++		{
++			static int	skip_commit_lock = -1;
++
++			if (skip_commit_lock < 0)
++				skip_commit_lock = (getenv("PG_NOTIFY_NOLOCK") != NULL) ? 1 : 0;
++
++			if (!skip_commit_lock)
++				LockSharedObject(DatabaseRelationId, InvalidOid, 0,
++								 AccessExclusiveLock);
++		}
+ 
+ 		/*
+ 		 * For the direct advancement optimization in SignalBackends(), we
