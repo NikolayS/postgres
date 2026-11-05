@@ -2051,7 +2051,7 @@ ExecInitResultTypeTL(PlanState *planstate)
  */
 
 /* ----------------
- *		ExecInitResultTupleSlotTL
+ *		ExecInitResultSlot
  *
  *		Initialize result tuple slot, using the tuple descriptor previously
  *		computed with ExecInitResultTypeTL().

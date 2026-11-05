@@ -171,7 +171,7 @@ sepgsql_schema_relabel(Oid namespaceId, const char *seclabel)
 }
 
 /*
- * sepgsql_schema_check_perms
+ * check_schema_perms
  *
  * utility routine to check db_schema:{xxx} permissions
  */

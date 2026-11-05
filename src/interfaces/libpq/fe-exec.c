@@ -535,7 +535,7 @@ fail:
 }
 
 /*
- * pqResultAlloc - exported routine to allocate local storage in a PGresult.
+ * PQresultAlloc - exported routine to allocate local storage in a PGresult.
  *
  * We force all such allocations to be maxaligned, since we don't know
  * whether the value might be binary.

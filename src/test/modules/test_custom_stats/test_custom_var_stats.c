@@ -6,7 +6,7 @@
  * Copyright (c) 2025-2026, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		src/test/modules/test_custom_var_stats/test_custom_var_stats.c
+ *		src/test/modules/test_custom_stats/test_custom_var_stats.c
  *
  * ------------------------------------------------------------------------------------
  */

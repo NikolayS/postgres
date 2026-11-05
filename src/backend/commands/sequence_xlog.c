@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * sequence.c
+ * sequence_xlog.c
  *	  RMGR WAL routines for sequences.
  *
  * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
