@@ -24,6 +24,7 @@ PostgreSQL documentation
   <cmdsynopsis>
    <command>pg_verifybackup</command>
    <arg rep="repeat"><replaceable>option</replaceable></arg>
+   <arg choice="plain"><replaceable>backup_directory</replaceable></arg>
   </cmdsynopsis>
  </refsynopsisdiv>
 

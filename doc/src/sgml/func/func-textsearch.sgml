@@ -761,7 +761,7 @@
        </para>
        <para>
         <literal>SELECT ts_rewrite('a &amp; b'::tsquery, 'SELECT t,s FROM aliases')</literal>
-        <returnvalue>'b' &amp; ( 'foo' | 'bar' )</returnvalue>
+        <returnvalue>'b' &amp; ( 'bar' | 'foo' )</returnvalue>
        </para></entry>
       </row>
 

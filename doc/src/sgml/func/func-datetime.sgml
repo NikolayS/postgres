@@ -1866,7 +1866,7 @@ SELECT date_bin('15 minutes', TIMESTAMP '2020-02-11 15:44:17', TIMESTAMP '2001-0
         </para>
         <para>
          <literal>timestamp '2001-02-16 20:38:40' at local</literal>
-         <returnvalue>2001-02-17 03:38:40+00</returnvalue>
+         <returnvalue>2001-02-16 20:38:40+00</returnvalue>
         </para></entry>
        </row>
 
@@ -1898,7 +1898,7 @@ SELECT date_bin('15 minutes', TIMESTAMP '2020-02-11 15:44:17', TIMESTAMP '2001-0
         </para>
         <para>
          <literal>timestamp with time zone '2001-02-16 20:38:40-05' at local</literal>
-         <returnvalue>2001-02-16 18:38:40</returnvalue>
+         <returnvalue>2001-02-17 01:38:40</returnvalue>
         </para></entry>
        </row>
 
@@ -1972,7 +1972,7 @@ SELECT TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40-05' AT LOCAL;
 SELECT TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40-05' AT TIME ZONE '+05';
 <lineannotation>Result: </lineannotation><computeroutput>2001-02-16 20:38:40</computeroutput>
 SELECT TIME WITH TIME ZONE '20:38:40-05' AT LOCAL;
-<lineannotation>Result: </lineannotation><computeroutput>17:38:40</computeroutput>
+<lineannotation>Result: </lineannotation><computeroutput>17:38:40-08</computeroutput>
 </screen>
     The first example adds a time zone to a value that lacks it, and
     displays the value using the current <varname>TimeZone</varname>
