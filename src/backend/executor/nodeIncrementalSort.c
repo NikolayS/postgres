@@ -1123,7 +1123,7 @@ ExecReScanIncrementalSort(IncrementalSortState *node)
  */
 
 /* ----------------------------------------------------------------
- *		ExecSortEstimate
+ *		ExecIncrementalSortEstimate
  *
  *		Estimate space required to propagate sort statistics.
  * ----------------------------------------------------------------
@@ -1144,7 +1144,7 @@ ExecIncrementalSortEstimate(IncrementalSortState *node, ParallelContext *pcxt)
 }
 
 /* ----------------------------------------------------------------
- *		ExecSortInitializeDSM
+ *		ExecIncrementalSortInitializeDSM
  *
  *		Initialize DSM space for sort statistics.
  * ----------------------------------------------------------------
@@ -1169,7 +1169,7 @@ ExecIncrementalSortInitializeDSM(IncrementalSortState *node, ParallelContext *pc
 }
 
 /* ----------------------------------------------------------------
- *		ExecSortInitializeWorker
+ *		ExecIncrementalSortInitializeWorker
  *
  *		Attach worker to DSM space for sort statistics.
  * ----------------------------------------------------------------
@@ -1183,7 +1183,7 @@ ExecIncrementalSortInitializeWorker(IncrementalSortState *node, ParallelWorkerCo
 }
 
 /* ----------------------------------------------------------------
- *		ExecSortRetrieveInstrumentation
+ *		ExecIncrementalSortRetrieveInstrumentation
  *
  *		Transfer sort statistics from DSM to private memory.
  * ----------------------------------------------------------------

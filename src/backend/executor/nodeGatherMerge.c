@@ -62,7 +62,7 @@ static bool gather_merge_readnext(GatherMergeState *gm_state, int reader,
 static void load_tuple_array(GatherMergeState *gm_state, int reader);
 
 /* ----------------------------------------------------------------
- *		ExecInitGather
+ *		ExecInitGatherMerge
  * ----------------------------------------------------------------
  */
 GatherMergeState *

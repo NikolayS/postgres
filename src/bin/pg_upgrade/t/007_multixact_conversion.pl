@@ -367,7 +367,7 @@ my $old_version;
 # Basic scenario: Create a cluster using old installation, run
 # multixid-creating workload on it, then upgrade.
 #
-# This works even even if the old and new version is the same,
+# This works even if the old and new versions are the same,
 # although it's not very interesting as the conversion routines only
 # run when upgrading from a pre-v19 cluster.
 {

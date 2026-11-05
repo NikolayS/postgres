@@ -1077,7 +1077,7 @@ add_local_ternary_reloption(local_relopts *relopts, const char *name,
 }
 
 /*
- * init_real_reloption
+ * init_int_reloption
  *		Allocate and initialize a new integer reloption
  */
 static relopt_int *

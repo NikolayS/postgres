@@ -1283,7 +1283,7 @@ SELECT 'w;x*y-z' = 'wxyz' COLLATE num_ignore_punct; -- true
      <xref linkend="icu-collation-levels"/> shows which textual feature
      differences are considered significant when determining equality at the
      given level. The Unicode character <literal>U+2063</literal> is an
-     invisible separator, and as seen in the table, is ignored for at all
+     invisible separator, and as seen in the table, is ignored at all
      levels of comparison less than <literal>identic</literal>.
     </para>
 

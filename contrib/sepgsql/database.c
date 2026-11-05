@@ -151,7 +151,7 @@ sepgsql_database_drop(Oid databaseId)
 }
 
 /*
- * sepgsql_database_post_alter
+ * sepgsql_database_setattr
  *
  * It checks privileges to alter the supplied database
  */

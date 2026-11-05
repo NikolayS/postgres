@@ -671,7 +671,7 @@ for (my $tupidx = 0; $tupidx < $ROWCOUNT; $tupidx++)
 	}
 	elsif ($offnum == 30)
 	{
-		# Save xid, so we can insert into into tuple at offset 31.
+		# Save xid, so we can insert it into tuple at offset 31.
 		$aborted_xid = $tup->{t_xmax};
 	}
 	elsif ($offnum == 31)
