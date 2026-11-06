@@ -4167,6 +4167,71 @@ where t2.a is null and t1.b is null;
    ->  Seq Scan on tbl_anti_pk t2
 (4 rows)
 
+-- A qual that const-folds to FALSE (here, because t1.a is NOT NULL) rejects
+-- every row, so no row of a full join below it can reach the result, and the
+-- full join can be reduced even though the explicit strict qual was folded
+-- away with the rest of the WHERE clause.  Without the reduction, the full
+-- join's ON clause, which is neither merge-joinable nor hash-joinable, could
+-- not be planned at all.
+explain (costs off)
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where t1.a is null and t3.b is not null;
+           QUERY PLAN           
+--------------------------------
+ Result
+   Replaces: Join on t1, t2, t3
+   One-Time Filter: false
+(3 rows)
+
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where t1.a is null and t3.b is not null;
+ a | b | c | a | b | c | a | b | c 
+---+---+---+---+---+---+---+---+---
+(0 rows)
+
+-- likewise for a literal constant-false WHERE clause ...
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where false;
+ a | b | c | a | b | c | a | b | c 
+---+---+---+---+---+---+---+---+---
+(0 rows)
+
+-- ... and for a constant-false ON clause of an inner join
+select * from tbl_anti t1 join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b) on false;
+ a | b | c | a | b | c | a | b | c 
+---+---+---+---+---+---+---+---+---
+(0 rows)
+
+-- The same applies to the ON clause of an outer join: no row of its nullable
+-- side can reach the result, so a full join within it can be reduced.  Here
+-- t1.a IS NULL folds the ON clause to constant false.
+insert into tbl_anti values (1, 1, 1);
+explain (costs off)
+select * from tbl_anti t1 left join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+  on t3.b = t1.b and t1.a is null;
+            QUERY PLAN            
+----------------------------------
+ Nested Loop Left Join
+   Join Filter: false
+   ->  Seq Scan on tbl_anti t1
+   ->  Result
+         Replaces: Join on t2, t3
+         One-Time Filter: false
+(6 rows)
+
+select * from tbl_anti t1 left join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+  on t3.b = t1.b and t1.a is null;
+ a | b | c | a | b | c | a | b | c 
+---+---+---+---+---+---+---+---+---
+ 1 | 1 | 1 |   |   |   |   |   |  
+(1 row)
+
 rollback;
 --
 -- regression test for bogus RTE_GROUP entries

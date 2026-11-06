@@ -1217,6 +1217,41 @@ select 1 from tbl_anti_pk t1 full join
   (tbl_anti_pk t2 left join tbl_anti_pk t3 on t3.a = t2.a) on true
 where t2.a is null and t1.b is null;
 
+-- A qual that const-folds to FALSE (here, because t1.a is NOT NULL) rejects
+-- every row, so no row of a full join below it can reach the result, and the
+-- full join can be reduced even though the explicit strict qual was folded
+-- away with the rest of the WHERE clause.  Without the reduction, the full
+-- join's ON clause, which is neither merge-joinable nor hash-joinable, could
+-- not be planned at all.
+explain (costs off)
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where t1.a is null and t3.b is not null;
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where t1.a is null and t3.b is not null;
+
+-- likewise for a literal constant-false WHERE clause ...
+select * from tbl_anti t1,
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+where false;
+
+-- ... and for a constant-false ON clause of an inner join
+select * from tbl_anti t1 join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b) on false;
+
+-- The same applies to the ON clause of an outer join: no row of its nullable
+-- side can reach the result, so a full join within it can be reduced.  Here
+-- t1.a IS NULL folds the ON clause to constant false.
+insert into tbl_anti values (1, 1, 1);
+explain (costs off)
+select * from tbl_anti t1 left join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+  on t3.b = t1.b and t1.a is null;
+select * from tbl_anti t1 left join
+  (tbl_anti t2 full join tbl_anti t3 on t2.b < t3.b)
+  on t3.b = t1.b and t1.a is null;
+
 rollback;
 
 --

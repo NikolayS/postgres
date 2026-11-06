@@ -164,7 +164,9 @@ static void reduce_outer_joins_pass2(Node *jtnode,
 									 reduce_outer_joins_pass2_state *state2,
 									 PlannerInfo *root,
 									 Relids nonnullable_rels,
-									 List *forced_null_vars);
+									 List *forced_null_vars,
+									 bool unreachable);
+static bool quals_are_constant_false(Node *quals);
 static void report_reduced_full_join(reduce_outer_joins_pass2_state *state2,
 									 int rtindex, Relids relids);
 static void remove_redundant_nullability_quals(Node *jtnode,
@@ -3334,7 +3336,7 @@ reduce_outer_joins(PlannerInfo *root)
 
 	reduce_outer_joins_pass2((Node *) root->parse->jointree,
 							 state1, &state2,
-							 root, NULL, NIL);
+							 root, NULL, NIL, false);
 
 	/*
 	 * If we successfully reduced the strength of any outer joins, we must
@@ -3553,6 +3555,8 @@ reduce_outer_joins_pass1(Node *jtnode)
  *	root: toplevel planner state
  *	nonnullable_rels: set of base relids forced non-null by upper quals
  *	forced_null_vars: multibitmapset of Vars forced null by upper quals
+ *	unreachable: true if no row of this subtree can reach the query result,
+ *		because an upper qual has been reduced to constant FALSE or NULL
  *
  * Returns info in state2 about outer joins that were successfully simplified.
  * Joins that were fully reduced to inner joins are all added to
@@ -3568,7 +3572,8 @@ reduce_outer_joins_pass2(Node *jtnode,
 						 reduce_outer_joins_pass2_state *state2,
 						 PlannerInfo *root,
 						 Relids nonnullable_rels,
-						 List *forced_null_vars)
+						 List *forced_null_vars,
+						 bool unreachable)
 {
 	/*
 	 * pass 2 should never descend as far as an empty subnode or base rel,
@@ -3585,6 +3590,7 @@ reduce_outer_joins_pass2(Node *jtnode,
 		ListCell   *s;
 		Relids		pass_nonnullable_rels;
 		List	   *pass_forced_null_vars;
+		bool		pass_unreachable;
 
 		/* Scan quals to see if we can add any constraints */
 		pass_nonnullable_rels = find_nonnullable_rels(f->quals);
@@ -3593,6 +3599,7 @@ reduce_outer_joins_pass2(Node *jtnode,
 		pass_forced_null_vars = find_forced_null_vars(f->quals);
 		pass_forced_null_vars = mbms_add_members(pass_forced_null_vars,
 												 forced_null_vars);
+		pass_unreachable = unreachable || quals_are_constant_false(f->quals);
 		/* And recurse --- but only into interesting subtrees */
 		Assert(list_length(f->fromlist) == list_length(state1->sub_states));
 		forboth(l, f->fromlist, s, state1->sub_states)
@@ -3603,7 +3610,8 @@ reduce_outer_joins_pass2(Node *jtnode,
 				reduce_outer_joins_pass2(lfirst(l), sub_state,
 										 state2, root,
 										 pass_nonnullable_rels,
-										 pass_forced_null_vars);
+										 pass_forced_null_vars,
+										 pass_unreachable);
 		}
 		bms_free(pass_nonnullable_rels);
 		/* can't so easily clean up var lists, unfortunately */
@@ -3630,7 +3638,19 @@ reduce_outer_joins_pass2(Node *jtnode,
 					jointype = JOIN_INNER;
 				break;
 			case JOIN_FULL:
-				if (bms_overlap(nonnullable_rels, left_state->relids))
+
+				/*
+				 * If no row of this join can reach the query result, because
+				 * an upper qual was reduced to constant FALSE or NULL, we can
+				 * reduce it to an inner join.  This matters because
+				 * const-simplification throws away any strict quals ANDed
+				 * with the constant, which would otherwise have let us reduce
+				 * this join; and we cannot plan a FULL JOIN whose condition
+				 * is neither merge-joinable nor hash-joinable.
+				 */
+				if (unreachable)
+					jointype = JOIN_INNER;
+				else if (bms_overlap(nonnullable_rels, left_state->relids))
 				{
 					if (bms_overlap(nonnullable_rels, right_state->relids))
 						jointype = JOIN_INNER;
@@ -3779,6 +3799,8 @@ reduce_outer_joins_pass2(Node *jtnode,
 			List	   *local_forced_null_vars;
 			Relids		pass_nonnullable_rels;
 			List	   *pass_forced_null_vars;
+			bool		local_unreachable;
+			bool		pass_unreachable;
 
 			/*
 			 * If this join is (now) inner, we can add any constraints its
@@ -3800,11 +3822,21 @@ reduce_outer_joins_pass2(Node *jtnode,
 			 *
 			 * At a FULL join we just punt and pass nothing down --- is it
 			 * possible to be smarter?
+			 *
+			 * The unreachable flag, saying that no row of this subtree can
+			 * reach the query result, is passed down to both sides of any
+			 * join, since then that holds for both of them.  It is also set
+			 * for the sides that receive local constraints if this join's own
+			 * quals have been reduced to constant FALSE or NULL; but not for
+			 * the non-nullable side of an outer join, whose rows still reach
+			 * the result.
 			 */
 			if (jointype != JOIN_FULL)
 			{
 				local_nonnullable_rels = find_nonnullable_rels(j->quals);
 				local_forced_null_vars = find_forced_null_vars(j->quals);
+				local_unreachable = unreachable ||
+					quals_are_constant_false(j->quals);
 				if (jointype == JOIN_INNER || jointype == JOIN_SEMI)
 				{
 					/* OK to merge upper and local constraints */
@@ -3819,6 +3851,7 @@ reduce_outer_joins_pass2(Node *jtnode,
 				/* no use in calculating these */
 				local_nonnullable_rels = NULL;
 				local_forced_null_vars = NIL;
+				local_unreachable = unreachable;
 			}
 
 			if (left_state->contains_outer)
@@ -3828,23 +3861,27 @@ reduce_outer_joins_pass2(Node *jtnode,
 					/* pass union of local and upper constraints */
 					pass_nonnullable_rels = local_nonnullable_rels;
 					pass_forced_null_vars = local_forced_null_vars;
+					pass_unreachable = local_unreachable;
 				}
 				else if (jointype != JOIN_FULL) /* ie, LEFT or ANTI */
 				{
 					/* can't pass local constraints to non-nullable side */
 					pass_nonnullable_rels = nonnullable_rels;
 					pass_forced_null_vars = forced_null_vars;
+					pass_unreachable = unreachable;
 				}
 				else
 				{
 					/* no constraints pass through JOIN_FULL */
 					pass_nonnullable_rels = NULL;
 					pass_forced_null_vars = NIL;
+					pass_unreachable = unreachable;
 				}
 				reduce_outer_joins_pass2(j->larg, left_state,
 										 state2, root,
 										 pass_nonnullable_rels,
-										 pass_forced_null_vars);
+										 pass_forced_null_vars,
+										 pass_unreachable);
 			}
 
 			if (right_state->contains_outer)
@@ -3854,17 +3891,20 @@ reduce_outer_joins_pass2(Node *jtnode,
 					/* pass appropriate constraints, per comment above */
 					pass_nonnullable_rels = local_nonnullable_rels;
 					pass_forced_null_vars = local_forced_null_vars;
+					pass_unreachable = local_unreachable;
 				}
 				else
 				{
 					/* no constraints pass through JOIN_FULL */
 					pass_nonnullable_rels = NULL;
 					pass_forced_null_vars = NIL;
+					pass_unreachable = unreachable;
 				}
 				reduce_outer_joins_pass2(j->rarg, right_state,
 										 state2, root,
 										 pass_nonnullable_rels,
-										 pass_forced_null_vars);
+										 pass_forced_null_vars,
+										 pass_unreachable);
 			}
 			bms_free(local_nonnullable_rels);
 		}
@@ -3872,6 +3912,40 @@ reduce_outer_joins_pass2(Node *jtnode,
 	else
 		elog(ERROR, "unrecognized node type: %d",
 			 (int) nodeTag(jtnode));
+}
+
+/*
+ * quals_are_constant_false
+ *	  Detect whether a jointree node's quals have been reduced to a constant
+ *	  FALSE or NULL, so that the node can produce no rows.
+ *
+ * The quals are normally in implicit-AND form here, but cope with a bare
+ * Const too.
+ *
+ * Helper for reduce_outer_joins_pass2.
+ */
+static bool
+quals_are_constant_false(Node *quals)
+{
+	List	   *quallist;
+
+	if (quals == NULL)
+		return false;
+
+	quallist = IsA(quals, List) ? (List *) quals : list_make1(quals);
+
+	foreach_ptr(Node, qual, quallist)
+	{
+		if (IsA(qual, Const))
+		{
+			Const	   *con = (Const *) qual;
+
+			if (con->constisnull || !DatumGetBool(con->constvalue))
+				return true;
+		}
+	}
+
+	return false;
 }
 
 /* Helper for reduce_outer_joins_pass2 */
