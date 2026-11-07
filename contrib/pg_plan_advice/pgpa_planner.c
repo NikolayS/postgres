@@ -968,6 +968,64 @@ pgpa_planner_apply_joinrel_advice(uint64 *pgs_mask_p, char *plan_name,
 		else
 			*pgs_mask_p &= ~(PGS_APPEND | PGS_MERGE_APPEND);
 	}
+
+	/*
+	 * Join order and join method advice can also rule out a partitionwise
+	 * join at this level, because a partitionwise join replaces the join
+	 * between the parent relations with separate joins between their
+	 * children, to which such advice does not apply. If an ordered JOIN_ORDER
+	 * list governs this joinrel, a partitionwise join here can't comply with
+	 * it; see pgpa_join_order_permits_join. Likewise, if join method advice
+	 * targets a proper subset of the relations in this joinrel, the required
+	 * join with exactly those relations on the inner side must occur at this
+	 * level or below it, which is impossible if this joinrel is built
+	 * partitionwise. In either case, disable Append and MergeAppend here,
+	 * just as for negative PARTITIONWISE advice.
+	 *
+	 * Explicit PARTITIONWISE advice requesting a partitionwise join at this
+	 * level takes precedence.
+	 */
+	if (partitionwise_outcome <= 0 || partitionwise_conflict)
+	{
+		int			total_count = pjs->outer_count + pjs->inner_count;
+		bool		forbid_partitionwise = false;
+
+		i = -1;
+		while ((i = bms_next_member(pjs->join_indexes, i)) >= 0)
+		{
+			pgpa_trove_entry *entry = &pjs->join_entries[i];
+
+			if (entry->tag == PGPA_TAG_JOIN_ORDER)
+			{
+				int			saved_flags = entry->flags;
+				pgpa_jo_outcome jo_outcome;
+
+				/*
+				 * Whether the outcome is PGPA_JO_INDIFFERENT does not depend
+				 * on the choice of outer and inner rel. Restore the feedback
+				 * flags, which will be set when join paths are considered.
+				 */
+				jo_outcome = pgpa_join_order_permits_join(pjs->outer_count,
+														  pjs->inner_count,
+														  pjs->rids,
+														  entry);
+				entry->flags = saved_flags;
+				if (jo_outcome != PGPA_JO_INDIFFERENT)
+					forbid_partitionwise = true;
+			}
+			else if (entry->tag != PGPA_TAG_FOREIGN_JOIN &&
+					 pgpa_join_strategy_mask_from_advice_tag(entry->tag) != 0)
+			{
+				if (pgpa_identifiers_match_target(total_count, pjs->rids,
+												  entry->target) ==
+					PGPA_ITM_TARGETS_ARE_SUBSET)
+					forbid_partitionwise = true;
+			}
+		}
+
+		if (forbid_partitionwise)
+			*pgs_mask_p &= ~(PGS_APPEND | PGS_MERGE_APPEND);
+	}
 }
 
 /*
