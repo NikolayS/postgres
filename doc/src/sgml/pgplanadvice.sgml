@@ -383,6 +383,11 @@ Join
     This can happen due to the presence of subqueries, or because there is a
     partitionwise join. In the latter case, each branch of the partitionwise
     join can have its own join order, independent of every other branch.
+    Conversely, an ordered join order list or join method advice that names
+    the partitioned tables themselves, rather than their partitions,
+    constrains a join between those tables and therefore prevents them from
+    being joined in partitionwise fashion at that level; an unordered
+    sublist in curly braces does not.
    </para>
 
   </sect3>

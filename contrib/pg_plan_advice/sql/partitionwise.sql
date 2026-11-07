@@ -120,6 +120,19 @@ SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
    AND val1 = 1 AND val2 = 1 AND val3 = 1;
 COMMIT;
 
+-- Join order or join method advice for the parent tables can't be satisfied
+-- by a partitionwise join, so it should suppress one.
+BEGIN;
+SET LOCAL pg_plan_advice.advice = 'JOIN_ORDER(pt3 pt2 pt1)';
+EXPLAIN (PLAN_ADVICE, COSTS OFF)
+SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
+   AND val1 = 1 AND val2 = 1 AND val3 = 1;
+SET LOCAL pg_plan_advice.advice = 'HASH_JOIN(pt1)';
+EXPLAIN (PLAN_ADVICE, COSTS OFF)
+SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
+   AND val1 = 1 AND val2 = 1 AND val3 = 1;
+COMMIT;
+
 -- We should get PARTITIONWISE advice for all unpruned partition tables.
 EXPLAIN (PLAN_ADVICE, COSTS OFF)
 SELECT * FROM mllpt WHERE a = 1 UNION ALL SELECT * FROM mllpt;
