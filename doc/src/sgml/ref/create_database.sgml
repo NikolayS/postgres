@@ -140,7 +140,13 @@ CREATE DATABASE <replaceable class="parameter">name</replaceable>
         after the creation of the new database. In some situations, this may
         have a noticeable negative impact on overall system performance. The
         <literal>FILE_COPY</literal> strategy is affected by the <xref
-        linkend="guc-file-copy-method"/> setting.
+        linkend="guc-file-copy-method"/> setting.  The
+        <literal>FILE_COPY</literal> strategy cannot be used while data
+        checksums are being enabled (that is, while
+        <xref linkend="guc-data-checksums"/> is
+        <literal>inprogress-on</literal>); the <literal>WAL_LOG</literal>
+        strategy must be used during that time.  See
+        <xref linkend="checksums-online-enable-disable"/>.
        </para>
       </listitem>
      </varlistentry>
