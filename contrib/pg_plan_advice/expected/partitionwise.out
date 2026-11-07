@@ -387,6 +387,55 @@ SELECT * FROM pt1, ptmismatch WHERE pt1.id = ptmismatch.id;
 (22 rows)
 
 COMMIT;
+-- PARTITIONWISE is only applicable to inheritance parents.
+BEGIN;
+SET LOCAL pg_plan_advice.advice = 'PARTITIONWISE(pt3a)';
+EXPLAIN (PLAN_ADVICE, COSTS OFF)
+SELECT * FROM pt1, pt3a WHERE pt1.id = pt3a.id;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (pt1.id = pt3a.id)
+   ->  Append
+         ->  Index Scan using pt1a_pkey on pt1a pt1_1
+         ->  Index Scan using pt1b_pkey on pt1b pt1_2
+         ->  Index Scan using pt1c_pkey on pt1c pt1_3
+   ->  Index Scan using pt3a_pkey on pt3a
+ Supplied Plan Advice:
+   PARTITIONWISE(pt3a) /* matched, inapplicable, failed */
+ Generated Plan Advice:
+   JOIN_ORDER(pt1 pt3a)
+   MERGE_JOIN_PLAIN(pt3a)
+   INDEX_SCAN(pt1/public.pt1a public.pt1a_pkey pt1/public.pt1b public.pt1b_pkey
+    pt1/public.pt1c public.pt1c_pkey pt3a public.pt3a_pkey)
+   PARTITIONWISE(pt1)
+   NO_GATHER(pt1 pt3a pt1/public.pt1a pt1/public.pt1b pt1/public.pt1c)
+(16 rows)
+
+SET LOCAL pg_plan_advice.advice = 'PARTITIONWISE((pt1 pt3a))';
+EXPLAIN (PLAN_ADVICE, COSTS OFF)
+SELECT * FROM pt1, pt3a WHERE pt1.id = pt3a.id;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (pt1.id = pt3a.id)
+   ->  Append
+         ->  Index Scan using pt1a_pkey on pt1a pt1_1
+         ->  Index Scan using pt1b_pkey on pt1b pt1_2
+         ->  Index Scan using pt1c_pkey on pt1c pt1_3
+   ->  Index Scan using pt3a_pkey on pt3a
+ Supplied Plan Advice:
+   PARTITIONWISE((pt1 pt3a)) /* matched, inapplicable, failed */
+ Generated Plan Advice:
+   JOIN_ORDER(pt1 pt3a)
+   MERGE_JOIN_PLAIN(pt3a)
+   INDEX_SCAN(pt1/public.pt1a public.pt1a_pkey pt1/public.pt1b public.pt1b_pkey
+    pt1/public.pt1c public.pt1c_pkey pt3a public.pt3a_pkey)
+   PARTITIONWISE(pt1)
+   NO_GATHER(pt1 pt3a pt1/public.pt1a pt1/public.pt1b pt1/public.pt1c)
+(16 rows)
+
+COMMIT;
 -- Force join order for a particular branch of the partitionwise join.
 BEGIN;
 SET LOCAL pg_plan_advice.advice = 'JOIN_ORDER(pt3/public.pt3a pt2/public.pt2a pt1/public.pt1a)';
@@ -503,34 +552,18 @@ SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
 
 SET LOCAL pg_plan_advice.advice = 'HASH_JOIN(pt1)';
 EXPLAIN (PLAN_ADVICE, COSTS OFF)
-SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
-   AND val1 = 1 AND val2 = 1 AND val3 = 1;
+SELECT * FROM pt1, pt2 WHERE pt1.id = pt2.id AND val1 = 1 AND val2 = 1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Hash Join
    Hash Cond: (pt2.id = pt1.id)
    ->  Append
-         ->  Hash Join
-               Hash Cond: (pt2_1.id = pt3_1.id)
-               ->  Seq Scan on pt2a pt2_1
-                     Filter: (val2 = 1)
-               ->  Hash
-                     ->  Seq Scan on pt3a pt3_1
-                           Filter: (val3 = 1)
-         ->  Hash Join
-               Hash Cond: (pt2_2.id = pt3_2.id)
-               ->  Seq Scan on pt2b pt2_2
-                     Filter: (val2 = 1)
-               ->  Hash
-                     ->  Seq Scan on pt3b pt3_2
-                           Filter: (val3 = 1)
-         ->  Hash Join
-               Hash Cond: (pt2_3.id = pt3_3.id)
-               ->  Seq Scan on pt2c pt2_3
-                     Filter: (val2 = 1)
-               ->  Hash
-                     ->  Seq Scan on pt3c pt3_3
-                           Filter: (val3 = 1)
+         ->  Seq Scan on pt2a pt2_1
+               Filter: (val2 = 1)
+         ->  Seq Scan on pt2b pt2_2
+               Filter: (val2 = 1)
+         ->  Seq Scan on pt2c pt2_3
+               Filter: (val2 = 1)
    ->  Hash
          ->  Append
                ->  Seq Scan on pt1a pt1_1
@@ -542,19 +575,14 @@ SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
  Supplied Plan Advice:
    HASH_JOIN(pt1) /* matched */
  Generated Plan Advice:
-   JOIN_ORDER(pt2/public.pt2a pt3/public.pt3a)
-   JOIN_ORDER(pt2/public.pt2b pt3/public.pt3b)
-   JOIN_ORDER(pt2/public.pt2c pt3/public.pt3c)
-   JOIN_ORDER({pt2 pt3} pt1)
-   HASH_JOIN(pt3/public.pt3a pt3/public.pt3b pt3/public.pt3c pt1)
-   SEQ_SCAN(pt2/public.pt2a pt3/public.pt3a pt2/public.pt2b pt3/public.pt3b
-    pt2/public.pt2c pt3/public.pt3c pt1/public.pt1a pt1/public.pt1b
-    pt1/public.pt1c)
-   PARTITIONWISE((pt2 pt3) pt1)
-   NO_GATHER(pt1 pt2 pt3 pt1/public.pt1a pt1/public.pt1b pt1/public.pt1c
-    pt2/public.pt2a pt2/public.pt2b pt2/public.pt2c pt3/public.pt3a
-    pt3/public.pt3b pt3/public.pt3c)
-(47 rows)
+   JOIN_ORDER(pt2 pt1)
+   HASH_JOIN(pt1)
+   SEQ_SCAN(pt2/public.pt2a pt2/public.pt2b pt2/public.pt2c pt1/public.pt1a
+    pt1/public.pt1b pt1/public.pt1c)
+   PARTITIONWISE(pt2 pt1)
+   NO_GATHER(pt1 pt2 pt1/public.pt1a pt1/public.pt1b pt1/public.pt1c
+    pt2/public.pt2a pt2/public.pt2b pt2/public.pt2c)
+(27 rows)
 
 COMMIT;
 -- We should get PARTITIONWISE advice for all unpruned partition tables.

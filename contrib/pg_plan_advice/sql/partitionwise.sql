@@ -129,8 +129,7 @@ SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
    AND val1 = 1 AND val2 = 1 AND val3 = 1;
 SET LOCAL pg_plan_advice.advice = 'HASH_JOIN(pt1)';
 EXPLAIN (PLAN_ADVICE, COSTS OFF)
-SELECT * FROM pt1, pt2, pt3 WHERE pt1.id = pt2.id AND pt2.id = pt3.id
-   AND val1 = 1 AND val2 = 1 AND val3 = 1;
+SELECT * FROM pt1, pt2 WHERE pt1.id = pt2.id AND val1 = 1 AND val2 = 1;
 COMMIT;
 
 -- We should get PARTITIONWISE advice for all unpruned partition tables.
