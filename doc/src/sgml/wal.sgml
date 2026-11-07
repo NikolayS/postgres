@@ -367,6 +367,17 @@
    </para>
 
    <para>
+    While the checksum state is <literal>inprogress-on</literal>,
+    <link linkend="sql-createdatabase"><command>CREATE DATABASE</command></link>
+    cannot use the <literal>FILE_COPY</literal>
+    <link linkend="create-database-strategy">strategy</link>, since a
+    file-level copy of a database that has not been processed yet would
+    produce files without valid checksums.  The <literal>WAL_LOG</literal>
+    strategy, which is the default, can be used.  This restriction does not
+    apply while checksums are being disabled.
+   </para>
+
+   <para>
     If the cluster is stopped while in <literal>inprogress-on</literal> state,
     for any reason, or processing was interrupted, then the checksum enable
     process must be restarted manually.  To do this, re-execute the function

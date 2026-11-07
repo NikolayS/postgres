@@ -569,7 +569,9 @@ CreateDatabaseUsingFileCopy(Oid src_dboid, Oid dst_dboid, Oid src_tsid,
 		ereport(ERROR,
 				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				errmsg("create database strategy \"%s\" not allowed when data checksums are being enabled",
-					   "file_copy"));
+					   "file_copy"),
+				errhint("Use the \"%s\" strategy, or wait until data checksums have been enabled.",
+						"wal_log"));
 
 	/*
 	 * The XID is assigned by now, so a datachecksumsworker launcher starting
@@ -1075,7 +1077,9 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 				ereport(ERROR,
 						errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("create database strategy \"%s\" not allowed when data checksums are being enabled",
-							   strategy));
+							   strategy),
+						errhint("Use the \"%s\" strategy, or wait until data checksums have been enabled.",
+								"wal_log"));
 			dbstrategy = CREATEDB_FILE_COPY;
 		}
 		else
