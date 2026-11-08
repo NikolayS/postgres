@@ -75,6 +75,8 @@ extern void ResolveRecoveryConflictWithSnapshot(TransactionId snapshotConflictHo
 extern void ResolveRecoveryConflictWithSnapshotFullXid(FullTransactionId snapshotConflictHorizon,
 													   bool isCatalogRel,
 													   RelFileLocator locator);
+extern void MaybePauseOnLogicalSlotConflict(Oid dboid,
+											TransactionId snapshotConflictHorizon);
 extern void ResolveRecoveryConflictWithTablespace(Oid tsid);
 extern void ResolveRecoveryConflictWithDatabase(Oid dbid);
 
