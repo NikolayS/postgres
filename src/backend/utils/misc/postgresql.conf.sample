@@ -747,6 +747,9 @@
 #autovacuum_vacuum_max_threshold = 100000000    # max number of row updates
                                                 # before vacuum; -1 disables max
                                                 # threshold
+#autovacuum_analyze_max_threshold = 50000000    # max number of row updates
+                                                # before analyze; -1 disables
+                                                # max threshold
 #autovacuum_freeze_max_age = 200000000  # maximum XID age before forced vacuum
                                         # (change requires restart)
 #autovacuum_multixact_freeze_max_age = 400000000        # maximum multixact age

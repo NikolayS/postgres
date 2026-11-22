@@ -1874,6 +1874,21 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
     </listitem>
    </varlistentry>
 
+   <varlistentry id="reloption-autovacuum-analyze-max-threshold" xreflabel="autovacuum_analyze_max_threshold">
+    <term><literal>autovacuum_analyze_max_threshold</literal> (<type>integer</type>)
+    <indexterm>
+     <primary><varname>autovacuum_analyze_max_threshold</varname></primary>
+     <secondary>storage parameter</secondary>
+    </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Per-table value for <xref linkend="guc-autovacuum-analyze-max-threshold"/>
+      parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+
    <varlistentry id="reloption-autovacuum-analyze-scale-factor" xreflabel="autovacuum_analyze_scale_factor">
     <term><literal>autovacuum_analyze_scale_factor</literal> (<type>floating point</type>)
     <indexterm>

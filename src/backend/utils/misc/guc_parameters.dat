@@ -120,6 +120,15 @@
   boot_val => 'true',
 },
 
+{ name => 'autovacuum_analyze_max_threshold', type => 'int', context => 'PGC_SIGHUP', group => 'VACUUM_AUTOVACUUM',
+  short_desc => 'Maximum number of tuple inserts, updates, or deletes prior to analyze.',
+  long_desc => '-1 disables the maximum threshold.',
+  variable => 'autovacuum_anl_max_thresh',
+  boot_val => '50000000',
+  min => '-1',
+  max => 'INT_MAX',
+},
+
 { name => 'autovacuum_analyze_scale_factor', type => 'real', context => 'PGC_SIGHUP', group => 'VACUUM_AUTOVACUUM',
   short_desc => 'Number of tuple inserts, updates, or deletes prior to analyze as a fraction of reltuples.',
   variable => 'autovacuum_anl_scale',

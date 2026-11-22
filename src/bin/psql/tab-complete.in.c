@@ -1401,6 +1401,7 @@ static const TCPattern tcpatterns[] =
 
 /* Storage parameters for CREATE TABLE and ALTER TABLE */
 static const char *const table_storage_parameters[] = {
+	"autovacuum_analyze_max_threshold",
 	"autovacuum_analyze_scale_factor",
 	"autovacuum_analyze_threshold",
 	"autovacuum_enabled",
