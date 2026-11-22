@@ -131,6 +131,7 @@ double		autovacuum_vac_scale;
 int			autovacuum_vac_ins_thresh;
 double		autovacuum_vac_ins_scale;
 int			autovacuum_anl_thresh;
+int			autovacuum_anl_max_thresh;
 double		autovacuum_anl_scale;
 int			autovacuum_freeze_max_age;
 int			autovacuum_multixact_freeze_max_age;
@@ -3092,7 +3093,8 @@ relation_needs_vacanalyze(Oid relid,
 	int			vac_base_thresh,
 				vac_max_thresh,
 				vac_ins_base_thresh,
-				anl_base_thresh;
+				anl_base_thresh,
+				anl_max_thresh;
 	float4		vac_scale_factor,
 				vac_ins_scale_factor,
 				anl_scale_factor;
@@ -3167,6 +3169,11 @@ relation_needs_vacanalyze(Oid relid,
 	anl_base_thresh = (relopts && relopts->analyze_threshold >= 0)
 		? relopts->analyze_threshold
 		: autovacuum_anl_thresh;
+
+	/* -1 is used to disable max threshold */
+	anl_max_thresh = (relopts && relopts->analyze_max_threshold >= -1)
+		? relopts->analyze_max_threshold
+		: autovacuum_anl_max_thresh;
 
 	freeze_max_age = (relopts && relopts->freeze_max_age >= 0)
 		? Min(relopts->freeze_max_age, autovacuum_freeze_max_age)
@@ -3292,6 +3299,8 @@ relation_needs_vacanalyze(Oid relid,
 	vacinsthresh = (float4) vac_ins_base_thresh +
 		vac_ins_scale_factor * reltuples * pcnt_unfrozen;
 	anlthresh = (float4) anl_base_thresh + anl_scale_factor * reltuples;
+	if (anl_max_thresh >= 0 && anlthresh > (float4) anl_max_thresh)
+		anlthresh = (float4) anl_max_thresh;
 
 	/* Determine if this table needs vacuum, and update the score. */
 	scores->vac = (double) vactuples / Max(vacthresh, 1);

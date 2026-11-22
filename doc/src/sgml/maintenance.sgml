@@ -1007,8 +1007,14 @@ vacuum insert threshold = vacuum base insert threshold + vacuum insert scale fac
    <para>
     For analyze, a similar condition is used: the threshold, defined as:
 <programlisting>
-analyze threshold = analyze base threshold + analyze scale factor * number of tuples
+analyze threshold = Minimum(analyze max threshold, analyze base threshold + analyze scale factor * number of tuples)
 </programlisting>
+    where the analyze max threshold is
+    <xref linkend="guc-autovacuum-analyze-max-threshold"/>,
+    the analyze base threshold is
+    <xref linkend="guc-autovacuum-analyze-threshold"/>,
+    and the analyze scale factor is
+    <xref linkend="guc-autovacuum-analyze-scale-factor"/>,
     is compared to the total number of tuples inserted, updated, or deleted
     since the last <command>ANALYZE</command>.
    </para>
@@ -1164,8 +1170,9 @@ analyze threshold = analyze base threshold + analyze scale factor * number of tu
        The <emphasis>analyze</emphasis> component measures the number of
        inserted, updated, or deleted tuples as compared to the threshold
        calculated with
-       <xref linkend="guc-autovacuum-analyze-threshold"/> and
-       <xref linkend="guc-autovacuum-analyze-scale-factor"/>.  The final value
+       <xref linkend="guc-autovacuum-analyze-threshold"/>,
+       <xref linkend="guc-autovacuum-analyze-scale-factor"/>, and
+       <xref linkend="guc-autovacuum-analyze-max-threshold"/>.  The final value
        for this component can be adjusted via
        <xref linkend="guc-autovacuum-analyze-score-weight"/>.
       </para>

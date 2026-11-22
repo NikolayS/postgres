@@ -282,6 +282,15 @@ static relopt_int intRelOpts[] =
 	},
 	{
 		{
+			"autovacuum_analyze_max_threshold",
+			"Maximum number of tuple inserts, updates or deletes prior to analyze",
+			RELOPT_KIND_HEAP,
+			ShareUpdateExclusiveLock
+		},
+		-2, -1, INT_MAX
+	},
+	{
+		{
 			"autovacuum_vacuum_cost_limit",
 			"Vacuum cost amount available before napping, for autovacuum",
 			RELOPT_KIND_HEAP | RELOPT_KIND_TOAST,
@@ -2078,6 +2087,8 @@ static const relopt_parse_elt stdRdOptionsTab[] = {
 	offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_ins_threshold)},
 	{"autovacuum_analyze_threshold", RELOPT_TYPE_INT,
 	offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, analyze_threshold)},
+	{"autovacuum_analyze_max_threshold", RELOPT_TYPE_INT,
+	offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, analyze_max_threshold)},
 	{"autovacuum_vacuum_cost_limit", RELOPT_TYPE_INT,
 	offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_cost_limit)},
 	{"autovacuum_freeze_min_age", RELOPT_TYPE_INT,

@@ -38,6 +38,7 @@ extern PGDLLIMPORT double autovacuum_vac_scale;
 extern PGDLLIMPORT int autovacuum_vac_ins_thresh;
 extern PGDLLIMPORT double autovacuum_vac_ins_scale;
 extern PGDLLIMPORT int autovacuum_anl_thresh;
+extern PGDLLIMPORT int autovacuum_anl_max_thresh;
 extern PGDLLIMPORT double autovacuum_anl_scale;
 extern PGDLLIMPORT int autovacuum_freeze_max_age;
 extern PGDLLIMPORT int autovacuum_multixact_freeze_max_age;
